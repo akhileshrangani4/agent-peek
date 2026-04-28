@@ -1,0 +1,54 @@
+{
+  "name": "agent-peek",
+  "version": "0.1.0",
+  "description": "Read-only peek into other AI agent chat sessions.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./adapter": {
+      "import": "./dist/adapters/types.js",
+      "types": "./dist/adapters/types.d.ts"
+    },
+    "./mcp": {
+      "import": "./dist/mcp/index.js",
+      "types": "./dist/mcp/index.d.ts"
+    }
+  },
+  "bin": {
+    "peek": "./bin/peek.js",
+    "apeek": "./bin/peek.js",
+    "agent-peek-mcp": "./bin/agent-peek-mcp.js"
+  },
+  "files": ["dist", "bin", "README.md", "LICENSE"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["ai", "agent", "claude", "claude-code", "mcp", "peek", "transcript"],
+  "author": "akhileshrangani4@gmail.com",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/akhileshrangani4/agent-peek.git" },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "cac": "^6.7.14",
+    "proper-lockfile": "^4.1.2",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@anthropic-ai/sdk": "^0.30.0"
+  },
+  "optionalDependencies": {}
+}
