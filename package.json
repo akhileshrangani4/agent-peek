@@ -24,8 +24,15 @@
     "apeek": "./bin/peek.js",
     "agent-peek-mcp": "./bin/agent-peek-mcp.js"
   },
-  "files": ["dist", "bin", "README.md", "LICENSE"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -34,21 +41,32 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["ai", "agent", "claude", "claude-code", "mcp", "peek", "transcript"],
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "claude-code",
+    "mcp",
+    "peek",
+    "transcript"
+  ],
   "author": "akhileshrangani4@gmail.com",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/akhileshrangani4/agent-peek.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akhileshrangani4/agent-peek.git"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/proper-lockfile": "^4.1.4",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
   },
   "dependencies": {
-    "cac": "^6.7.14",
-    "proper-lockfile": "^4.1.2",
+    "@anthropic-ai/sdk": "^0.30.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@anthropic-ai/sdk": "^0.30.0"
-  },
-  "optionalDependencies": {}
+    "cac": "^6.7.14",
+    "proper-lockfile": "^4.1.2"
+  }
 }
