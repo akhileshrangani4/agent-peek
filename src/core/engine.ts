@@ -93,8 +93,7 @@ export class Engine {
   async untag(id: string): Promise<void> {
     const e = await this.deps.registry.get(id);
     if (!e) throw new SessionNotFoundError(id);
-    const { tag, ...rest } = e;
-    await this.deps.registry.upsert(rest);
+    await this.deps.registry.upsert({ ...e, tag: undefined });
   }
 
   async unregister(id: string): Promise<void> {

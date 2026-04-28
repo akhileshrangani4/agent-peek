@@ -108,4 +108,12 @@ describe("Engine", () => {
     const got = await registry.get("fake:c");
     expect(got?.tag).toBe("side");
   });
+
+  it("untag clears the tag", async () => {
+    await engine.list();
+    await engine.tag("fake:a", "researcher");
+    expect((await registry.get("fake:a"))?.tag).toBe("researcher");
+    await engine.untag("fake:a");
+    expect((await registry.get("fake:a"))?.tag).toBeUndefined();
+  });
 });

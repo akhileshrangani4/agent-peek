@@ -61,7 +61,12 @@ export class Registry {
 
   async upsert(entry: SessionEntry): Promise<void> {
     await this.write((f) => {
-      f.sessions[entry.id] = { ...f.sessions[entry.id], ...entry };
+      const merged = { ...f.sessions[entry.id], ...entry };
+      // strip keys that came in as undefined (caller signaling "unset")
+      for (const k of Object.keys(merged) as (keyof SessionEntry)[]) {
+        if (merged[k] === undefined) delete merged[k];
+      }
+      f.sessions[entry.id] = merged as SessionEntry;
     });
   }
 
