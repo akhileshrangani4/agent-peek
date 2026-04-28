@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { toRaw, toStructured } from "../../src/core/snapshot.js";
+import { toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
 import type { RawMessage } from "../../src/core/types.js";
+import { withEnv } from "../helpers/tmp-home.js";
 
 const msgs = (): RawMessage[] => [
   { role: "user", text: "do X", raw: {} },
@@ -61,5 +62,50 @@ describe("snapshot.toStructured", () => {
   it("currentTask comes from last user message (heuristic)", () => {
     const s = toStructured("sid", msgs());
     expect(s.currentTask).toBe("do X");
+  });
+});
+
+describe("snapshot.toSummary", () => {
+  it("falls back to structured when no API key", async () => {
+    await withEnv({ ANTHROPIC_API_KEY: "" }, async () => {
+      const s = await toSummary("sid", [{ role: "user", text: "hi", raw: {} }], { deltaMessageCount: 1 });
+      expect(s.mode).toBe("summary");
+      expect(s.fallback).toBe(true);
+      expect(s.structured).toBeDefined();
+      expect(s.summary).toMatch(/no.*api.*key/i);
+    });
+  });
+
+  it("calls anthropic client when key present", async () => {
+    let captured: any = null;
+    const mockClient = {
+      messages: {
+        create: async (req: any) => {
+          captured = req;
+          return { content: [{ type: "text", text: "Agent is doing X." }] };
+        },
+      },
+    };
+    const s = await toSummary(
+      "sid",
+      [{ role: "user", text: "do X", raw: {} }],
+      { deltaMessageCount: 1, client: mockClient as any, model: "claude-haiku-4-5" },
+    );
+    expect(s.summary).toBe("Agent is doing X.");
+    expect(s.fallback).toBeFalsy();
+    expect(captured.model).toBe("claude-haiku-4-5");
+  });
+
+  it("caches by (sessionId, cursor) for 60s", async () => {
+    let calls = 0;
+    const mockClient = {
+      messages: {
+        create: async () => { calls++; return { content: [{ type: "text", text: "x" }] }; },
+      },
+    };
+    const m = [{ role: "user" as const, text: "a", raw: {} }];
+    await toSummary("sid", m, { deltaMessageCount: 1, client: mockClient as any, cacheKey: "k1" });
+    await toSummary("sid", m, { deltaMessageCount: 1, client: mockClient as any, cacheKey: "k1" });
+    expect(calls).toBe(1);
   });
 });
