@@ -11,7 +11,10 @@ describe("Registry", () => {
 
   beforeEach(async () => {
     ({ home, cleanup } = await makeTmpHome());
-    reg = new Registry({ home });
+    reg = new Registry({
+      home,
+      lockRetries: { retries: 30, minTimeout: 20, maxTimeout: 200, factor: 1.5 },
+    });
   });
   afterEach(async () => { await cleanup(); });
 

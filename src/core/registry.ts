@@ -1,5 +1,5 @@
 // src/core/registry.ts
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -10,6 +10,12 @@ import { RegistryLockTimeoutError } from "./errors.js";
 export interface RegistryOptions {
   home?: string;
   staleMs?: number;
+  lockRetries?: {
+    retries?: number;
+    minTimeout?: number;
+    maxTimeout?: number;
+    factor?: number;
+  };
 }
 
 interface RegistryFile {
@@ -17,16 +23,30 @@ interface RegistryFile {
   sessions: Record<string, SessionEntry>;
 }
 
+interface LockRetriesConfig {
+  retries: number;
+  minTimeout: number;
+  maxTimeout: number;
+  factor: number;
+}
+
 export class Registry {
   private readonly dir: string;
   private readonly path: string;
   private readonly staleMs: number;
+  private readonly lockRetries: LockRetriesConfig;
 
   constructor(opts: RegistryOptions = {}) {
     const home = opts.home ?? homedir();
     this.dir = join(home, ".agent-peek");
     this.path = join(this.dir, "registry.json");
     this.staleMs = opts.staleMs ?? 24 * 3600 * 1000;
+    this.lockRetries = {
+      retries: opts.lockRetries?.retries ?? 5,
+      minTimeout: opts.lockRetries?.minTimeout ?? 50,
+      maxTimeout: opts.lockRetries?.maxTimeout ?? 500,
+      factor: opts.lockRetries?.factor ?? 2,
+    };
   }
 
   async list(): Promise<SessionEntry[]> {
@@ -93,7 +113,7 @@ export class Registry {
     let release: () => Promise<void>;
     try {
       release = await lockfile.lock(this.path, {
-        retries: { retries: 30, minTimeout: 20, maxTimeout: 200, factor: 1.5 },
+        retries: this.lockRetries,
         stale: 10_000,
         realpath: false,
       });
@@ -105,7 +125,12 @@ export class Registry {
       mutator(f);
       const tmp = `${this.path}.tmp-${process.pid}-${Date.now()}`;
       await writeFile(tmp, JSON.stringify(f, null, 2), "utf8");
-      await rename(tmp, this.path);
+      try {
+        await rename(tmp, this.path);
+      } catch (err) {
+        await unlink(tmp).catch(() => { /* ignore */ });
+        throw err;
+      }
     } finally {
       await release();
     }
