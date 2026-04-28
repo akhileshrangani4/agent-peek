@@ -1,0 +1,6 @@
+{"timestamp":"2026-04-28T12:00:00.000Z","type":"session_meta","payload":{"id":"019cbabb-1261-7393-8ae4-007653e6c643","timestamp":"2026-04-28T12:00:00.000Z","cwd":"/tmp/repo","originator":"Codex Desktop","cli_version":"0.107.0","source":"vscode","model_provider":"openai"}}
+{"timestamp":"2026-04-28T12:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"refactor auth"}]}}
+{"timestamp":"2026-04-28T12:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Looking at the auth module."}],"phase":"final_answer"}}
+{"timestamp":"2026-04-28T12:00:03.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cat auth.ts\"}","call_id":"call_abc123"}}
+{"timestamp":"2026-04-28T12:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_abc123","output":"export function login(){}"}}
+{"timestamp":"2026-04-28T12:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Found it. Will rewrite next."}],"phase":"final_answer"}}
