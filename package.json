@@ -1,6 +1,6 @@
 {
   "name": "agent-peek",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read-only peek into other AI agent chat sessions.",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,9 +20,9 @@
     }
   },
   "bin": {
-    "peek": "./bin/peek.js",
-    "apeek": "./bin/peek.js",
-    "agent-peek-mcp": "./bin/agent-peek-mcp.js"
+    "peek": "bin/peek.js",
+    "apeek": "bin/peek.js",
+    "agent-peek-mcp": "bin/agent-peek-mcp.js"
   },
   "files": [
     "dist",

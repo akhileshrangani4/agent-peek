@@ -10,18 +10,26 @@ import type { SnapshotMode } from "../core/types.js";
 export async function run(argv: string[] = process.argv): Promise<number> {
   const cli = cac("peek");
 
-  cli.command("list", "List discovered sessions")
+  cli.command("list [target]", "List discovered sessions, or `list adapters` for adapters")
     .option("--adapter <name>", "Filter by adapter")
     .option("--status <s>", "Filter by status (active|idle|ended)")
     .option("--json", "Output JSON")
-    .action(async (opts) => {
+    .action(async (target, opts) => {
+      if (target === "adapters") {
+        await listAdapters();
+        return;
+      }
+      if (target !== undefined) {
+        console.error(`unknown list target: ${target}\nusage: peek list [adapters]`);
+        process.exit(5);
+      }
       const engine = await createEngine({ withExternal: true });
       const list = await engine.list({ adapter: opts.adapter, status: opts.status });
       if (opts.json) { console.log(JSON.stringify(list, null, 2)); return; }
       printList(list);
     });
 
-  cli.command("peek <selector>", "Show snapshot of a session")
+  cli.command("at <selector>", "Show snapshot of a session")
     .option("--mode <m>", "raw|structured|summary", { default: "raw" })
     .option("--since <cursor>", "Only return new messages after this cursor")
     .option("--limit <n>", "Max raw messages", { default: 200 })
@@ -37,8 +45,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       printSnapshot(r);
     });
 
-  cli.command("tag <id> <name>", "Set a friendly tag for a session")
-    .action(async (id, name) => {
+  cli.command("tag <id> <asLiteral> <name>", "Tag a session — usage: peek tag <id> as <name>")
+    .action(async (id, asLiteral, name) => {
+      if (asLiteral !== "as") {
+        console.error(`expected: peek tag <id> as <name>`);
+        process.exit(5);
+      }
       const engine = await createEngine();
       await engine.tag(id, name);
       console.log(`tagged ${id} as ${name}`);
@@ -51,38 +63,39 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       console.log(`untagged ${id}`);
     });
 
-  cli.command("register", "Register a session manually")
-    .option("--id <id>", "Session id (must be adapter-prefixed)", { default: "" })
-    .option("--adapter <name>", "Adapter name", { default: "" })
-    .option("--transcript-path <p>", "Absolute transcript path", { default: "" })
-    .option("--as <tag>", "Tag/name for the session", { default: "" })
-    .option("--cwd <path>", "Working directory", { default: "" })
-    .action(async (opts) => {
-      if (!opts.id || !opts.adapter || !opts.transcriptPath) {
-        console.error("--id, --adapter, --transcript-path are required");
+  cli.command("register <id> <atLiteral> <path>", "Register a session — usage: peek register <id> at <path>")
+    .option("--as <name>", "Tag/name for the session")
+    .option("--cwd <path>", "Working directory")
+    .action(async (id, atLiteral, path, opts) => {
+      if (atLiteral !== "at") {
+        console.error(`expected: peek register <id> at <path>`);
         process.exit(5);
       }
+      const colon = id.indexOf(":");
+      if (colon <= 0) {
+        console.error(`id must be adapter-prefixed, e.g. "claude-code:abc-123"`);
+        process.exit(5);
+      }
+      const adapter = id.slice(0, colon);
       const engine = await createEngine();
       await engine.register({
-        id: opts.id, adapter: opts.adapter, transcriptPath: opts.transcriptPath,
-        tag: opts.as || undefined, cwd: opts.cwd || undefined,
+        id, adapter, transcriptPath: path,
+        tag: opts.as || undefined,
+        cwd: opts.cwd || undefined,
       });
-      console.log(`registered ${opts.id}`);
+      console.log(`registered ${id}`);
     });
 
-  cli.command("unregister <id>", "Remove a session from the registry")
+  cli.command("forget <id>", "Remove a session from the registry")
     .action(async (id) => {
       const engine = await createEngine();
       await engine.unregister(id);
-      console.log(`unregistered ${id}`);
+      console.log(`forgot ${id}`);
     });
 
-  cli.command("adapters", "List installed adapters")
+  cli.command("adapters", "Alias for `list adapters`")
     .action(async () => {
-      const engine = await createEngine({ withExternal: true });
-      const list = await engine.list();
-      const seen = new Set(list.map((e) => e.adapter));
-      console.log(["claude-code", "codex", ...seen].filter(Boolean).join("\n"));
+      await listAdapters();
     });
 
   cli.help();
@@ -95,6 +108,13 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   } catch (e) {
     return handleError(e);
   }
+}
+
+async function listAdapters(): Promise<void> {
+  const engine = await createEngine({ withExternal: true });
+  const list = await engine.list();
+  const seen = new Set(list.map((e) => e.adapter));
+  console.log(["claude-code", "codex", ...seen].filter(Boolean).join("\n"));
 }
 
 function handleError(e: unknown): number {

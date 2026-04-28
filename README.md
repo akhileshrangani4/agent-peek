@@ -20,13 +20,15 @@ Provides three things:
 
 ```bash
 peek list                                 # show discovered sessions
-peek peek <id|tag|cwd>                    # full snapshot
-peek peek <selector> --mode structured    # normalized fields
-peek peek <selector> --mode summary       # LLM-summarized (needs ANTHROPIC_API_KEY)
-peek peek <selector> --since <cursor>     # only new messages since prior peek
-peek tag <id> researcher                  # give a session a friendly name
-peek register --id ... --adapter ... --transcript-path ...
-peek adapters
+peek list adapters                        # show installed adapters
+peek at <id|tag|cwd>                      # full snapshot
+peek at <selector> --mode structured      # normalized fields
+peek at <selector> --mode summary         # LLM-summarized (needs ANTHROPIC_API_KEY)
+peek at <selector> --since <cursor>       # only new messages since prior peek
+peek tag <id> as researcher               # give a session a friendly name
+peek untag <id>
+peek register <id> at <path> [--as <name>]
+peek forget <id>
 ```
 
 ## MCP

@@ -35,7 +35,7 @@ describe("CLI integration", () => {
 
   it("peek of unknown selector exits 2 with helpful message", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
-    const r = await runCli(["peek", "ghost"], { HOME: home });
+    const r = await runCli(["at", "ghost"], { HOME: home });
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/peek list/);
   });

@@ -4,7 +4,7 @@ import { makeTmpHome } from "../helpers/tmp-home.js";
 
 describe("smoke", () => {
   it("exposes a version", () => {
-    expect(VERSION).toBe("0.1.0");
+    expect(VERSION).toBe("0.1.1");
   });
 
   it("createEngine returns an engine that can list (zero sessions on tmp home)", async () => {
