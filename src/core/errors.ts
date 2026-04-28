@@ -15,7 +15,7 @@ export class AmbiguousSelectorError extends Error {
 export class AdapterError extends Error {
   readonly name: string = "AdapterError";
   constructor(public adapter: string, message: string, public override cause?: unknown) {
-    super(`[${adapter}] ${message}`);
+    super(`[${adapter}] ${message}`, { cause });
   }
 }
 
