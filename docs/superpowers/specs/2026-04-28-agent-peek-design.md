@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-28
 **Status:** Approved for implementation planning
-**Author:** akhilesh@tambo.co (with Claude)
+**Author:** akhileshrangani4@gmail.com (with Claude)
 
 ## Problem
 
