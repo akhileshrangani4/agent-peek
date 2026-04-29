@@ -1,5 +1,7 @@
 // src/index.ts
-export const VERSION = "0.1.1";
+import packageJson from "../package.json" with { type: "json" };
+
+export const VERSION = packageJson.version;
 
 export type {
   SessionEntry, SessionStatus, Activity,

@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema, ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createEngine } from "../index.js";
+import { createEngine, VERSION } from "../index.js";
 import type { SessionEntry, SnapshotMode } from "../core/types.js";
 import { displayNames } from "../core/names.js";
 
@@ -53,7 +53,7 @@ const tools = [
 export async function run(): Promise<void> {
   const engine = await createEngine({ withExternal: true });
   const server = new Server(
-    { name: "agent-peek", version: "0.1.0" },
+    { name: "agent-peek", version: VERSION },
     { capabilities: { tools: {} } },
   );
 
