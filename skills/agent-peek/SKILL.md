@@ -1,0 +1,232 @@
+---
+name: agent-peek
+description: Use this skill whenever the user wants an AI agent to inspect, monitor, summarize, or coordinate with other local AI agent sessions using agent-peek, peek CLI, or the agent-peek MCP server. This includes requests like "peek at what Codex was doing", "check the other agent", "set up agent-peek MCP", "configure MCP for Cursor/Codex/Claude/Gemini/Windsurf/Cline/VS Code", or "help agents share context without writing into each other's chats." The skill installs or verifies agent-peek, configures the right MCP shape for the current client, and uses read-only peek/list/tag commands safely.
+---
+
+# Agent Peek
+
+Use `agent-peek` to read other local agent sessions without modifying their
+transcripts. Treat it as observability, not control: inspect, summarize, and
+coordinate, but do not claim you changed another agent's state.
+
+## Fast Path
+
+1. Check whether the CLI exists:
+
+   ```bash
+   command -v peek
+   peek --help
+   ```
+
+2. If missing and npm is available, install it:
+
+   ```bash
+   npm i -g agent-peek
+   ```
+
+3. If the user wants this workflow installed as an agent skill, use the `npx skills` CLI:
+
+   ```bash
+   npx skills add akhileshrangani4/agent-peek
+   ```
+
+   The installer is interactive and will guide scope/agent choices. For a
+   non-interactive global install:
+
+   ```bash
+   npx skills add akhileshrangani4/agent-peek --skill agent-peek -g -y
+   ```
+
+   To target specific agents non-interactively:
+
+   ```bash
+   npx skills add akhileshrangani4/agent-peek --skill agent-peek -a codex -a claude-code -g -y
+   ```
+
+   `-g` installs globally for the current user. `-y` skips confirmation
+   prompts. Omit `-g` for a project-local install.
+
+4. Verify adapters and discovered sessions:
+
+   ```bash
+   peek doctor
+   peek list
+   ```
+
+5. Read a session with the smallest useful mode:
+
+   ```bash
+   peek at <name|id|tag|cwd> --mode structured
+   peek at <name|id|tag|cwd> --mode brief
+   peek at <name|id|tag|cwd> --mode summary
+   ```
+
+`summary` is local by default when no hosted provider is configured. Use
+`brief` when you need deterministic, compact output with no LLM behavior.
+
+## Choosing Commands
+
+- Use `peek list` first; the `NAME` column is the friendly selector for `peek at`.
+- Use `peek at <selector> --mode structured --json` when another script or agent will parse the result.
+- Use `peek at <selector> --mode brief` for a compact human-readable status.
+- Use `peek at <selector> --mode summary` for a sentence-style local summary.
+- Use `peek at <selector> --since <nextCursor> --json` when polling so you only read new messages.
+- Use `peek tag <selector> as <name>` when the display name is unstable or hard to type.
+- Use `peek ui` only when the human explicitly wants an interactive terminal browser.
+
+Avoid raw mode unless the user asks for exact transcript details or debugging;
+it can be noisy. When raw is needed, prefer a bounded window:
+
+```bash
+peek at <selector> --last 50
+peek at <selector> --around 100 --limit 30
+peek at <selector> --last 50 --reverse
+```
+
+## MCP Server
+
+The stdio MCP command is:
+
+```bash
+agent-peek-mcp
+```
+
+After adding the server to a client, restart or refresh that client, then ask it
+to list MCP tools. Expected tools:
+
+- `list_sessions`
+- `peek_session`
+- `tag_session`
+
+## MCP Configs By Client
+
+Use the config shape for the current host. Most clients use JSON with
+`mcpServers`; Codex uses TOML; VS Code uses JSON with top-level `servers`.
+
+### Claude Code
+
+CLI:
+
+```bash
+claude mcp add agent-peek agent-peek-mcp
+```
+
+Project `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+### Codex
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-peek]
+command = "agent-peek-mcp"
+```
+
+### Cursor
+
+Global `~/.cursor/mcp.json` or project `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+### Windsurf
+
+Add to `~/.codeium/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+### Gemini CLI
+
+Add to user `~/.gemini/settings.json` or project `.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+Gemini CLI can also add it directly:
+
+```bash
+gemini mcp add agent-peek agent-peek-mcp
+```
+
+### Cline
+
+Cline CLI uses `~/.cline/data/settings/cline_mcp_settings.json`. The VS Code
+extension opens its own `cline_mcp_settings.json` from the MCP Servers settings.
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp",
+      "disabled": false
+    }
+  }
+}
+```
+
+### VS Code
+
+Workspace `.vscode/mcp.json` or user-profile `mcp.json`:
+
+```json
+{
+  "servers": {
+    "agent-peek": {
+      "type": "stdio",
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+## Troubleshooting
+
+- If no sessions appear, run `peek doctor` and check which adapter paths exist.
+- If terminal sessions are expected, use `peek list --terminals`; terminal scrollback adapters are opt-in.
+- If an MCP client cannot start the server, use the full path from `which agent-peek-mcp` as `command`.
+- If a project-scoped MCP config is ignored, restart the client and approve or trust the workspace/server when prompted.
+- If names are ambiguous, use `peek list --ids` and select by raw id.
+
+## Response Pattern
+
+When reporting findings to the user, include:
+
+- Which session was inspected.
+- Current task or last user request.
+- Latest assistant status.
+- Pending or recent tools, if relevant.
+- Whether the session appears idle, thinking, or tool-running.
+
+Keep it short unless the user asks for transcript detail.

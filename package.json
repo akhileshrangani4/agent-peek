@@ -1,6 +1,6 @@
 {
   "name": "agent-peek",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Read-only peek into other AI agent chat sessions.",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,6 +27,7 @@
   "files": [
     "dist",
     "bin",
+    "skills",
     "README.md",
     "LICENSE"
   ],

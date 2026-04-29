@@ -84,13 +84,21 @@ describe("snapshot.toBrief", () => {
 });
 
 describe("snapshot.toSummary", () => {
-  it("falls back to structured when no API key", async () => {
-    await withEnv({ ANTHROPIC_API_KEY: "" }, async () => {
+  it("creates a no-dependency local summary when no API key is configured", async () => {
+    await withEnv({ ANTHROPIC_API_KEY: "", AGENT_PEEK_SUMMARY_PROVIDER: "" }, async () => {
       const s = await toSummary("sid", [{ role: "user", text: "hi", raw: {} }], { deltaMessageCount: 1 });
       expect(s.mode).toBe("summary");
-      expect(s.fallback).toBe(true);
-      expect(s.structured).toBeDefined();
-      expect(s.summary).toMatch(/no.*api.*key/i);
+      expect(s.fallback).toBeFalsy();
+      expect(s.structured).toBeUndefined();
+      expect(s.summary).toMatch(/Current task: hi/);
+    });
+  });
+
+  it("can force the local summary provider even when an Anthropic key is present", async () => {
+    await withEnv({ ANTHROPIC_API_KEY: "test-key", AGENT_PEEK_SUMMARY_PROVIDER: "local" }, async () => {
+      const s = await toSummary("sid", msgs(), { deltaMessageCount: 5 });
+      expect(s.summary).toMatch(/Current task: do X/);
+      expect(s.summary).toMatch(/Recent tools: Read/);
     });
   });
 

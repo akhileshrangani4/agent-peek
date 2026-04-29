@@ -72,7 +72,7 @@ export interface SummarySnapshot {
   sessionId: string;
   summary: string;
   deltaMessageCount: number;
-  fallback?: boolean; // true if summary unavailable; structured returned instead
+  fallback?: boolean; // true if hosted summary failed and local structured context was returned
   structured?: StructuredSnapshot;
 }
 

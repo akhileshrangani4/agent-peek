@@ -91,7 +91,7 @@ peek ui --terminals
 peek at <name|id|tag|cwd>                 # raw snapshot
 peek at <selector> --mode structured      # normalized status/task/tool fields
 peek at <selector> --mode brief           # compact local summary, no API key
-peek at <selector> --mode summary         # LLM summary, requires ANTHROPIC_API_KEY
+peek at <selector> --mode summary         # sentence-style summary, local by default
 peek at <selector> --since <cursor>       # only messages since prior peek
 peek at <selector> --first 20             # first 20 raw messages
 peek at <selector> --last 50              # last 50 raw messages
@@ -124,7 +124,7 @@ with `peek list --ids`, and JSON output includes both `id` and `displayName`.
 | `raw` | Reading transcript messages directly. Best for debugging or inspecting exactly what happened. | No |
 | `structured` | Stable fields for agents: current task, activity, last messages, pending tools, recent tools. | No |
 | `brief` | A compact local summary built from structured fields. Good default for humans and scripts that do not need raw logs. | No |
-| `summary` | LLM-written 2-3 sentence summary of the session tail. Falls back when no Anthropic key is configured. | `ANTHROPIC_API_KEY` |
+| `summary` | Sentence-style summary. Uses a no-dependency local summary by default; can use Anthropic when explicitly configured. | No |
 
 Raw mode has pagination controls:
 
@@ -138,6 +138,14 @@ peek at researcher --last 50 --reverse
 
 By default, raw mode hides tool-only messages and tool-call status lines to keep
 the output readable. Add `--tools` or `--verbose` when you need that detail.
+
+`summary` does not require Ollama, Anthropic, or any other model runtime. If you
+want hosted LLM summaries, set `ANTHROPIC_API_KEY`. To force local summaries on
+a machine that also has an Anthropic key, set:
+
+```bash
+AGENT_PEEK_SUMMARY_PROVIDER=local
+```
 
 Timeline is not a `peek at --mode` value. It is an interactive-only view inside
 `peek ui`.
@@ -153,7 +161,7 @@ It starts in `structured` mode. Press `m` or Tab to cycle through:
 - `brief` — compact local summary, no API key
 - `timeline` — chronological role/text timeline for quick scanning
 - `raw` — recent transcript messages
-- `summary` — LLM summary, when `ANTHROPIC_API_KEY` is configured
+- `summary` — sentence-style summary, local by default
 
 There is no separate command-line flag for timeline yet; open `peek ui`, then
 press `m`/Tab until the header shows `mode=timeline`.
@@ -196,12 +204,119 @@ peek at researcher --mode raw --since <nextCursor> --json
 
 ## MCP
 
-Add the MCP server to your client config:
+The MCP server command is:
+
+```bash
+agent-peek-mcp
+```
+
+It is a local stdio server. Different clients use different config shapes.
+
+### Claude Code
+
+Add it from the CLI:
+
+```bash
+claude mcp add agent-peek agent-peek-mcp
+```
+
+Or add a project-scoped `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "agent-peek": { "command": "agent-peek-mcp" }
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+### Codex
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-peek]
+command = "agent-peek-mcp"
+```
+
+### Cursor
+
+Add to global `~/.cursor/mcp.json` or project `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+### Windsurf
+
+Add to `~/.codeium/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+### Gemini CLI
+
+Add to user `~/.gemini/settings.json` or project `.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+Or use Gemini's MCP command:
+
+```bash
+gemini mcp add agent-peek agent-peek-mcp
+```
+
+### Cline
+
+Cline CLI uses `~/.cline/data/settings/cline_mcp_settings.json`. The VS Code
+extension opens its own `cline_mcp_settings.json` from the MCP Servers settings.
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp",
+      "disabled": false
+    }
+  }
+}
+```
+
+### VS Code
+
+VS Code uses top-level `servers`, not `mcpServers`. Add to workspace
+`.vscode/mcp.json` or your user-profile `mcp.json`:
+
+```json
+{
+  "servers": {
+    "agent-peek": {
+      "type": "stdio",
+      "command": "agent-peek-mcp"
+    }
   }
 }
 ```
@@ -211,6 +326,49 @@ Tools exposed:
 - `list_sessions`
 - `peek_session`
 - `tag_session`
+
+Config references: [Claude Code](https://code.claude.com/docs/en/mcp),
+[Codex](https://developers.openai.com/codex/config-reference),
+[Cursor](https://docs.cursor.com/advanced/model-context-protocol),
+[Windsurf](https://docs.windsurf.com/plugins/cascade/mcp),
+[Gemini CLI](https://geminicli.com/docs/tools/mcp-server/),
+[Cline](https://docs.cline.bot/cline-cli/configuration), and
+[VS Code](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration).
+
+## Agent Skill
+
+This repo includes an installable skill at `skills/agent-peek`. Use it when you
+want another agent to learn the `peek` workflow and the MCP configs above.
+
+Install it with the `npx skills` CLI:
+
+```bash
+npx skills add akhileshrangani4/agent-peek
+```
+
+The installer is interactive and will guide scope/agent choices. For a
+non-interactive global install:
+
+```bash
+npx skills add akhileshrangani4/agent-peek --skill agent-peek -g -y
+```
+
+To target specific agents non-interactively:
+
+```bash
+npx skills add akhileshrangani4/agent-peek --skill agent-peek -a codex -a claude-code -g -y
+```
+
+Flags: `-g` installs globally for your user, and `-y` skips confirmation
+prompts. Omit `-g` if you only want the skill installed into the current
+project.
+
+The skill teaches agents to:
+
+- install or verify `agent-peek`
+- run `peek doctor`, `peek list`, and bounded `peek at` commands
+- configure MCP for Claude Code, Codex, Cursor, Windsurf, Gemini CLI, Cline, and VS Code
+- report what another session is doing without modifying that session
 
 ## Library
 

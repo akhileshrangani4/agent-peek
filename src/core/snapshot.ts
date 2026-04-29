@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type {
   BriefSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
   StructuredSnapshot, SummarySnapshot, ToolCall,
@@ -134,17 +133,6 @@ export async function toSummary(
   opts: ToSummaryOpts,
 ): Promise<SummarySnapshot> {
   const structured = toStructured(sessionId, messages);
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!opts.client && !key) {
-    return {
-      mode: "summary",
-      sessionId,
-      summary: "Summary unavailable: no ANTHROPIC_API_KEY set; returning structured snapshot.",
-      deltaMessageCount: opts.deltaMessageCount,
-      fallback: true,
-      structured,
-    };
-  }
   const cacheId = opts.cacheKey ? `${sessionId}::${opts.cacheKey}` : undefined;
   const ttl = opts.ttlMs ?? 60_000;
   if (cacheId) {
@@ -158,30 +146,82 @@ export async function toSummary(
       };
     }
   }
-  const client = opts.client ?? new Anthropic({ apiKey: key! });
-  const model = opts.model ?? process.env.AGENT_PEEK_SUMMARY_MODEL ?? "claude-haiku-4-5";
-  const prompt = renderSummaryPrompt(messages);
-  let summary: string;
+
+  const provider = opts.client
+    ? "anthropic"
+    : (process.env.AGENT_PEEK_SUMMARY_PROVIDER ?? (process.env.ANTHROPIC_API_KEY ? "anthropic" : "local"));
+  if (provider !== "anthropic") {
+    const summary = renderLocalSummary(structured, messages);
+    if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });
+    return { mode: "summary", sessionId, summary, deltaMessageCount: opts.deltaMessageCount };
+  }
+
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!opts.client && !key) {
+    const summary = renderLocalSummary(structured, messages);
+    if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });
+    return { mode: "summary", sessionId, summary, deltaMessageCount: opts.deltaMessageCount };
+  }
+
   try {
-    const resp = await client.messages.create({
-      model,
-      max_tokens: 200,
-      messages: [{ role: "user", content: prompt }],
-    });
-    const block = resp.content?.[0];
-    summary = (block && (block as any).type === "text") ? (block as any).text : "(no summary)";
+    const summary = await summarizeWithAnthropic(messages, opts, key);
+    if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });
+    return { mode: "summary", sessionId, summary, deltaMessageCount: opts.deltaMessageCount };
   } catch (e) {
+    const local = renderLocalSummary(structured, messages);
     return {
       mode: "summary",
       sessionId,
-      summary: `Summary unavailable: ${(e as Error).message}; returning structured snapshot.`,
+      summary: `LLM summary unavailable: ${(e as Error).message}. ${local}`,
       deltaMessageCount: opts.deltaMessageCount,
       fallback: true,
       structured,
     };
   }
-  if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });
-  return { mode: "summary", sessionId, summary, deltaMessageCount: opts.deltaMessageCount };
+}
+
+async function summarizeWithAnthropic(messages: RawMessage[], opts: ToSummaryOpts, key?: string): Promise<string> {
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  const client = opts.client ?? new Anthropic({ apiKey: key! });
+  const model = opts.model ?? process.env.AGENT_PEEK_SUMMARY_MODEL ?? "claude-haiku-4-5";
+  const resp = await client.messages.create({
+    model,
+    max_tokens: 200,
+    messages: [{ role: "user", content: renderSummaryPrompt(messages) }],
+  });
+  const block = resp.content?.[0];
+  return (block && (block as any).type === "text") ? (block as any).text : "(no summary)";
+}
+
+function renderLocalSummary(structured: StructuredSnapshot, messages: RawMessage[]): string {
+  if (!messages.length) return "No messages found in this session yet.";
+
+  const sentences: string[] = [];
+  if (structured.currentTask) {
+    sentences.push(`Current task: ${oneLine(structured.currentTask, 220)}.`);
+  } else {
+    sentences.push("No clear current task was found in the transcript tail.");
+  }
+
+  const pending = toolNames(structured.pendingToolCalls);
+  if (pending.length) {
+    sentences.push(`The agent appears to be waiting on ${plural("tool", pending.length)}: ${pending.join(", ")}.`);
+  } else if (structured.activity === "thinking") {
+    sentences.push("The latest message is from the assistant, so the session may still be in progress.");
+  } else {
+    sentences.push("The session looks idle after the latest recorded message.");
+  }
+
+  if (structured.lastAssistantMessage) {
+    sentences.push(`Last assistant update: ${oneLine(structured.lastAssistantMessage, 220)}.`);
+  }
+
+  const recent = toolNames(structured.lastToolCalls);
+  if (recent.length) {
+    sentences.push(`Recent tools: ${recent.join(", ")}.`);
+  }
+
+  return sentences.slice(0, 4).join(" ");
 }
 
 function renderSummaryPrompt(messages: RawMessage[]): string {
@@ -212,6 +252,10 @@ function toolNames(tools: ToolCall[]): string[] {
 function oneLine(value: string, max = 180): string {
   const flat = value.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}...` : flat;
+}
+
+function plural(word: string, count: number): string {
+  return count === 1 ? word : `${word}s`;
 }
 
 function clamp(value: number, min: number, max: number): number {
