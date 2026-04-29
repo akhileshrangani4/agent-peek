@@ -1,17 +1,47 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
-  RawMessage, RawSnapshot, StructuredSnapshot, SummarySnapshot, ToolCall,
+  BriefSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
+  StructuredSnapshot, SummarySnapshot, ToolCall,
 } from "./types.js";
 
 export interface ToRawOpts {
   limit?: number;
+  offset?: number;
+  around?: number;
+  from?: RawWindowFrom;
+  order?: RawOrder;
 }
 
 export function toRaw(sessionId: string, messages: RawMessage[], opts: ToRawOpts = {}): RawSnapshot {
-  const sliced = opts.limit !== undefined && messages.length > opts.limit
-    ? messages.slice(-opts.limit)
-    : messages;
-  return { mode: "raw", sessionId, messages: sliced };
+  const total = messages.length;
+  const order = opts.order ?? "oldest-first";
+  const limit = opts.limit === undefined ? total : Math.max(0, opts.limit);
+  const offset = Math.max(0, opts.offset ?? 0);
+  let start = 0;
+  let end = total;
+
+  if (opts.around !== undefined) {
+    const center = clamp(Math.trunc(opts.around) - 1, 0, Math.max(0, total - 1));
+    const before = Math.floor(limit / 2);
+    start = clamp(center - before, 0, total);
+    end = clamp(start + limit, 0, total);
+    start = clamp(end - limit, 0, total);
+  } else if ((opts.from ?? "end") === "start") {
+    start = clamp(offset, 0, total);
+    end = clamp(start + limit, 0, total);
+  } else {
+    end = clamp(total - offset, 0, total);
+    start = clamp(end - limit, 0, end);
+  }
+
+  const sliced = messages.slice(start, end);
+  return {
+    mode: "raw",
+    sessionId,
+    messages: order === "newest-first" ? [...sliced].reverse() : sliced,
+    totalMessageCount: total,
+    window: { start, end, order },
+  };
 }
 
 export function toStructured(sessionId: string, messages: RawMessage[]): StructuredSnapshot {
@@ -35,6 +65,30 @@ export function toStructured(sessionId: string, messages: RawMessage[]): Structu
     pendingToolCalls,
     lastToolCalls: lastToolCalls.slice(-5),
     activity,
+  };
+}
+
+export function toBrief(sessionId: string, messages: RawMessage[]): BriefSnapshot {
+  const structured = toStructured(sessionId, messages);
+  const parts: string[] = [];
+  if (structured.currentTask) parts.push(`Task: ${oneLine(structured.currentTask)}`);
+  if (structured.lastAssistantMessage) parts.push(`Last assistant: ${oneLine(structured.lastAssistantMessage)}`);
+  if (structured.pendingToolCalls.length) {
+    parts.push(`Pending tools: ${toolNames(structured.pendingToolCalls).join(", ")}`);
+  }
+  if (!parts.length) {
+    parts.push(messages.length ? "No clear current task found in the transcript." : "No messages found.");
+  }
+  return {
+    mode: "brief",
+    sessionId,
+    messageCount: structured.messageCount,
+    activity: structured.activity,
+    brief: parts.join(" "),
+    currentTask: structured.currentTask,
+    lastAssistantMessage: structured.lastAssistantMessage,
+    pendingTools: toolNames(structured.pendingToolCalls),
+    recentTools: toolNames(structured.lastToolCalls),
   };
 }
 
@@ -149,4 +203,17 @@ function renderSummaryPrompt(messages: RawMessage[]): string {
   }
   lines.push("--- end ---");
   return lines.join("\n");
+}
+
+function toolNames(tools: ToolCall[]): string[] {
+  return [...new Set(tools.map((tool) => tool.name))];
+}
+
+function oneLine(value: string, max = 180): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}...` : flat;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

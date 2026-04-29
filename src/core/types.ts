@@ -39,12 +39,20 @@ export interface CursorData {
 }
 export type Cursor = string; // opaque base64
 
-export type SnapshotMode = "raw" | "structured" | "summary";
+export type SnapshotMode = "raw" | "structured" | "brief" | "summary";
+export type RawWindowFrom = "start" | "end";
+export type RawOrder = "oldest-first" | "newest-first";
 
 export interface RawSnapshot {
   mode: "raw";
   sessionId: string;
   messages: RawMessage[];
+  totalMessageCount: number;
+  window: {
+    start: number;
+    end: number;
+    order: RawOrder;
+  };
 }
 
 export interface StructuredSnapshot {
@@ -68,7 +76,19 @@ export interface SummarySnapshot {
   structured?: StructuredSnapshot;
 }
 
-export type Snapshot = RawSnapshot | StructuredSnapshot | SummarySnapshot;
+export interface BriefSnapshot {
+  mode: "brief";
+  sessionId: string;
+  messageCount: number;
+  activity: Activity;
+  brief: string;
+  currentTask?: string;
+  lastAssistantMessage?: string;
+  pendingTools: string[];
+  recentTools: string[];
+}
+
+export type Snapshot = RawSnapshot | StructuredSnapshot | BriefSnapshot | SummarySnapshot;
 
 export interface PeekResult {
   snapshot: Snapshot;

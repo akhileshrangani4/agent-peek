@@ -142,6 +142,32 @@ describe("CLI integration", () => {
     expect(badLimit.stderr).toMatch(/error: invalid_limit/);
   });
 
+  it("at supports brief mode and raw pagination flags", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-page");
+    await mkdir(projDir, { recursive: true });
+    const tx = join(projDir, "page.jsonl");
+    await writeFile(tx, [
+      `{"type":"user","sessionId":"page","cwd":"/tmp/page","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"first"}}`,
+      `{"type":"assistant","sessionId":"page","cwd":"/tmp/page","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":"second"}}`,
+      `{"type":"user","sessionId":"page","cwd":"/tmp/page","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"third"}}`,
+    ].join("\n") + "\n", "utf8");
+
+    const brief = await runCli(["at", "page-claude", "--mode", "brief"], { HOME: home });
+    expect(brief.code).toBe(0);
+    expect(brief.stdout).toMatch(/Task: third/);
+
+    const first = await runCli(["at", "page-claude", "--first", "1"], { HOME: home });
+    expect(first.code).toBe(0);
+    expect(first.stdout).toMatch(/messages: 1-1 of 3/);
+    expect(first.stdout).toMatch(/first/);
+    expect(first.stdout).not.toMatch(/third/);
+
+    const newest = await runCli(["at", "page-claude", "--last", "2", "--reverse"], { HOME: home });
+    expect(newest.code).toBe(0);
+    expect(newest.stdout.indexOf("third")).toBeLessThan(newest.stdout.indexOf("second"));
+  });
+
   it("doctor shows adapter availability", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["doctor"], { HOME: home });

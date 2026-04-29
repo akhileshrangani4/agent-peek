@@ -1,12 +1,12 @@
 import type { Registry } from "./registry.js";
 import type { AdapterLoader } from "../adapters/loader.js";
 import type {
-  SessionEntry, PeekResult, SnapshotMode, Cursor,
+  RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor,
 } from "./types.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError, AdapterError,
 } from "./errors.js";
-import { toRaw, toStructured, toSummary } from "./snapshot.js";
+import { toBrief, toRaw, toStructured, toSummary } from "./snapshot.js";
 import { decodeCursor, cursorAdapter } from "./cursor.js";
 import { displayNames } from "./names.js";
 
@@ -14,6 +14,10 @@ export interface PeekOpts {
   mode?: SnapshotMode;
   since?: Cursor;
   limit?: number;
+  offset?: number;
+  around?: number;
+  from?: RawWindowFrom;
+  order?: RawOrder;
 }
 
 export interface RegisterOpts {
@@ -77,8 +81,17 @@ export class Engine {
     const messages = result.messages;
     const mode: SnapshotMode = opts.mode ?? "raw";
     let snapshot;
-    if (mode === "raw") snapshot = toRaw(entry.id, messages, { limit: opts.limit ?? 200 });
+    if (mode === "raw") {
+      snapshot = toRaw(entry.id, messages, {
+        limit: opts.limit ?? 200,
+        offset: opts.offset,
+        around: opts.around,
+        from: opts.from,
+        order: opts.order,
+      });
+    }
     else if (mode === "structured") snapshot = toStructured(entry.id, messages);
+    else if (mode === "brief") snapshot = toBrief(entry.id, messages);
     else snapshot = await toSummary(entry.id, messages, {
       deltaMessageCount: messages.length,
       cacheKey: result.nextCursor,

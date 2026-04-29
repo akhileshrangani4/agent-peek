@@ -56,6 +56,12 @@ Peek at a session by display name, id, tag, or cwd:
 peek at researcher-codex --mode structured
 ```
 
+Get a compact local summary without an API key:
+
+```bash
+peek at researcher-codex --mode brief
+```
+
 Give a session a stable name:
 
 ```bash
@@ -84,8 +90,14 @@ peek ui --terminals
 
 peek at <name|id|tag|cwd>                 # raw snapshot
 peek at <selector> --mode structured      # normalized status/task/tool fields
+peek at <selector> --mode brief           # compact local summary, no API key
 peek at <selector> --mode summary         # LLM summary, requires ANTHROPIC_API_KEY
 peek at <selector> --since <cursor>       # only messages since prior peek
+peek at <selector> --first 20             # first 20 raw messages
+peek at <selector> --last 50              # last 50 raw messages
+peek at <selector> --around 100 --limit 30 # raw window around message 100
+peek at <selector> --last 50 --reverse    # newest-first raw output
+peek at <selector> --tools                # include tool-only raw messages
 
 peek tag <selector> as researcher
 peek untag researcher
@@ -103,6 +115,30 @@ sessionseek-codex  codex    active  0s ago   file    ~/Documents/sessionseek/ses
 The `NAME` column is the selector to use with `peek at`. Raw ids stay available
 with `peek list --ids`, and JSON output includes both `id` and `displayName`.
 
+## Peek Modes
+
+`peek at` supports four output modes:
+
+| Mode | Use it for | API key |
+| --- | --- | --- |
+| `raw` | Reading transcript messages directly. Best for debugging or inspecting exactly what happened. | No |
+| `structured` | Stable fields for agents: current task, activity, last messages, pending tools, recent tools. | No |
+| `brief` | A compact local summary built from structured fields. Good default for humans and scripts that do not need raw logs. | No |
+| `summary` | LLM-written 2-3 sentence summary of the session tail. Falls back when no Anthropic key is configured. | `ANTHROPIC_API_KEY` |
+
+Raw mode has pagination controls:
+
+```bash
+peek at researcher --first 25
+peek at researcher --last 100
+peek at researcher --last 100 --offset 100
+peek at researcher --around 250 --limit 40
+peek at researcher --last 50 --reverse
+```
+
+By default, raw mode hides tool-only messages and tool-call status lines to keep
+the output readable. Add `--tools` or `--verbose` when you need that detail.
+
 ## Terminal UI
 
 `peek ui` is for humans browsing in a real terminal. It shows a session list and
@@ -111,6 +147,8 @@ a detail pane for the selected session.
 It starts in `structured` mode and can switch between:
 
 - `structured` — current task, activity, last messages, pending tools, recent tools
+- `brief` — compact local summary, no API key
+- `timeline` — chronological role/text timeline for quick scanning
 - `raw` — recent transcript messages
 - `summary` — LLM summary, when `ANTHROPIC_API_KEY` is configured
 
@@ -177,6 +215,7 @@ const engine = await createEngine();
 const sessions = await engine.list();
 
 const result = await engine.peek("researcher", { mode: "summary" });
+const firstPage = await engine.peek("researcher", { mode: "raw", from: "start", limit: 50 });
 
 console.log(result.snapshot);
 console.log(result.nextCursor);

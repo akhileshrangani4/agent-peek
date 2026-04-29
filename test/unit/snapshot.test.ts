@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
+import { toBrief, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
 import type { RawMessage } from "../../src/core/types.js";
 import { withEnv } from "../helpers/tmp-home.js";
 
@@ -24,6 +24,14 @@ describe("snapshot.toRaw", () => {
     expect(s.messages.length).toBe(2);
     // tail of 2 = last 2 messages
     expect(s.messages[1]!.text).toBe("done");
+    expect(s.window).toEqual({ start: 3, end: 5, order: "oldest-first" });
+  });
+
+  it("supports first, offset, around, and newest-first windows", () => {
+    expect(toRaw("sid", msgs(), { limit: 2, from: "start" }).messages.map((m) => m.text)).toEqual(["do X", "starting"]);
+    expect(toRaw("sid", msgs(), { limit: 2, offset: 1 }).messages.map((m) => m.text)).toEqual([undefined, undefined]);
+    expect(toRaw("sid", msgs(), { limit: 3, around: 2 }).window).toEqual({ start: 0, end: 3, order: "oldest-first" });
+    expect(toRaw("sid", msgs(), { limit: 2, order: "newest-first" }).messages.map((m) => m.text)).toEqual(["done", undefined]);
   });
 });
 
@@ -62,6 +70,16 @@ describe("snapshot.toStructured", () => {
   it("currentTask comes from last user message (heuristic)", () => {
     const s = toStructured("sid", msgs());
     expect(s.currentTask).toBe("do X");
+  });
+});
+
+describe("snapshot.toBrief", () => {
+  it("creates a local non-LLM summary", () => {
+    const s = toBrief("sid", msgs());
+    expect(s.mode).toBe("brief");
+    expect(s.brief).toMatch(/Task: do X/);
+    expect(s.brief).toMatch(/Last assistant: done/);
+    expect(s.recentTools).toContain("Read");
   });
 });
 

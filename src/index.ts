@@ -7,7 +7,8 @@ export type {
   SessionEntry, SessionStatus, Activity,
   RawMessage, ToolCall,
   Cursor, CursorData,
-  Snapshot, RawSnapshot, StructuredSnapshot, SummarySnapshot, SnapshotMode,
+  Snapshot, RawSnapshot, StructuredSnapshot, BriefSnapshot, SummarySnapshot,
+  SnapshotMode, RawWindowFrom, RawOrder,
   PeekResult,
 } from "./core/types.js";
 
@@ -20,7 +21,7 @@ export {
 export { Registry } from "./core/registry.js";
 export { Engine } from "./core/engine.js";
 export { encodeCursor, decodeCursor, cursorAdapter } from "./core/cursor.js";
-export { toRaw, toStructured, toSummary } from "./core/snapshot.js";
+export { toRaw, toStructured, toBrief, toSummary } from "./core/snapshot.js";
 
 export { AdapterLoader, discoverExternal } from "./adapters/loader.js";
 export type { Adapter, AdapterReadResult, AdapterModule } from "./adapters/types.js";

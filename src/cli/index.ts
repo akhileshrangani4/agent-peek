@@ -10,7 +10,7 @@ import {
   SessionNotFoundError, AmbiguousSelectorError,
   AdapterError, AdapterNotFoundError, RegistryLockTimeoutError,
 } from "../core/errors.js";
-import type { SessionEntry, SnapshotMode } from "../core/types.js";
+import type { PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode } from "../core/types.js";
 import { displayNames } from "../core/names.js";
 
 const execFileAsync = promisify(execFile);
@@ -67,23 +67,39 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     });
 
   cli.command("at <selector>", "Read a session by displayName, id, tag, or cwd.")
-    .usage("at <selector> [--mode raw|structured|summary] [--since <cursor>] [--limit <n>] [--json]")
+    .usage("at <selector> [--mode raw|structured|brief|summary] [--since <cursor>] [--limit <n>] [--json]")
     .example("peek at sessionseek-codex --mode structured")
-    .example("peek at codex:abc123 --mode raw --limit 50")
+    .example("peek at codex:abc123 --mode raw --last 50")
+    .example("peek at codex:abc123 --mode raw --first 20")
+    .example("peek at codex:abc123 --mode raw --around 100 --limit 30")
     .example("peek at buildy-claude --since <nextCursor>")
-    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, or summary", { default: "raw" })
+    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, or summary", { default: "raw" })
     .option("--since <cursor>", "Only return new messages after a prior nextCursor")
-    .option("--limit <n>", "Max raw messages to print in raw mode", { default: 200 })
+    .option("--limit <n>", "Raw window size. Defaults to 200, or 30 with --around")
+    .option("--first <n>", "Show the first N raw messages")
+    .option("--last <n>", "Show the last N raw messages")
+    .option("--around <n>", "Show raw messages around 1-based message number N")
+    .option("--offset <n>", "Skip N messages from the selected edge before applying the raw window")
+    .option("--reverse", "Print raw messages newest-first")
+    .option("--oldest-first", "Print raw messages oldest-first (default)")
+    .option("--tools", "Show tool-only raw messages and tool-call status lines")
+    .option("--verbose", "Alias for --tools in raw output")
     .option("--json", "Output the full PeekResult JSON")
     .action(async (selector, opts) => {
+      const mode = parseMode(opts.mode);
+      const rawOpts = parseRawOpts(opts);
       const engine = await createEngine({ withExternal: true });
       const r = await engine.peek(selector, {
-        mode: parseMode(opts.mode),
+        mode,
         since: opts.since,
-        limit: parseLimit(opts.limit),
+        limit: rawOpts.limit,
+        offset: rawOpts.offset,
+        around: rawOpts.around,
+        from: rawOpts.from,
+        order: rawOpts.order,
       });
       if (opts.json) { console.log(JSON.stringify(r, null, 2)); return; }
-      printSnapshot(r);
+      printSnapshot(r, { showTools: Boolean(opts.tools || opts.verbose) });
     });
 
   cli.command("tag <selector> <asLiteral> <name>", "Assign a stable alias to a session selector.")
@@ -321,26 +337,111 @@ function parseStatus(value: unknown): SessionEntry["status"] | undefined {
 
 function parseMode(value: unknown): SnapshotMode {
   if (value === undefined || value === "raw") return "raw";
-  if (value === "structured" || value === "summary") return value;
+  if (value === "structured" || value === "brief" || value === "summary") return value;
   fail({
     code: 5,
     error: "invalid_mode",
     message: `Invalid --mode: ${String(value)}`,
-    hint: "Mode must be one of: raw, structured, summary.",
-    next: ["peek at <selector> --mode raw", "peek at <selector> --mode structured", "peek at <selector> --mode summary"],
+    hint: "Mode must be one of: raw, structured, brief, summary.",
+    next: ["peek at <selector> --mode raw", "peek at <selector> --mode structured", "peek at <selector> --mode brief", "peek at <selector> --mode summary"],
   });
 }
 
-function parseLimit(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
+interface RawCliOpts {
+  limit: number;
+  offset?: number;
+  around?: number;
+  from: RawWindowFrom;
+  order: RawOrder;
+}
+
+function parseRawOpts(opts: {
+  limit?: unknown;
+  first?: unknown;
+  last?: unknown;
+  around?: unknown;
+  offset?: unknown;
+  reverse?: unknown;
+  oldestFirst?: unknown;
+}): RawCliOpts {
+  if (opts.reverse && opts.oldestFirst) {
+    fail({
+      code: 5,
+      error: "invalid_raw_order",
+      message: "Cannot combine --reverse and --oldest-first.",
+      hint: "Use one raw ordering flag.",
+      next: ["peek at <selector> --reverse", "peek at <selector> --oldest-first"],
+    });
+  }
+
+  const hasFirst = opts.first !== undefined;
+  const hasLast = opts.last !== undefined;
+  const hasAround = opts.around !== undefined;
+  if ([hasFirst, hasLast, hasAround].filter(Boolean).length > 1) {
+    fail({
+      code: 5,
+      error: "invalid_raw_window",
+      message: "Choose only one of --first, --last, or --around.",
+      hint: "--limit can be used by itself, or with --around to set the window size.",
+      next: ["peek at <selector> --first 20", "peek at <selector> --last 50", "peek at <selector> --around 100 --limit 30"],
+    });
+  }
+  if (hasAround && opts.offset !== undefined) {
+    fail({
+      code: 5,
+      error: "invalid_raw_window",
+      message: "Cannot combine --around and --offset.",
+      hint: "--around already selects the center of the raw window.",
+      next: ["peek at <selector> --around 100 --limit 30"],
+    });
+  }
+
+  const order: RawOrder = opts.reverse ? "newest-first" : "oldest-first";
+  const offset = parseOffset(opts.offset);
+  if (hasFirst) {
+    return { limit: parseRequiredPositive(opts.first, "--first"), offset, from: "start", order };
+  }
+  if (hasLast) {
+    return { limit: parseRequiredPositive(opts.last, "--last"), offset, from: "end", order };
+  }
+  if (hasAround) {
+    return {
+      limit: opts.limit === undefined ? 30 : parseRequiredPositive(opts.limit, "--limit"),
+      around: parseRequiredPositive(opts.around, "--around"),
+      from: "start",
+      order,
+    };
+  }
+  return {
+    limit: opts.limit === undefined ? 200 : parseRequiredPositive(opts.limit, "--limit"),
+    offset,
+    from: "end",
+    order,
+  };
+}
+
+function parseRequiredPositive(value: unknown, flag: string): number {
   const limit = Number(value);
   if (Number.isInteger(limit) && limit > 0) return limit;
   fail({
     code: 5,
     error: "invalid_limit",
-    message: `Invalid --limit: ${String(value)}`,
-    hint: "Limit must be a positive integer.",
-    next: ["peek at <selector> --mode raw --limit 50"],
+    message: `Invalid ${flag}: ${String(value)}`,
+    hint: `${flag} must be a positive integer.`,
+    next: [`peek at <selector> ${flag} 50`],
+  });
+}
+
+function parseOffset(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const offset = Number(value);
+  if (Number.isInteger(offset) && offset >= 0) return offset;
+  fail({
+    code: 5,
+    error: "invalid_offset",
+    message: `Invalid --offset: ${String(value)}`,
+    hint: "Offset must be a non-negative integer.",
+    next: ["peek at <selector> --last 50 --offset 50"],
   });
 }
 
@@ -486,14 +587,16 @@ function relativeTime(iso: string): string {
   return iso.slice(0, 10);
 }
 
-function printSnapshot(r: import("../core/types.js").PeekResult): void {
+function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void {
   const s = r.snapshot;
   if (s.mode === "raw") {
+    console.log(`messages: ${s.window.start + 1}-${s.window.end} of ${s.totalMessageCount} (${s.window.order})`);
     for (const m of s.messages) {
+      if (!opts.showTools && !m.text) continue;
       const head = `[${m.role}]${m.timestamp ? " " + m.timestamp : ""}`;
       console.log(head);
       if (m.text) console.log(indent(m.text));
-      if (m.toolCalls?.length) {
+      if (opts.showTools && m.toolCalls?.length) {
         for (const tc of m.toolCalls) {
           console.log(indent(`tool=${tc.name} status=${tc.status ?? "?"}`));
         }
@@ -508,6 +611,12 @@ function printSnapshot(r: import("../core/types.js").PeekResult): void {
     if (s.pendingToolCalls.length) {
       console.log(`pending tools: ${s.pendingToolCalls.map((t) => t.name).join(", ")}`);
     }
+  } else if (s.mode === "brief") {
+    console.log(s.brief);
+    console.log(`activity: ${s.activity}`);
+    console.log(`messages: ${s.messageCount}`);
+    if (s.pendingTools.length) console.log(`pending tools: ${s.pendingTools.join(", ")}`);
+    if (s.recentTools.length) console.log(`recent tools: ${s.recentTools.join(", ")}`);
   } else {
     console.log(s.summary);
     if (s.fallback) console.log(`(fallback: structured returned)`);

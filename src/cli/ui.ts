@@ -13,6 +13,7 @@ interface UiOpts {
 
 type NamedSession = SessionEntry & { displayName: string };
 type LoadState = "loading" | "ready" | "error";
+type UiMode = SnapshotMode | "timeline";
 
 export async function runUi(opts: UiOpts = {}): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -38,7 +39,7 @@ function PeekUi({ engine, opts }: { engine: Engine; opts: UiOpts }): React.JSX.E
   const { exit } = useApp();
   const [sessions, setSessions] = useState<NamedSession[]>([]);
   const [selected, setSelected] = useState(0);
-  const [mode, setMode] = useState<SnapshotMode>("structured");
+  const [mode, setMode] = useState<UiMode>("structured");
   const [result, setResult] = useState<PeekResult | undefined>();
   const [listState, setListState] = useState<LoadState>("loading");
   const [detailState, setDetailState] = useState<LoadState>("loading");
@@ -74,7 +75,10 @@ function PeekUi({ engine, opts }: { engine: Engine; opts: UiOpts }): React.JSX.E
     setDetailState("loading");
     setError(undefined);
     try {
-      const peek = await engine.peek(session.id, { mode: nextMode, limit: 40 });
+      const peek = await engine.peek(session.id, {
+        mode: nextMode === "timeline" ? "raw" : nextMode,
+        limit: nextMode === "timeline" ? 20 : 40,
+      });
       setResult(peek);
       setDetailState("ready");
     } catch (e) {
@@ -137,7 +141,7 @@ function PeekUi({ engine, opts }: { engine: Engine; opts: UiOpts }): React.JSX.E
   );
 }
 
-function Header({ mode, opts }: { mode: SnapshotMode; opts: UiOpts }): React.JSX.Element {
+function Header({ mode, opts }: { mode: UiMode; opts: UiOpts }): React.JSX.Element {
   const filters = [
     opts.adapter ? `adapter=${opts.adapter}` : undefined,
     opts.all ? "all" : undefined,
@@ -179,7 +183,7 @@ function DetailPane(
     session?: NamedSession;
     result?: PeekResult;
     state: LoadState;
-    mode: SnapshotMode;
+    mode: UiMode;
   },
 ): React.JSX.Element {
   if (!session) {
@@ -195,6 +199,16 @@ function DetailPane(
   const title = `${session.displayName} (${mode})`;
   const snapshot = result.snapshot;
   const meta = sessionMeta(session);
+  if (mode === "timeline" && snapshot.mode === "raw") {
+    return panel(
+      title,
+      ...meta,
+      ...snapshot.messages.slice(-12).map((message, index) => line(
+        `${snapshot.window.start + index + 1}`,
+        `${message.role}: ${compact(message.text || toolSummary(message), 130)}`,
+      )),
+    );
+  }
   if (snapshot.mode === "structured") {
     return panel(
       title,
@@ -219,6 +233,17 @@ function DetailPane(
       React.createElement(Text, null, snapshot.summary),
       React.createElement(Text, { dimColor: true }, `delta messages ${snapshot.deltaMessageCount}`),
       snapshot.fallback ? React.createElement(Text, { color: "yellow" }, "summary unavailable; showing fallback") : null,
+    );
+  }
+  if (snapshot.mode === "brief") {
+    return panel(
+      title,
+      ...meta,
+      React.createElement(Text, null, snapshot.brief),
+      line("activity", snapshot.activity),
+      line("messages", String(snapshot.messageCount)),
+      snapshot.pendingTools.length ? line("pending tools", snapshot.pendingTools.join(", ")) : null,
+      snapshot.recentTools.length ? line("recent tools", snapshot.recentTools.join(", ")) : null,
     );
   }
   const messages = snapshot.messages.slice(-8);
@@ -276,8 +301,10 @@ function sessionMeta(session: NamedSession): React.JSX.Element[] {
   ];
 }
 
-function cycleMode(mode: SnapshotMode): SnapshotMode {
-  if (mode === "structured") return "raw";
+function cycleMode(mode: UiMode): UiMode {
+  if (mode === "structured") return "brief";
+  if (mode === "brief") return "timeline";
+  if (mode === "timeline") return "raw";
   if (mode === "raw") return "summary";
   return "structured";
 }
@@ -296,6 +323,11 @@ function roleColor(role: string): string {
 function compact(value: string, max: number): string {
   const flat = value.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}...` : flat;
+}
+
+function toolSummary(message: { toolCalls?: { name: string; status?: string }[] }): string {
+  if (!message.toolCalls?.length) return "(no text)";
+  return message.toolCalls.map((tool) => `tool=${tool.name} ${tool.status ?? ""}`.trim()).join(", ");
 }
 
 function sourceLabel(entry: { adapter: string; sourceType?: string; transcriptPath: string }): string {

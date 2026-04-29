@@ -16,9 +16,14 @@ const tools = [
       type: "object",
       properties: {
         selector: { type: "string", description: "Session displayName, id, tag, or cwd." },
-        mode: { type: "string", enum: ["raw", "structured", "summary"], default: "raw" },
+        mode: { type: "string", enum: ["raw", "structured", "brief", "summary"], default: "raw" },
         since: { type: "string", description: "Cursor returned by a prior peek." },
         limit: { type: "number", description: "Max raw messages (default 200)." },
+        first: { type: "number", description: "Show the first N raw messages." },
+        last: { type: "number", description: "Show the last N raw messages." },
+        around: { type: "number", description: "Show raw messages around this 1-based message number." },
+        offset: { type: "number", description: "Skip N messages from the selected raw edge." },
+        reverse: { type: "boolean", description: "Return raw messages newest-first." },
       },
       required: ["selector"],
     },
@@ -65,7 +70,11 @@ export async function run(): Promise<void> {
       const r = await engine.peek(String(args.selector), {
         mode: (args.mode as SnapshotMode) ?? "raw",
         since: args.since ? String(args.since) : undefined,
-        limit: typeof args.limit === "number" ? args.limit : undefined,
+        limit: rawLimit(args),
+        offset: typeof args.offset === "number" ? args.offset : undefined,
+        around: typeof args.around === "number" ? args.around : undefined,
+        from: typeof args.first === "number" ? "start" : "end",
+        order: args.reverse === true ? "newest-first" : "oldest-first",
       });
       return { content: [{ type: "text", text: JSON.stringify(r) }] };
     }
@@ -90,6 +99,13 @@ export async function run(): Promise<void> {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+function rawLimit(args: Record<string, unknown>): number | undefined {
+  if (typeof args.first === "number") return args.first;
+  if (typeof args.last === "number") return args.last;
+  if (typeof args.limit === "number") return args.limit;
+  return undefined;
 }
 
 function withDisplayNames<T extends { id: string; name?: string; tag?: string; adapter: string; cwd?: string }>(
