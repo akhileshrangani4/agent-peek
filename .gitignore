@@ -6,3 +6,4 @@ coverage/
 .env
 .env.local
 .agent-peek-test-home/
+docs/superpowers/
