@@ -1,6 +1,6 @@
 {
   "name": "agent-peek",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Read-only peek into other AI agent chat sessions.",
   "type": "module",
   "main": "./dist/index.js",
