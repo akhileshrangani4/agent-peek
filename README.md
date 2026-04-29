@@ -117,7 +117,7 @@ with `peek list --ids`, and JSON output includes both `id` and `displayName`.
 
 ## Peek Modes
 
-`peek at` supports four output modes:
+`peek at` supports four scriptable output modes:
 
 | Mode | Use it for | API key |
 | --- | --- | --- |
@@ -139,18 +139,24 @@ peek at researcher --last 50 --reverse
 By default, raw mode hides tool-only messages and tool-call status lines to keep
 the output readable. Add `--tools` or `--verbose` when you need that detail.
 
+Timeline is not a `peek at --mode` value. It is an interactive-only view inside
+`peek ui`.
+
 ## Terminal UI
 
 `peek ui` is for humans browsing in a real terminal. It shows a session list and
 a detail pane for the selected session.
 
-It starts in `structured` mode and can switch between:
+It starts in `structured` mode. Press `m` or Tab to cycle through:
 
 - `structured` — current task, activity, last messages, pending tools, recent tools
 - `brief` — compact local summary, no API key
 - `timeline` — chronological role/text timeline for quick scanning
 - `raw` — recent transcript messages
 - `summary` — LLM summary, when `ANTHROPIC_API_KEY` is configured
+
+There is no separate command-line flag for timeline yet; open `peek ui`, then
+press `m`/Tab until the header shows `mode=timeline`.
 
 The detail pane shows useful metadata: raw id, adapter, source type, status,
 tag, cwd, transcript path, and last update time. It intentionally does not show
