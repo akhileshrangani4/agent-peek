@@ -16,8 +16,8 @@ export interface Adapter {
 
   /**
    * Read messages from `entry`, optionally starting from `cursor`.
-   * MUST stop at last newline-terminated record (no partial-line parsing).
-   * MUST never throw on a writer-mid-flight; treat partial trailing line as eof.
+   * File-backed JSONL adapters must stop at the last newline-terminated record.
+   * Adapters should avoid throwing on writer-mid-flight partial data.
    */
   read(entry: SessionEntry, cursor?: Cursor): Promise<AdapterReadResult>;
 

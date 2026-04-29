@@ -47,6 +47,7 @@ const adapter: Adapter = {
         adapter: ADAPTER_NAME,
         transcriptPath: fpath,
         cwd,
+        sourceType: "file",
         lastSeen: new Date(st.mtimeMs).toISOString(),
         status,
       });

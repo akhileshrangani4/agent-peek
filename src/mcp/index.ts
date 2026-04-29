@@ -5,7 +5,8 @@ import {
   CallToolRequestSchema, ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEngine } from "../index.js";
-import type { SnapshotMode } from "../core/types.js";
+import type { SessionEntry, SnapshotMode } from "../core/types.js";
+import { displayNames } from "../core/names.js";
 
 const tools = [
   {
@@ -14,7 +15,7 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        selector: { type: "string", description: "Session id, tag, or cwd." },
+        selector: { type: "string", description: "Session displayName, id, tag, or cwd." },
         mode: { type: "string", enum: ["raw", "structured", "summary"], default: "raw" },
         since: { type: "string", description: "Cursor returned by a prior peek." },
         limit: { type: "number", description: "Max raw messages (default 200)." },
@@ -30,6 +31,8 @@ const tools = [
       properties: {
         adapter: { type: "string" },
         status: { type: "string", enum: ["active", "idle", "ended"] },
+        includeEnded: { type: "boolean", description: "Include ended sessions when status is not provided." },
+        includeTerminal: { type: "boolean", description: "Include terminal capture adapters such as tmux and screen." },
       },
     },
   },
@@ -67,11 +70,16 @@ export async function run(): Promise<void> {
       return { content: [{ type: "text", text: JSON.stringify(r) }] };
     }
     if (name === "list_sessions") {
-      const list = await engine.list({
+      const status = parseStatus(args.status);
+      let list = await engine.list({
         adapter: args.adapter ? String(args.adapter) : undefined,
-        status: args.status as any,
+        status,
+        includeTerminal: args.includeTerminal === true || isTerminalAdapter(args.adapter),
       });
-      return { content: [{ type: "text", text: JSON.stringify(list) }] };
+      if (!status && args.includeEnded !== true) {
+        list = list.filter((entry) => entry.status !== "ended");
+      }
+      return { content: [{ type: "text", text: JSON.stringify(withDisplayNames(list)) }] };
     }
     if (name === "tag_session") {
       await engine.tag(String(args.id), String(args.tag));
@@ -82,6 +90,23 @@ export async function run(): Promise<void> {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+function withDisplayNames<T extends { id: string; name?: string; tag?: string; adapter: string; cwd?: string }>(
+  list: T[],
+): (T & { displayName: string })[] {
+  const names = displayNames(list);
+  return list.map((entry, i) => ({ ...entry, displayName: names[i]! }));
+}
+
+function parseStatus(value: unknown): SessionEntry["status"] | undefined {
+  if (value === undefined) return undefined;
+  if (value === "active" || value === "idle" || value === "ended") return value;
+  throw new Error(`invalid status: ${String(value)}`);
+}
+
+function isTerminalAdapter(adapter: unknown): boolean {
+  return adapter === "tmux" || adapter === "screen";
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

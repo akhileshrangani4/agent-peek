@@ -61,12 +61,14 @@ export class Registry {
 
   async upsert(entry: SessionEntry): Promise<void> {
     await this.write((f) => {
-      const merged = { ...f.sessions[entry.id], ...entry };
-      // strip keys that came in as undefined (caller signaling "unset")
-      for (const k of Object.keys(merged) as (keyof SessionEntry)[]) {
-        if (merged[k] === undefined) delete merged[k];
-      }
-      f.sessions[entry.id] = merged as SessionEntry;
+      this.applyEntry(f, entry);
+    });
+  }
+
+  async upsertMany(entries: SessionEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    await this.write((f) => {
+      for (const entry of entries) this.applyEntry(f, entry);
     });
   }
 
@@ -139,5 +141,14 @@ export class Registry {
     } finally {
       await release();
     }
+  }
+
+  private applyEntry(f: RegistryFile, entry: SessionEntry): void {
+    const merged = { ...f.sessions[entry.id], ...entry };
+    // strip keys that came in as undefined (caller signaling "unset")
+    for (const k of Object.keys(merged) as (keyof SessionEntry)[]) {
+      if (merged[k] === undefined) delete merged[k];
+    }
+    f.sessions[entry.id] = merged as SessionEntry;
   }
 }

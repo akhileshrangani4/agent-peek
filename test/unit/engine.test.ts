@@ -63,11 +63,51 @@ describe("Engine", () => {
     expect((await registry.list()).length).toBe(2);
   });
 
+  it("list with adapter filter only scans that adapter", async () => {
+    loader.register({
+      name: "broken",
+      async scan() {
+        throw new Error("should not scan");
+      },
+      async read() {
+        throw new Error("unused");
+      },
+    });
+    const list = await engine.list({ adapter: "fake" });
+    expect(list.map((entry) => entry.adapter)).toEqual(["fake", "fake"]);
+  });
+
+  it("adapterNames returns registered adapters without scanning", () => {
+    loader.register({
+      name: "broken",
+      async scan() {
+        throw new Error("should not scan");
+      },
+      async read() {
+        throw new Error("unused");
+      },
+    });
+    expect(engine.adapterNames()).toEqual(["broken", "fake"]);
+  });
+
   it("peek by exact id returns raw snapshot", async () => {
-    await engine.list();
     const r = await engine.peek("fake:a", { mode: "raw" });
     expect(r.snapshot.mode).toBe("raw");
     expect((r.snapshot as any).messages.length).toBe(2);
+  });
+
+  it("peek by adapter-prefixed id only scans that adapter", async () => {
+    loader.register({
+      name: "broken",
+      async scan() {
+        throw new Error("should not scan");
+      },
+      async read() {
+        throw new Error("unused");
+      },
+    });
+    const r = await engine.peek("fake:a", { mode: "raw" });
+    expect((r.snapshot as any).sessionId).toBe("fake:a");
   });
 
   it("peek by tag works after tag()", async () => {
@@ -75,6 +115,42 @@ describe("Engine", () => {
     await engine.tag("fake:a", "researcher");
     const r = await engine.peek("researcher", { mode: "structured" });
     expect((r.snapshot as any).mode).toBe("structured");
+  });
+
+  it("peek by display name works when unique", async () => {
+    await registry.upsert({
+      id: "fake:named",
+      adapter: "fake",
+      transcriptPath: "/tmp/named",
+      name: "worker",
+      lastSeen: new Date().toISOString(),
+      status: "active",
+    });
+    const r = await engine.peek("worker", { mode: "raw" });
+    expect((r.snapshot as any).sessionId).toBe("fake:named");
+  });
+
+  it("peek by display name resolves duplicate names by list order", async () => {
+    await registry.upsert({
+      id: "fake:newer",
+      adapter: "fake",
+      transcriptPath: "/tmp/newer",
+      name: "worker",
+      lastSeen: "2026-01-02T00:00:00.000Z",
+      status: "active",
+    });
+    await registry.upsert({
+      id: "fake:older",
+      adapter: "fake",
+      transcriptPath: "/tmp/older",
+      name: "worker",
+      lastSeen: "2026-01-01T00:00:00.000Z",
+      status: "active",
+    });
+    const latest = await engine.peek("worker", { mode: "raw" });
+    const next = await engine.peek("worker-2", { mode: "raw" });
+    expect((latest.snapshot as any).sessionId).toBe("fake:newer");
+    expect((next.snapshot as any).sessionId).toBe("fake:older");
   });
 
   it("peek with cursor returns delta", async () => {

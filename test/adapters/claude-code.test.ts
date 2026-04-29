@@ -95,4 +95,20 @@ describe("claude-code adapter", () => {
     expect(sessions[0]!.cwd).toBe("/tmp/repo");
     expect(sessions[0]!.transcriptPath).toBe(tx);
   });
+
+  it("scan finds session metadata after initial non-message records", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ac-home-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-late");
+    await mkdir(projDir, { recursive: true });
+    const tx = join(projDir, "from-file.jsonl");
+    await writeFile(tx,
+      `{"type":"file-history-snapshot","cwd":null}\n`
+      + `{"type":"user","sessionId":"from-record","cwd":"/tmp/late","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hi"}}\n`,
+      "utf8");
+    process.env.HOME = home;
+    const sessions = await claudeCode.scan();
+    expect(sessions[0]!.id).toBe("claude-code:from-record");
+    expect(sessions[0]!.cwd).toBe("/tmp/late");
+    expect(sessions[0]!.name).toBe("late-claude");
+  });
 });

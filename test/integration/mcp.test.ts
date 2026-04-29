@@ -35,7 +35,9 @@ describe("MCP integration", () => {
     const text = (res.content as any)?.[0]?.text ?? "[]";
     const list = JSON.parse(text);
     expect(Array.isArray(list)).toBe(true);
-    expect(list.find((e: any) => e.id === "claude-code:xyz")).toBeTruthy();
+    const session = list.find((e: any) => e.id === "claude-code:xyz");
+    expect(session).toBeTruthy();
+    expect(session.displayName).toBe("y-claude");
 
     await client.close();
   }, 15_000);

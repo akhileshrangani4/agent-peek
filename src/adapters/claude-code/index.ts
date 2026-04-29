@@ -1,8 +1,8 @@
 // src/adapters/claude-code/index.ts
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
@@ -38,24 +38,22 @@ const adapter: Adapter = {
         let sessionId = f.replace(/\.jsonl$/, "");
         let cwd: string | undefined;
         try {
-          const head = await readFirstLine(fpath);
-          if (head) {
-            try {
-              const rec = JSON.parse(head);
-              if (typeof rec?.sessionId === "string") sessionId = rec.sessionId;
-              if (typeof rec?.cwd === "string") cwd = rec.cwd;
-            } catch { /* skip */ }
-          }
+          const metadata = await readSessionMetadata(fpath);
+          if (metadata.sessionId) sessionId = metadata.sessionId;
+          if (metadata.cwd) cwd = metadata.cwd;
         } catch { /* skip */ }
         const ageMs = Date.now() - st.mtimeMs;
         const status = ageMs < 5 * 60 * 1000 ? "active"
                      : ageMs < 24 * 3600 * 1000 ? "idle"
                      : "ended";
+        const inferredName = cwd ? `${basename(cwd)}-claude` : `${projectNameFromDir(p)}-claude`;
         out.push({
           id: `${ADAPTER_NAME}:${sessionId}`,
+          name: inferredName,
           adapter: ADAPTER_NAME,
           transcriptPath: fpath,
           cwd,
+          sourceType: "file",
           lastSeen: new Date(st.mtimeMs).toISOString(),
           status,
         });
@@ -89,11 +87,46 @@ const adapter: Adapter = {
   },
 };
 
-async function readFirstLine(path: string): Promise<string | null> {
-  const buf = await readFile(path);
-  const nl = buf.indexOf(0x0a);
-  if (nl === -1) return buf.length ? buf.toString("utf8") : null;
-  return buf.subarray(0, nl).toString("utf8");
+async function readSessionMetadata(path: string): Promise<{ sessionId?: string; cwd?: string }> {
+  const lines = await readHeadLines(path, 50);
+  const metadata: { sessionId?: string; cwd?: string } = {};
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let rec: unknown;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (!metadata.sessionId && typeof (rec as { sessionId?: unknown }).sessionId === "string") {
+      metadata.sessionId = (rec as { sessionId: string }).sessionId;
+    }
+    if (!metadata.cwd && typeof (rec as { cwd?: unknown }).cwd === "string") {
+      metadata.cwd = (rec as { cwd: string }).cwd;
+    }
+    if (metadata.sessionId && metadata.cwd) break;
+  }
+
+  return metadata;
+}
+
+async function readHeadLines(path: string, maxLines: number): Promise<string[]> {
+  const fh = await open(path, "r");
+  try {
+    const buf = Buffer.alloc(64 * 1024);
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+    if (!bytesRead) return [];
+    return buf.subarray(0, bytesRead).toString("utf8").split("\n").slice(0, maxLines);
+  } finally {
+    await fh.close();
+  }
+}
+
+function projectNameFromDir(dir: string): string {
+  const parts = dir.split("-").filter(Boolean);
+  return parts.at(-1) || dir || "session";
 }
 
 export default adapter;

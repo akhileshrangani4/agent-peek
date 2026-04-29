@@ -2,14 +2,17 @@
 
 export type SessionStatus = "active" | "idle" | "ended";
 export type Activity = "idle" | "thinking" | "tool-running";
+export type SessionSourceType = "file" | "directory" | "database" | "terminal" | "manual";
 
 export interface SessionEntry {
   id: string;             // adapter-prefixed, e.g. "claude-code:abc-123"
   adapter: string;        // "claude-code" | "codex" | ...
-  transcriptPath: string; // absolute path resolved by adapter
+  transcriptPath: string; // adapter read target: absolute path, DB path, or local terminal URI
+  name?: string;          // human-oriented selector/display name
   cwd?: string;
   tag?: string;
   pid?: number;
+  sourceType?: SessionSourceType;
   lastSeen: string;       // ISO timestamp
   status: SessionStatus;
 }
