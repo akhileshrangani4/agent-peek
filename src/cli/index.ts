@@ -22,6 +22,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.example("peek list");
   cli.example("peek list --json");
   cli.example("peek at sessionseek-codex --mode structured");
+  cli.example("peek ui");
   cli.example("peek doctor");
 
   cli.command("list [target]", "List local agent sessions. Use `list adapters` for supported adapters.")
@@ -158,6 +159,24 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.command("adapters", "Print installed adapter names, one per line.")
     .action(async () => {
       await listAdapters();
+    });
+
+  cli.command("ui", "Open an interactive terminal UI for browsing sessions.")
+    .usage("ui [--adapter <name>] [--all] [--terminals]")
+    .example("peek ui")
+    .example("peek ui --adapter codex")
+    .example("peek ui --terminals")
+    .option("--adapter <name>", "Scan/list only one adapter (claude-code|codex|gemini|tmux|...)")
+    .option("--all", "Include ended sessions")
+    .option("--terminals", "Include terminal capture adapters (tmux, screen)")
+    .action(async (opts) => {
+      const { runUi } = await import("./ui.js");
+      const code = await runUi({
+        adapter: opts.adapter,
+        all: Boolean(opts.all),
+        terminals: Boolean(opts.terminals),
+      });
+      if (code !== 0) process.exit(code);
     });
 
   cli.command("doctor", "Explain adapter availability, missing paths, dependencies, and opt-in terminal capture.")

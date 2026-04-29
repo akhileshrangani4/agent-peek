@@ -27,6 +27,7 @@ peek list --ids                           # show raw session ids
 peek list --json                          # include displayName selectors
 peek list adapters                        # show installed adapters
 peek doctor                               # show adapter availability and setup hints
+peek ui                                   # interactive terminal browser
 peek at <name|id|tag|cwd>                 # full snapshot
 peek at <selector> --mode structured      # normalized fields
 peek at <selector> --mode summary         # LLM-summarized (needs ANTHROPIC_API_KEY)
@@ -111,18 +112,40 @@ Terminal adapters are opt-in for default CLI/MCP listing because they capture
 terminal scrollback, not structured agent transcript files. Use
 `peek list --terminals` or `peek list --adapter tmux`.
 
-## UI roadmap
+## Terminal UI
 
-The current CLI is deliberately plain text and scriptable. The next user-facing
-layer should use a terminal UI library for richer interaction while preserving
-the existing agent-friendly commands and JSON contracts. Good candidates:
+The plain-text commands remain the stable automation surface. For interactive
+browsing in a real terminal, use:
 
-- `ink` for a React-style TUI with interactive session lists and detail panes.
-- `blessed` / `neo-blessed` for a lower-level dashboard layout.
-- `enquirer` for focused prompts such as selecting a session from `peek list`.
+```bash
+peek ui
+peek ui --adapter codex
+peek ui --all
+peek ui --terminals
+```
 
-The non-interactive CLI should remain the stable automation surface; a TUI can
-be added as a separate command such as `peek ui`.
+`peek ui` shows a session list plus a detail pane for the selected session. It
+uses structured mode by default and can switch between:
+
+- `structured` — current task, activity, last messages, pending tools, recent tools
+- `raw` — recent transcript messages
+- `summary` — LLM summary, when `ANTHROPIC_API_KEY` is configured
+
+The detail pane also shows session metadata: raw id, adapter, source type,
+status, tag, cwd, transcript path, and last update time. It intentionally does
+not show cursors; cursors are for `peek at --since <cursor>`, JSON output,
+MCP tools, and library callers that need incremental polling.
+
+Keyboard controls:
+
+- up/down or `j`/`k` — select a session
+- Enter or Space — refresh the selected session detail
+- `m` or Tab — switch detail mode
+- `r` — rescan sessions
+- `q` or Escape — exit
+
+`peek ui` requires an interactive TTY. Use `peek list`, `peek at`, and
+`peek at --json` for pipes, scripts, and agent harnesses.
 
 ## External adapters
 

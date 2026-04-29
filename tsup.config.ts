@@ -5,7 +5,8 @@ export default defineConfig({
     "src/index.ts",
     "src/adapters/types.ts",
     "src/mcp/index.ts",
-    "src/cli/index.ts"
+    "src/cli/index.ts",
+    "src/cli/ui.ts"
   ],
   format: ["esm"],
   target: "node20",

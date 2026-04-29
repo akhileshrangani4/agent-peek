@@ -28,6 +28,23 @@ describe("CLI integration", () => {
     expect(r.stderr).toBe("");
   });
 
+  it("ui help is available", async () => {
+    const r = await runCli(["ui", "--help"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/Usage:/);
+    expect(r.stdout).toMatch(/peek ui --adapter codex/);
+    expect(r.stdout).toMatch(/--terminals/);
+    expect(r.stderr).toBe("");
+  });
+
+  it("ui requires an interactive terminal", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const r = await runCli(["ui"], { HOME: home });
+    expect(r.code).toBe(5);
+    expect(r.stderr).toMatch(/error: ui_requires_tty/);
+    expect(r.stderr).toMatch(/peek list/);
+  });
+
   it("unknown command exits with agent-friendly diagnostic", async () => {
     const r = await runCli(["nope"]);
     expect(r.code).toBe(5);
