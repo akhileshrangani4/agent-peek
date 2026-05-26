@@ -4,7 +4,7 @@ import packageJson from "../package.json" with { type: "json" };
 export const VERSION = packageJson.version;
 
 export type {
-  SessionEntry, SessionStatus, Activity,
+  SessionEntry, SessionStatus, Activity, FileClaim,
   RawMessage, ToolCall,
   Cursor, CursorData,
   Snapshot, RawSnapshot, StructuredSnapshot, BriefSnapshot, SummarySnapshot, HandoffSnapshot,
@@ -20,6 +20,7 @@ export {
 } from "./core/errors.js";
 
 export { Registry } from "./core/registry.js";
+export { ClaimsStore } from "./core/claims.js";
 export { Engine } from "./core/engine.js";
 export { encodeCursor, decodeCursor, cursorAdapter } from "./core/cursor.js";
 export { toRaw, toStructured, toBrief, toHandoff, toSummary } from "./core/snapshot.js";
@@ -41,6 +42,7 @@ import screen from "./adapters/screen/index.js";
 import tmux from "./adapters/tmux/index.js";
 import { Engine } from "./core/engine.js";
 import { Registry } from "./core/registry.js";
+import { ClaimsStore } from "./core/claims.js";
 import { AdapterLoader, discoverExternal } from "./adapters/loader.js";
 
 export interface CreateEngineOpts {
@@ -51,6 +53,7 @@ export interface CreateEngineOpts {
 
 export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine> {
   const registry = new Registry({ home: opts.home });
+  const claims = new ClaimsStore({ home: opts.home });
   const loader = new AdapterLoader();
   if (opts.withBuiltins !== false) {
     loader.register(claudeCode);
@@ -65,5 +68,5 @@ export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine>
     loader.register(tmux);
   }
   if (opts.withExternal) await discoverExternal(loader);
-  return new Engine({ registry, loader });
+  return new Engine({ registry, loader, claims });
 }

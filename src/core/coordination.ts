@@ -2,7 +2,7 @@ import { basename, extname, isAbsolute, normalize, resolve } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import type {
   CoordinationCursor, CoordinationDigest, CoordinationOverlap, CoordinationSession, CoordinationWritingFileEvent,
-  Cursor, RawMessage, SessionEntry, StructuredSnapshot, ToolCall,
+  Cursor, FileClaim, RawMessage, SessionEntry, StructuredSnapshot, ToolCall,
 } from "./types.js";
 import { InvalidCursorError } from "./errors.js";
 
@@ -90,6 +90,38 @@ export function buildCoordinationSession(opts: {
     writingFilesLastSeen: latestWritingAt(writingFileEvents),
     touchedFiles: recentFiles,
     error: opts.error,
+  };
+}
+
+export function buildClaimCoordinationSession(claim: FileClaim): CoordinationSession {
+  return {
+    id: `claim:${claim.id}`,
+    displayName: `claim-${claim.owner}`,
+    adapter: "claim",
+    status: "active",
+    activity: "tool-running",
+    cwd: claim.cwd,
+    sourceType: "manual",
+    lastSeen: claim.createdAt,
+    messageCount: 0,
+    changedMessageCount: 0,
+    currentTask: `Claimed ${claim.files.length} file${claim.files.length === 1 ? "" : "s"} until ${claim.expiresAt}`,
+    pendingTools: [],
+    recentTools: [],
+    intent: "writing",
+    recentFiles: [],
+    knownFiles: claim.files,
+    hotFiles: claim.files,
+    activeWritingFiles: claim.files,
+    recentWritingFiles: claim.files,
+    writingFileEvents: claim.files.map((file) => ({
+      file,
+      lastWritingAt: claim.createdAt,
+      active: true,
+    })),
+    writingFiles: claim.files,
+    writingFilesLastSeen: claim.createdAt,
+    touchedFiles: claim.files,
   };
 }
 

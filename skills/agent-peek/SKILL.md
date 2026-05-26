@@ -51,9 +51,24 @@ coordinate, but do not claim you changed another agent's state.
    ```bash
    peek doctor
    peek list
+   peek list --files
    ```
 
-5. Read a session with the smallest useful mode:
+5. Before editing in a busy repo, check or claim the file:
+
+   ```bash
+   peek coord . --writing
+   peek check src/core/engine.ts
+   peek claim src/core/engine.ts --ttl 2m
+   # edit the file
+   peek release src/core/engine.ts
+   ```
+
+   `peek check` exits `0` when no active writer is detected and `1` when there
+   is a conflict. Use it in shell gates. `peek claim` declares temporary write
+   intent so other agents see the conflict before the first write lands.
+
+6. Read a session with the smallest useful mode:
 
    ```bash
    peek at <name|id|tag|cwd> --mode structured
@@ -67,10 +82,16 @@ coordinate, but do not claim you changed another agent's state.
 ## Choosing Commands
 
 - Use `peek list` first; the `NAME` column is the friendly selector for `peek at`.
+- Use `peek list --files` when you need a quick overview of active/recent file context.
+- Use `peek coord . --writing` before writing; it filters to active writers and claims.
+- Use `peek check <file>` for scriptable conflict checks. Exit `1` means wait or inspect.
+- Use `peek check --files-from <path|->` for a planned multi-file edit.
+- Use `peek claim <file> --ttl 2m` before a planned write; add `--files-from <path|->` for bulk claims. Run `peek release <file>` when done.
 - Use `peek at <selector> --mode structured --json` when another script or agent will parse the result.
 - Use `peek at <selector> --mode brief` for a compact human-readable status.
 - Use `peek at <selector> --mode summary` for a sentence-style local summary.
-- Use `peek at <selector> --since <nextCursor> --json` when polling so you only read new messages.
+- Use `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` for polling coordination state without inline cursor blobs.
+- Use `peek at <selector> --since <nextCursor> --json` when polling one transcript so you only read new messages.
 - Use `peek tag <selector> as <name>` when the display name is unstable or hard to type.
 - Use `peek ui` only when the human explicitly wants an interactive terminal browser.
 
@@ -96,6 +117,7 @@ to list MCP tools. Expected tools:
 
 - `list_sessions`
 - `peek_session`
+- `coordination_digest`
 - `tag_session`
 
 ## MCP Configs By Client
@@ -218,6 +240,8 @@ Workspace `.vscode/mcp.json` or user-profile `mcp.json`:
 - If an MCP client cannot start the server, use the full path from `which agent-peek-mcp` as `command`.
 - If a project-scoped MCP config is ignored, restart the client and approve or trust the workspace/server when prompted.
 - If names are ambiguous, use `peek list --ids` and select by raw id.
+- If `coord` is noisy, start with `peek coord . --writing` or `peek check <file>`.
+- If a check-then-write race matters, claim the file first with a short TTL and release it when done.
 
 ## Response Pattern
 

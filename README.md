@@ -84,6 +84,10 @@ peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
 peek doctor                               # adapter availability and setup hints
 peek check src/core/engine.ts             # exit 1 if another agent is actively writing the file
+peek check --files-from changed-files.txt # bulk conflict check
+peek claim src/core/engine.ts --ttl 2m    # declare temporary write intent
+peek claim src/core/engine.ts --files-from changed-files.txt --ttl 2m
+peek release src/core/engine.ts           # release a prior claim
 peek coord                                # summarize nearby agents in this cwd
 peek coord /path/to/repo --json           # machine-readable coordination digest
 peek coord . --json --fields currentTask,intent,activeWritingFiles --cursor-file .peek-cursor
@@ -235,6 +239,9 @@ it reads a prior cursor from the file when present and writes the next cursor ba
 active writing overlap as a signal to inspect or wait, not as enforced exclusion.
 For shell-gated write workflows, `peek check <file>` is the simplest primitive:
 it exits `0` when no active writer is detected and `1` when a conflict is present.
+Use `peek claim <file> --ttl 2m` before a planned edit to broadcast intent and
+close the check-then-write race window. Claims are local, TTL-bound, visible in
+`coord --writing`, and can be released with `peek release <file>` when done.
 
 ## MCP
 

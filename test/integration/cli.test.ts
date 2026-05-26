@@ -319,6 +319,48 @@ describe("CLI integration", () => {
     expect(files.stdout).toMatch(/writing: .*src\/core\/engine.ts/);
   });
 
+  it("claim adds temporary file ownership that check and coord can see", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const claimFiles = join(home, "claim-files.txt");
+    await writeFile(claimFiles, "README.md\n", "utf8");
+    const claim = await runCli([
+      "claim", "src/core/engine.ts",
+      "--files-from", claimFiles,
+      "--cwd", "/tmp/claim",
+      "--as", "tester",
+      "--ttl", "2m",
+      "--json",
+    ], { HOME: home });
+    expect(claim.code).toBe(0);
+    const claimed = JSON.parse(claim.stdout);
+    expect(claimed.owner).toBe("tester");
+    expect(claimed.files).toEqual(["/tmp/claim/README.md", "/tmp/claim/src/core/engine.ts"]);
+
+    const conflict = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    expect(conflict.code).toBe(1);
+    const check = JSON.parse(conflict.stdout);
+    expect(check.ok).toBe(false);
+    expect(check.conflicts[0].displayName).toBe("claim-tester");
+
+    const filesList = join(home, "files.txt");
+    await writeFile(filesList, "README.md\nsrc/other.ts\n", "utf8");
+    const bulk = await runCli(["check", "--files-from", filesList, "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    expect(bulk.code).toBe(1);
+    expect(JSON.parse(bulk.stdout).conflictCount).toBe(1);
+
+    const coord = await runCli(["coord", "/tmp/claim", "--writing", "--json"], { HOME: home });
+    expect(coord.code).toBe(0);
+    expect(JSON.parse(coord.stdout).sessions[0].displayName).toBe("claim-tester");
+
+    const release = await runCli(["release", "src/core/engine.ts", "--cwd", "/tmp/claim"], { HOME: home });
+    expect(release.code).toBe(0);
+    expect(release.stdout).toMatch(/released 1 claim/);
+
+    const clear = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim"], { HOME: home });
+    expect(clear.code).toBe(0);
+    expect(clear.stdout).toMatch(/ok: no active writing conflict/);
+  });
+
   it("doctor shows adapter availability", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["doctor"], { HOME: home });

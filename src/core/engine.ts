@@ -1,4 +1,5 @@
 import type { Registry } from "./registry.js";
+import type { ClaimsStore } from "./claims.js";
 import type { AdapterLoader } from "../adapters/loader.js";
 import type {
   CoordinationDigest, CoordinationCursor, CoordinationSession,
@@ -14,6 +15,7 @@ import {
   buildCoordinationDigest, buildCoordinationSession, compactCoordinationSessionForCursor, cwdMatches,
   coordinationCursorFor, coordinationSessionFor, decodeCoordinationCursor,
   encodeCoordinationCursor, expireStaleWritingState, isTrivialCoordinationSession, mergeCoordinationSession,
+  buildClaimCoordinationSession,
   type CoordinationCursorSessionState,
 } from "./coordination.js";
 
@@ -53,7 +55,7 @@ export interface CoordinationOpts {
 }
 
 export class Engine {
-  constructor(private readonly deps: { registry: Registry; loader: AdapterLoader }) {}
+  constructor(private readonly deps: { registry: Registry; loader: AdapterLoader; claims?: ClaimsStore }) {}
 
   adapterNames(): string[] {
     return this.deps.loader.names().sort();
@@ -160,7 +162,12 @@ export class Engine {
         });
       }
     }));
-    const normalizedSessions = allSessions.map((session) => expireStaleWritingState(session));
+    const claimSessions = this.deps.claims
+      ? (await this.deps.claims.list())
+        .filter((claim) => !opts.cwd || cwdMatches(claim.cwd, opts.cwd) || claim.files.some((file) => cwdMatches(file, opts.cwd)))
+        .map(buildClaimCoordinationSession)
+      : [];
+    const normalizedSessions = [...allSessions.map((session) => expireStaleWritingState(session)), ...claimSessions];
     for (const session of normalizedSessions) {
       const state = nextCursors[session.id];
       if (state) state.session = compactCoordinationSessionForCursor(session);
@@ -183,7 +190,7 @@ export class Engine {
     const visibleNames = displayNames(sessions);
     const visibleSessions = sessions.map((session, index) => ({
       ...session,
-      displayName: visibleNames[index]!,
+      displayName: session.adapter === "claim" ? session.displayName : visibleNames[index]!,
     }));
 
     return buildCoordinationDigest({

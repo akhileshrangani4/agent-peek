@@ -2,10 +2,11 @@
 import { cac } from "cac";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createEngine, VERSION } from "../index.js";
+import { ClaimsStore } from "../core/claims.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError,
   AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
@@ -26,6 +27,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.example("peek at sessionseek-codex --mode structured");
   cli.example("peek coord");
   cli.example("peek check src/core/engine.ts");
+  cli.example("peek claim src/core/engine.ts --ttl 2m");
   cli.example("peek ui");
   cli.example("peek doctor");
 
@@ -82,42 +84,98 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       printList(list, { showIds: Boolean(opts.ids) });
     });
 
-  cli.command("check <file>", "Exit 1 when another active agent is writing a file.")
-    .usage("check <file> [--cwd <path>] [--adapter <name>] [--terminals] [--json]")
+  cli.command("check [file]", "Exit 1 when another active agent is writing a file.")
+    .usage("check [file] [--files-from <path|->] [--cwd <path>] [--adapter <name>] [--terminals] [--json]")
     .example("peek check src/core/engine.ts")
+    .example("peek check --files-from changed-files.txt")
     .example("peek check src/core/engine.ts --json")
+    .option("--files-from <path>", "Read files to check from a newline-delimited file, or '-' for stdin")
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--adapter <name>", "Scan only one adapter")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--json", "Output machine-readable check result")
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
-      const target = resolve(cwd, String(file));
+      const targets = checkTargets(file, opts.filesFrom, cwd);
       const engine = await createEngine({ withExternal: true });
       const digest = await engine.coordinate({
         cwd,
         adapter: opts.adapter,
         includeTerminal: Boolean(opts.terminals) || isTerminalAdapter(opts.adapter),
       });
-      const conflicts = activeFileConflicts(digest, target);
+      const files = targets.map((target) => ({
+        file: target,
+        conflicts: activeFileConflicts(digest, target),
+      }));
+      const conflicts = files.flatMap((item) => item.conflicts.map((conflict) => ({
+        ...conflict,
+        file: item.file,
+      })));
       const result = {
         ok: conflicts.length === 0,
-        file: target,
+        files,
         conflictCount: conflicts.length,
         conflicts,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
       } else if (conflicts.length) {
-        console.log(`conflict: ${formatPath(target)} is actively written by ${conflicts.length} session${conflicts.length === 1 ? "" : "s"}`);
+        console.log(`conflict: ${conflicts.length} active file conflict${conflicts.length === 1 ? "" : "s"}`);
         for (const conflict of conflicts) {
-          console.log(indent(`${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` writing ${relativeTime(conflict.lastWritingAt)}` : ""}`));
+          console.log(indent(`${formatPath(conflict.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}`));
           if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
         }
       } else {
-        console.log(`ok: no active writing conflict for ${formatPath(target)}`);
+        console.log(`ok: no active writing conflict for ${targets.map(formatPath).join(", ")}`);
       }
       if (conflicts.length) process.exitCode = 1;
+    });
+
+  cli.command("claim <file>", "Declare intent to write files so other agents can avoid conflicts.")
+    .usage("claim <file> [--files-from <path|->] [--ttl <duration>] [--cwd <path>] [--as <owner>] [--json]")
+    .example("peek claim src/core/engine.ts --ttl 2m")
+    .example("peek claim src/core/engine.ts --files-from changed-files.txt --as codex-main")
+    .option("--files-from <path>", "Also read files to claim from a newline-delimited file, or '-' for stdin")
+    .option("--ttl <duration>", "Claim TTL such as 30s, 2m, or 1h", { default: "2m" })
+    .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
+    .option("--as <owner>", "Owner name shown to other agents")
+    .option("--json", "Output machine-readable claim")
+    .action(async (file, opts) => {
+      const cwd = resolve(String(opts.cwd ?? process.cwd()));
+      const targets = checkTargets(file, opts.filesFrom, cwd);
+      const claims = new ClaimsStore();
+      const claim = await claims.claim({
+        files: targets,
+        cwd,
+        owner: opts.as ? String(opts.as) : defaultClaimOwner(),
+        ttlMs: parseDurationMs(opts.ttl, "--ttl"),
+      });
+      if (opts.json) {
+        console.log(JSON.stringify(claim, null, 2));
+        return;
+      }
+      console.log(`claimed ${claim.files.length} file${claim.files.length === 1 ? "" : "s"} until ${claim.expiresAt}`);
+      console.log(indent(`id: ${claim.id}`));
+      for (const claimedFile of claim.files) console.log(indent(formatPath(claimedFile)));
+    });
+
+  cli.command("release <claimOrFile>", "Release a file claim by claim id or file path.")
+    .usage("release <claim-id|file> [--cwd <path>] [--json]")
+    .example("peek release src/core/engine.ts")
+    .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
+    .option("--json", "Output machine-readable release result")
+    .action(async (claimOrFile, opts) => {
+      const cwd = resolve(String(opts.cwd ?? process.cwd()));
+      const rawSelector = String(claimOrFile);
+      const selector = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(rawSelector)
+        ? rawSelector
+        : resolve(cwd, rawSelector);
+      const released = await new ClaimsStore().release(selector);
+      if (opts.json) {
+        console.log(JSON.stringify({ released }, null, 2));
+        return;
+      }
+      console.log(`released ${released} claim${released === 1 ? "" : "s"}`);
     });
 
   cli.command("coord [cwd]", "Summarize nearby agent activity and possible overlap.")
@@ -489,6 +547,65 @@ function activeFileConflicts(
       currentTask: session.currentTask,
       lastWritingAt: session.writingFileEvents.find((event) => event.file === target && event.active)?.lastWritingAt,
     }));
+}
+
+function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] {
+  const values: string[] = [];
+  if (file !== undefined) values.push(String(file));
+  if (filesFrom !== undefined) values.push(...readFilesFrom(String(filesFrom)));
+  if (values.length === 0) {
+    fail({
+      code: 5,
+      error: "invalid_usage",
+      message: "Provide a file argument or --files-from.",
+      hint: "Use `peek check src/file.ts` for one file, or `peek check --files-from changed-files.txt` for bulk checks.",
+      next: ["peek check src/core/engine.ts", "peek check --files-from changed-files.txt"],
+    });
+  }
+  return [...new Set(values.map((value) => resolve(cwd, value)))].sort();
+}
+
+function readFilesFrom(path: string): string[] {
+  const raw = path === "-"
+    ? readFileSync(0, "utf8")
+    : readFileSync(path, "utf8");
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+function parseDurationMs(value: unknown, flag: string): number {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d+)(ms|s|m|h)?$/i);
+  if (!match) {
+    fail({
+      code: 5,
+      error: "invalid_duration",
+      message: `Invalid ${flag}: ${text}`,
+      hint: "Use a duration like 30s, 2m, or 1h.",
+      next: ["peek claim src/core/engine.ts --ttl 2m"],
+    });
+  }
+  const amount = Number(match[1]);
+  const unit = (match[2] ?? "s").toLowerCase();
+  const factor = unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : unit === "s" ? 1000 : 1;
+  const ms = amount * factor;
+  if (!Number.isSafeInteger(ms) || ms <= 0) {
+    fail({
+      code: 5,
+      error: "invalid_duration",
+      message: `Invalid ${flag}: ${text}`,
+      hint: "Duration must be positive.",
+      next: ["peek claim src/core/engine.ts --ttl 2m"],
+    });
+  }
+  return ms;
+}
+
+function defaultClaimOwner(): string {
+  const user = userInfo().username || "agent";
+  return `${user}@${hostname()}:${process.pid}`;
 }
 
 function printCoordinationDigest(

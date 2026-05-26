@@ -17,6 +17,15 @@ export interface SessionEntry {
   status: SessionStatus;
 }
 
+export interface FileClaim {
+  id: string;
+  files: string[];
+  owner: string;
+  cwd?: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface ToolCall {
   name: string;
   input?: unknown;
