@@ -89,6 +89,7 @@ peek check --files-from changed-files.txt # bulk conflict check
 peek claim src/core/engine.ts --ttl 2m    # declare temporary write intent
 peek claim src/core/engine.ts --files-from changed-files.txt --ttl 2m
 peek release src/core/engine.ts           # release a prior claim
+peek release <claim-id> --claim-id --files-from done-files.txt
 peek coord                                # summarize nearby agents in this cwd
 peek coord /path/to/repo --json           # machine-readable coordination digest
 peek coord . --json --fields currentTask,intent,activeWritingFiles --cursor-file .peek-cursor
@@ -246,6 +247,8 @@ close the check-then-write race window. Claims are local, TTL-bound, visible in
 Use `peek check --as <owner>` to ignore your own claims in claim-then-check
 loops. Usage/internal errors exit with `5`/`1`, so `0` is safe, `1` is conflict,
 and anything else should stop the workflow.
+Claims are cooperative, local coordination signals; `--as` is an unverified
+owner label for well-behaved agents, not authentication or access control.
 
 ## MCP
 

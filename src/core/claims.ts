@@ -56,11 +56,21 @@ export class ClaimsStore {
     return claim;
   }
 
-  async release(selector: string, now: Date = new Date()): Promise<FileClaim[]> {
+  async release(selector: string, opts: { files?: string[]; now?: Date } = {}): Promise<FileClaim[]> {
+    const now = opts.now ?? new Date();
+    const partialFiles = opts.files ? new Set(opts.files) : undefined;
     const released: FileClaim[] = [];
     await this.write((file) => {
       pruneExpired(file, now);
       for (const [id, claim] of Object.entries(file.claims)) {
+        if (id === selector && partialFiles) {
+          const releasedFiles = claim.files.filter((claimFile) => partialFiles.has(claimFile));
+          if (releasedFiles.length === 0) continue;
+          claim.files = claim.files.filter((claimFile) => !partialFiles.has(claimFile));
+          released.push({ ...claim, files: releasedFiles });
+          if (claim.files.length === 0) delete file.claims[id];
+          continue;
+        }
         if (id === selector || claim.files.includes(selector)) {
           delete file.claims[id];
           released.push(claim);

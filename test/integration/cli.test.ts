@@ -344,7 +344,8 @@ describe("CLI integration", () => {
     expect(conflict.code).toBe(1);
     const check = JSON.parse(conflict.stdout);
     expect(check.ok).toBe(false);
-    expect(check.conflicts[0].displayName).toBe("claim-tester");
+    expect(check.conflicts).toBeUndefined();
+    expect(check.files[0].conflicts[0].displayName).toBe("claim-tester");
 
     const selfCheck = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--as", "tester", "--json"], { HOME: home });
     expect(selfCheck.code).toBe(0);
@@ -360,12 +361,23 @@ describe("CLI integration", () => {
     expect(coord.code).toBe(0);
     expect(JSON.parse(coord.stdout).sessions[0].displayName).toBe("claim-tester");
 
+    const partialFile = join(home, "release-files.txt");
+    await writeFile(partialFile, "README.md\n", "utf8");
+    const partialRelease = await runCli(["release", claimed.id, "--claim-id", "--files-from", partialFile, "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    expect(partialRelease.code).toBe(0);
+    const partial = JSON.parse(partialRelease.stdout);
+    expect(partial.files).toEqual(["/tmp/claim/README.md"]);
+
+    const stillClaimed = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    expect(stillClaimed.code).toBe(1);
+    expect(JSON.parse(stillClaimed.stdout).conflictCount).toBe(1);
+
     const release = await runCli(["release", claimed.id, "--claim-id", "--json"], { HOME: home });
     expect(release.code).toBe(0);
     const released = JSON.parse(release.stdout);
     expect(released.released).toBe(1);
     expect(released.claims[0].id).toBe(claimed.id);
-    expect(released.files).toEqual(["/tmp/claim/README.md", "/tmp/claim/src/core/engine.ts"]);
+    expect(released.files).toEqual(["/tmp/claim/src/core/engine.ts"]);
 
     const clear = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim"], { HOME: home });
     expect(clear.code).toBe(0);

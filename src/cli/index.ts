@@ -110,28 +110,26 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         file: target,
         conflicts: activeFileConflicts(digest, target, ignoredOwner),
       }));
-      const conflicts = files.flatMap((item) => item.conflicts.map((conflict) => ({
-        ...conflict,
-        file: item.file,
-      })));
+      const conflictCount = files.reduce((count, item) => count + item.conflicts.length, 0);
       const result = {
-        ok: conflicts.length === 0,
+        ok: conflictCount === 0,
         files,
-        conflictCount: conflicts.length,
-        conflicts,
+        conflictCount,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
-      } else if (conflicts.length) {
-        console.log(`conflict: ${conflicts.length} active file conflict${conflicts.length === 1 ? "" : "s"}`);
-        for (const conflict of conflicts) {
-          console.log(indent(`${formatPath(conflict.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}`));
-          if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
+      } else if (conflictCount) {
+        console.log(`conflict: ${conflictCount} active file conflict${conflictCount === 1 ? "" : "s"}`);
+        for (const item of files) {
+          for (const conflict of item.conflicts) {
+            console.log(indent(`${formatPath(item.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}`));
+            if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
+          }
         }
       } else {
         console.log(`ok: no active writing conflict for ${targets.map(formatPath).join(", ")}`);
       }
-      if (conflicts.length) process.exitCode = 1;
+      if (conflictCount) process.exitCode = 1;
     });
 
   cli.command("claim <file>", "Declare intent to write files so other agents can avoid conflicts.")
@@ -163,10 +161,11 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     });
 
   cli.command("release <claimOrFile>", "Release a file claim by claim id or file path.")
-    .usage("release <claim-id|file> [--claim-id] [--cwd <path>] [--json]")
+    .usage("release <claim-id|file> [--claim-id] [--files-from <path|->] [--cwd <path>] [--json]")
     .example("peek release src/core/engine.ts")
     .example("peek release <claim-id> --claim-id --json")
     .option("--claim-id", "Treat the argument as a claim id")
+    .option("--files-from <path>", "With --claim-id, release only these newline-delimited files from the claim")
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--json", "Output machine-readable release result")
     .action(async (claimOrFile, opts) => {
@@ -175,7 +174,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const selector = opts.claimId || /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(rawSelector)
         ? rawSelector
         : resolve(cwd, rawSelector);
-      const releasedClaims = await new ClaimsStore().release(selector);
+      const partialFiles = opts.filesFrom === undefined ? undefined : readFilesFrom(String(opts.filesFrom)).map((file) => resolve(cwd, file));
+      const releasedClaims = await new ClaimsStore().release(selector, { files: partialFiles });
       const result = {
         released: releasedClaims.length,
         claims: releasedClaims,

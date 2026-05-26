@@ -87,7 +87,8 @@ coordinate, but do not claim you changed another agent's state.
 - Use `peek check <file>` for scriptable conflict checks. Exit `1` means wait or inspect.
 - Use `peek check <file> --as <owner>` after claiming, so your own claim is ignored.
 - Use `peek check --files-from <path|->` for a planned multi-file edit.
-- Use `peek claim <file> --ttl 2m` before a planned write; add `--files-from <path|->` for bulk claims. Run `peek release <claim-id> --claim-id --json` or `peek release <file>` when done.
+- Use `peek claim <file> --ttl 2m` before a planned write; add `--files-from <path|->` for bulk claims. Run `peek release <claim-id> --claim-id --json`, optionally with `--files-from <path|->` for partial release, or `peek release <file>` when done.
+- Treat claims as cooperative local coordination, not authentication. `--as` is an unverified owner label for well-behaved agents.
 - Use `peek at <selector> --mode structured --json` when another script or agent will parse the result.
 - Use `peek at <selector> --mode brief` for a compact human-readable status.
 - Use `peek at <selector> --mode summary` for a sentence-style local summary.
