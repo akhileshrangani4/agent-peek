@@ -5,6 +5,7 @@ import {
   AdapterError,
   AdapterNotFoundError,
   CursorMismatchError,
+  InvalidCursorError,
   RegistryLockTimeoutError,
 } from "../../src/core/errors.js";
 
@@ -39,6 +40,12 @@ describe("errors", () => {
     const e = new CursorMismatchError("a", "b");
     expect(e.cursorAdapter).toBe("a");
     expect(e.sessionAdapter).toBe("b");
+  });
+
+  it("InvalidCursorError names malformed cursors", () => {
+    const e = new InvalidCursorError("bad shape");
+    expect(e.name).toBe("InvalidCursorError");
+    expect(e.message).toMatch(/bad shape/);
   });
 
   it("RegistryLockTimeoutError exists", () => {

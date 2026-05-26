@@ -33,6 +33,13 @@ export class CursorMismatchError extends Error {
   }
 }
 
+export class InvalidCursorError extends Error {
+  readonly name = "InvalidCursorError";
+  constructor(message: string) {
+    super(`Invalid cursor: ${message}`);
+  }
+}
+
 export class RegistryLockTimeoutError extends Error {
   readonly name = "RegistryLockTimeoutError";
   constructor() {

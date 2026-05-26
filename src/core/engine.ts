@@ -1,14 +1,21 @@
 import type { Registry } from "./registry.js";
 import type { AdapterLoader } from "../adapters/loader.js";
 import type {
+  CoordinationDigest, CoordinationCursor, CoordinationSession,
   RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor,
 } from "./types.js";
 import {
-  SessionNotFoundError, AmbiguousSelectorError, AdapterError,
+  SessionNotFoundError, AmbiguousSelectorError, CursorMismatchError,
 } from "./errors.js";
-import { toBrief, toRaw, toStructured, toSummary } from "./snapshot.js";
+import { toBrief, toHandoff, toRaw, toStructured, toSummary } from "./snapshot.js";
 import { decodeCursor, cursorAdapter } from "./cursor.js";
 import { displayNames } from "./names.js";
+import {
+  buildCoordinationDigest, buildCoordinationSession, compactCoordinationSessionForCursor, cwdMatches,
+  coordinationCursorFor, coordinationSessionFor, decodeCoordinationCursor,
+  encodeCoordinationCursor, expireStaleWritingState, isTrivialCoordinationSession, mergeCoordinationSession,
+  type CoordinationCursorSessionState,
+} from "./coordination.js";
 
 export interface PeekOpts {
   mode?: SnapshotMode;
@@ -33,6 +40,16 @@ export interface ListFilter {
   adapter?: string;
   status?: SessionEntry["status"];
   includeTerminal?: boolean;
+}
+
+export interface CoordinationOpts {
+  cwd?: string;
+  adapter?: string;
+  status?: SessionEntry["status"];
+  includeEnded?: boolean;
+  includeTerminal?: boolean;
+  writingOnly?: boolean;
+  since?: CoordinationCursor;
 }
 
 export class Engine {
@@ -73,8 +90,7 @@ export class Engine {
     if (cursor) {
       const adapterFromCursor = cursorAdapter(cursor);
       if (adapterFromCursor !== entry.adapter) {
-        throw new AdapterError(entry.adapter,
-          `cursor was issued by adapter "${adapterFromCursor}"`);
+        throw new CursorMismatchError(adapterFromCursor, entry.adapter);
       }
     }
     const result = await adapter.read(entry, cursor);
@@ -92,11 +108,88 @@ export class Engine {
     }
     else if (mode === "structured") snapshot = toStructured(entry.id, messages);
     else if (mode === "brief") snapshot = toBrief(entry.id, messages);
+    else if (mode === "handoff") snapshot = toHandoff(entry.id, messages, entry.cwd);
     else snapshot = await toSummary(entry.id, messages, {
       deltaMessageCount: messages.length,
       cacheKey: result.nextCursor,
     });
     return { snapshot, nextCursor: result.nextCursor, eof: result.eof };
+  }
+
+  async coordinate(opts: CoordinationOpts = {}): Promise<CoordinationDigest> {
+    const cursorData = decodeCoordinationCursor(opts.since);
+    const firstSnapshot = !opts.since;
+    let entries = await this.list({
+      adapter: opts.adapter,
+      status: opts.status,
+      includeTerminal: opts.includeTerminal === true || isTerminalAdapter(opts.adapter ?? ""),
+    });
+    if (!opts.status && opts.includeEnded !== true) entries = entries.filter((entry) => entry.status !== "ended");
+    entries = entries.filter((entry) => cwdMatches(entry.cwd, opts.cwd));
+
+    const names = displayNames(entries);
+    const nextCursors: Record<string, CoordinationCursorSessionState> = {};
+    const allSessions = await Promise.all(entries.map(async (entry, index) => {
+      const adapter = this.deps.loader.get(entry.adapter);
+      const priorState = cursorData.sessions[entry.id];
+      const priorCursor = coordinationCursorFor(priorState);
+      const priorSession = coordinationSessionFor(priorState, entry, names[index]!);
+      try {
+        const delta = priorCursor ? await adapter.read(entry, priorCursor) : undefined;
+        if (delta && delta.messages.length === 0 && priorSession) {
+          nextCursors[entry.id] = { cursor: delta.nextCursor, session: compactCoordinationSessionForCursor(priorSession) };
+          return priorSession;
+        }
+        const full = await adapter.read(entry);
+        const changed = delta ?? full;
+        const structured = toStructured(entry.id, full.messages);
+        const session = mergeCoordinationSession(priorSession, buildCoordinationSession({
+          entry,
+          displayName: names[index]!,
+          structured,
+          deltaMessages: changed.messages,
+          touchedMessages: changed.messages,
+        }));
+        nextCursors[entry.id] = { cursor: full.nextCursor, session: compactCoordinationSessionForCursor(session) };
+        return session;
+      } catch (error) {
+        return buildCoordinationSession({
+          entry,
+          displayName: names[index]!,
+          error: (error as Error).message,
+        });
+      }
+    }));
+    const normalizedSessions = allSessions.map((session) => expireStaleWritingState(session));
+    for (const session of normalizedSessions) {
+      const state = nextCursors[session.id];
+      if (state) state.session = compactCoordinationSessionForCursor(session);
+    }
+    let sessions = opts.includeEnded === true
+      ? normalizedSessions
+      : normalizedSessions.filter((session) => !isTrivialCoordinationSession(session));
+    const hiddenLowSignalSessionCount = normalizedSessions.length - sessions.length;
+    const preFilterSessionCount = sessions.length;
+    if (opts.writingOnly) {
+      sessions = sessions.filter((session) => session.intent === "writing" || session.activeWritingFiles.length > 0);
+    }
+    const filteredSessionCount = preFilterSessionCount - sessions.length;
+    const visibleNames = displayNames(sessions);
+    const visibleSessions = sessions.map((session, index) => ({
+      ...session,
+      displayName: visibleNames[index]!,
+    }));
+
+    return buildCoordinationDigest({
+      sessions: visibleSessions,
+      totalSessionCount: normalizedSessions.length,
+      filteredSessionCount,
+      firstSnapshot,
+      hiddenLowSignalSessionCount,
+      hiddenUnchangedSessionCount: 0,
+      cwd: opts.cwd,
+      nextCursor: encodeCoordinationCursor({ version: 1, sessions: nextCursors }),
+    });
   }
 
   async register(opts: RegisterOpts): Promise<SessionEntry> {

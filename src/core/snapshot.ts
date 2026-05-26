@@ -1,7 +1,8 @@
 import type {
-  BriefSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
+  BriefSnapshot, HandoffSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
   StructuredSnapshot, SummarySnapshot, ToolCall,
 } from "./types.js";
+import { inferTouchedFiles } from "./coordination.js";
 
 export interface ToRawOpts {
   limit?: number;
@@ -50,17 +51,18 @@ export function toStructured(sessionId: string, messages: RawMessage[]): Structu
   for (const m of messages) {
     if (m.role === "user" && m.text) lastUserMessage = m.text;
     if (m.role === "assistant" && m.text) lastAssistantMessage = m.text;
-    if (m.toolCalls) lastToolCalls.push(...m.toolCalls);
+    if (m.toolCalls) lastToolCalls.push(...m.toolCalls.filter(isNamedToolCall));
   }
   const pendingToolCalls = computePending(messages);
   const activity = computeActivity(messages, pendingToolCalls);
+  const currentTask = inferCurrentTask(messages, lastUserMessage);
   return {
     mode: "structured",
     sessionId,
     messageCount: messages.length,
     lastUserMessage,
     lastAssistantMessage,
-    currentTask: lastUserMessage,
+    currentTask,
     pendingToolCalls,
     lastToolCalls: lastToolCalls.slice(-5),
     activity,
@@ -91,6 +93,31 @@ export function toBrief(sessionId: string, messages: RawMessage[]): BriefSnapsho
   };
 }
 
+export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: string): HandoffSnapshot {
+  const structured = toStructured(sessionId, messages);
+  const assistantText = messages
+    .filter((message) => message.role === "assistant" && message.text)
+    .map((message) => message.text!);
+  const allText = messages
+    .filter((message) => message.text && message.role !== "system")
+    .map((message) => message.text!);
+
+  return {
+    mode: "handoff",
+    sessionId,
+    messageCount: messages.length,
+    activity: structured.activity,
+    currentTask: structured.currentTask,
+    lastAssistantMessage: structured.lastAssistantMessage,
+    decisions: extractLines(assistantText, /\b(decided|decision|chose|using|implemented|added|changed|fixed|removed)\b/i, 5),
+    openQuestions: extractQuestions(allText, 5),
+    nextActions: extractLines(assistantText, /\b(next|todo|remaining|follow[- ]?up|need to|will)\b/i, 5),
+    touchedFiles: inferTouchedFiles(messages, cwd),
+    pendingTools: toolNames(structured.pendingToolCalls),
+    recentTools: toolNames(structured.lastToolCalls),
+  };
+}
+
 function computePending(messages: RawMessage[]): ToolCall[] {
   const pendingByName: ToolCall[] = [];
   let resultsAfter = 0;
@@ -115,6 +142,78 @@ function computeActivity(messages: RawMessage[], pending: ToolCall[]): "idle" | 
   if (!last) return "idle";
   if (last.role === "assistant") return "thinking";
   return "idle";
+}
+
+function inferCurrentTask(messages: RawMessage[], fallback: string | undefined): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.role !== "assistant" || !message.text) continue;
+    const candidate = objectiveFromAssistantText(message.text);
+    if (candidate) return candidate;
+  }
+  return objectiveFromUserText(fallback);
+}
+
+function objectiveFromAssistantText(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.startsWith("{") || trimmed.startsWith("[")) return undefined;
+  const lines = candidateLines(trimmed);
+  const objective = lines.find((line) => (
+    isObjectiveLine(line) && !isReviewOrStatusLine(line)
+  ));
+  return objective ? oneLine(cleanObjectiveLine(objective)).slice(0, 240) : undefined;
+}
+
+function objectiveFromUserText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const lines = candidateLines(text);
+  const reviewLine = lines.find((line) => /\breview\b.+\b(diff|changes|code|project|uncommitted)\b/i.test(line));
+  if (reviewLine) return oneLine(cleanObjectiveLine(reviewLine)).slice(0, 240);
+  const actionLine = lines.find((line) => (
+    !isSystemPromptLine(line) && !isReviewOrStatusLine(line) && /\b(add|build|fix|implement|update|review|inspect|summarize|test|debug|refactor)\b/i.test(line)
+  ));
+  if (actionLine) return oneLine(cleanObjectiveLine(actionLine)).slice(0, 240);
+  if (text.split(/\r?\n/).filter((line) => line.trim()).length > 2 || text.length > 180) return undefined;
+  const simpleLine = lines.find((line) => !isSystemPromptLine(line) && !isReviewOrStatusLine(line));
+  return simpleLine ? oneLine(cleanObjectiveLine(simpleLine)).slice(0, 240) : undefined;
+}
+
+function candidateLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .map((line) => cleanObjectiveLine(line))
+    .filter((line) => isUsableTaskLine(line));
+}
+
+function cleanObjectiveLine(line: string): string {
+  return line
+    .replace(/^[-*#>\s]+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/\*+$/g, "")
+    .trim();
+}
+
+function isUsableTaskLine(line: string): boolean {
+  if (!line || line.startsWith("{") || line.startsWith("[") || /[{}[\]]/.test(line)) return false;
+  if (/^\d+[.)]\s/.test(line) || /^#{1,6}\s/.test(line)) return false;
+  if (/^\*\*?[^*]+?\*\*?$/.test(line)) return false;
+  if (/^(if|because|since|while|when|although|maybe|perhaps|other)\b/i.test(line)) return false;
+  if (isSystemPromptLine(line) || isReviewOrStatusLine(line)) return false;
+  return /\b[A-Za-z]{2,}\b/.test(line);
+}
+
+function isObjectiveLine(line: string): boolean {
+  return /\b(i(?:'ll| will| am|’ll|’m)|i'm|i’m|next|now|plan|going to|need to|working on|let me|i need to)\b/i.test(line)
+    && /\b(add|build|fix|implement|update|review|inspect|summarize|test|debug|refactor|run|check|create|write|wire|use|change|remove|hide|show)\b/i.test(line);
+}
+
+function isReviewOrStatusLine(line: string): boolean {
+  return /\b(passed|failed|green|reviewer|findings|stdout|stderr|would i use it|what improved|weak|untrustworthy|highest leverage|remove or de-emphasize|should have been|thinking about whether|not sure|might use|residual risk)\b/i.test(line);
+}
+
+function isSystemPromptLine(line: string): boolean {
+  return /\b(you are claude code|you are an ai|act as|acting as|return findings|do not edit|focus on|answer these sections)\b/i.test(line);
 }
 
 interface ToSummaryOpts {
@@ -245,8 +344,45 @@ function renderSummaryPrompt(messages: RawMessage[]): string {
   return lines.join("\n");
 }
 
+function extractLines(values: string[], pattern: RegExp, max: number): string[] {
+  const lines: string[] = [];
+  for (const value of values) {
+    for (const line of splitCandidateLines(value)) {
+      if (pattern.test(line)) lines.push(oneLine(line, 220));
+    }
+  }
+  return uniqueStrings(lines).slice(-max);
+}
+
+function extractQuestions(values: string[], max: number): string[] {
+  const questions: string[] = [];
+  for (const value of values) {
+    for (const line of splitCandidateLines(value)) {
+      if (line.endsWith("?") || /\b(blocked|unclear|need input|open question)\b/i.test(line)) {
+        questions.push(oneLine(line, 220));
+      }
+    }
+  }
+  return uniqueStrings(questions).slice(-max);
+}
+
+function splitCandidateLines(value: string): string[] {
+  return value
+    .split(/\n|(?<=[.!?])\s+/)
+    .map((line) => line.replace(/^[-*]\s+/, "").trim())
+    .filter((line) => line.length > 0);
+}
+
 function toolNames(tools: ToolCall[]): string[] {
   return [...new Set(tools.map((tool) => tool.name))];
+}
+
+function isNamedToolCall(tool: ToolCall): boolean {
+  return tool.name !== "(result)";
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function oneLine(value: string, max = 180): string {

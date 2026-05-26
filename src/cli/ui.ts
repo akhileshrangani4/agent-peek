@@ -246,6 +246,21 @@ function DetailPane(
       snapshot.recentTools.length ? line("recent tools", snapshot.recentTools.join(", ")) : null,
     );
   }
+  if (snapshot.mode === "handoff") {
+    return panel(
+      title,
+      ...meta,
+      line("messages", String(snapshot.messageCount)),
+      line("activity", snapshot.activity),
+      snapshot.currentTask ? line("task", compact(snapshot.currentTask, 140)) : null,
+      listLines("decisions", snapshot.decisions),
+      listLines("open questions", snapshot.openQuestions),
+      listLines("next actions", snapshot.nextActions),
+      snapshot.touchedFiles.length ? line("files", snapshot.touchedFiles.map(formatPath).join(", ")) : null,
+      snapshot.pendingTools.length ? line("pending tools", snapshot.pendingTools.join(", ")) : null,
+      snapshot.recentTools.length ? line("recent tools", snapshot.recentTools.join(", ")) : null,
+    );
+  }
   const messages = snapshot.messages.slice(-8);
   return panel(
     title,
@@ -282,6 +297,16 @@ function line(label: string, value: string): React.JSX.Element {
   );
 }
 
+function listLines(label: string, values: string[]): React.JSX.Element | null {
+  if (!values.length) return null;
+  return React.createElement(
+    Box,
+    { flexDirection: "column" },
+    React.createElement(Text, { color: "gray" }, `${label}:`),
+    ...values.map((value, index) => React.createElement(Text, { key: `${label}-${index}` }, `  - ${compact(value, 130)}`)),
+  );
+}
+
 function withDisplayNames(list: SessionEntry[]): NamedSession[] {
   const names = displayNames(list);
   return list.map((entry, index) => ({ ...entry, displayName: names[index]! }));
@@ -305,7 +330,8 @@ function cycleMode(mode: UiMode): UiMode {
   if (mode === "structured") return "brief";
   if (mode === "brief") return "timeline";
   if (mode === "timeline") return "raw";
-  if (mode === "raw") return "summary";
+  if (mode === "raw") return "handoff";
+  if (mode === "handoff") return "summary";
   return "structured";
 }
 

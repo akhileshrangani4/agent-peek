@@ -1,16 +1,18 @@
 // src/cli/index.ts
 import { cac } from "cac";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createEngine, VERSION } from "../index.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError,
-  AdapterError, AdapterNotFoundError, RegistryLockTimeoutError,
+  AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
 } from "../core/errors.js";
-import type { PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode } from "../core/types.js";
+import type {
+  CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
+} from "../core/types.js";
 import { displayNames } from "../core/names.js";
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +24,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.example("peek list");
   cli.example("peek list --json");
   cli.example("peek at sessionseek-codex --mode structured");
+  cli.example("peek coord");
   cli.example("peek ui");
   cli.example("peek doctor");
 
@@ -66,14 +69,71 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       printList(list, { showIds: Boolean(opts.ids) });
     });
 
+  cli.command("coord [cwd]", "Summarize nearby agent activity and possible overlap.")
+    .usage("coord [cwd] [--since <cursor>] [--since-file <path>] [--adapter <name>] [--status <status>] [--writing] [--fields <list>] [--cursor-file <path>] [--all] [--terminals] [--verbose] [--json]")
+    .example("peek coord")
+    .example("peek coord . --json")
+    .example("peek coord . --json --fields currentTask,activeWritingFiles --cursor-file .peek-cursor")
+    .example("peek coord /path/to/repo --since <nextCursor>")
+    .option("--cwd <path>", "Working directory to summarize. Defaults to cwd argument or the current directory.")
+    .option("--adapter <name>", "Scan/list only one adapter")
+    .option("--status <s>", "Filter by status (active|idle|ended)")
+    .option("--writing", "Only include sessions with recent write intent")
+    .option("--fields <list>", "JSON only: comma-separated session fields to include")
+    .option("--since <cursor>", "Coordination cursor returned by a prior coord call")
+    .option("--since-file <path>", "Read prior cursor from a file if it exists, then write the next cursor back")
+    .option("--cursor-file <path>", "Write the full next cursor to a file and omit it from stdout")
+    .option("--cursor-stderr", "Write the full next cursor to stderr and omit it from stdout")
+    .option("--all", "Include ended sessions")
+    .option("--terminals", "Include terminal capture adapters (tmux, screen)")
+    .option("--verbose", "Show known file lists in human output")
+    .option("--json", "Output JSON coordination digest")
+    .action(async (cwdArg, opts) => {
+      const cwd = resolve(String(opts.cwd ?? cwdArg ?? process.cwd()));
+      const status = parseStatus(opts.status);
+      const sinceFile = opts.sinceFile === undefined ? undefined : resolve(String(opts.sinceFile));
+      const since = readCoordinationSince({
+        since: opts.since,
+        sinceFile,
+      });
+      const engine = await createEngine({ withExternal: true });
+      const digest = await engine.coordinate({
+        cwd,
+        adapter: opts.adapter,
+        status,
+        since,
+        includeEnded: Boolean(opts.all),
+        includeTerminal: Boolean(opts.terminals) || isTerminalAdapter(opts.adapter),
+        writingOnly: Boolean(opts.writing),
+      });
+      const cursorLocation = writeCoordinationCursor(digest.nextCursor, {
+        cursorFile: sinceFile ?? opts.cursorFile,
+        cursorStderr: Boolean(opts.cursorStderr),
+      });
+      const omitCursor = Boolean(cursorLocation || opts.cursorStderr);
+      if (opts.json) {
+        console.log(JSON.stringify(projectCoordinationDigest(digest, {
+          fields: opts.fields,
+          omitCursor,
+          cursorLocation,
+        }), null, 2));
+        return;
+      }
+      printCoordinationDigest(digest, {
+        verbose: Boolean(opts.verbose),
+        cursorLocation,
+        suppressCursor: omitCursor,
+      });
+    });
+
   cli.command("at <selector>", "Read a session by displayName, id, tag, or cwd.")
-    .usage("at <selector> [--mode raw|structured|brief|summary] [--since <cursor>] [--limit <n>] [--json]")
+    .usage("at <selector> [--mode raw|structured|brief|summary|handoff] [--since <cursor>] [--limit <n>] [--json]")
     .example("peek at sessionseek-codex --mode structured")
     .example("peek at codex:abc123 --mode raw --last 50")
     .example("peek at codex:abc123 --mode raw --first 20")
     .example("peek at codex:abc123 --mode raw --around 100 --limit 30")
     .example("peek at buildy-claude --since <nextCursor>")
-    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, or summary", { default: "raw" })
+    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary", { default: "raw" })
     .option("--since <cursor>", "Only return new messages after a prior nextCursor")
     .option("--limit <n>", "Raw window size. Defaults to 200, or 30 with --around")
     .option("--first <n>", "Show the first N raw messages")
@@ -272,6 +332,15 @@ function handleError(e: unknown): number {
       next: ["peek list"],
     });
   }
+  if (e instanceof InvalidCursorError || e instanceof CursorMismatchError) {
+    fail({
+      code: 5,
+      error: "invalid_cursor",
+      message: e.message,
+      hint: "Use the nextCursor returned by the matching prior command.",
+      next: ["peek at <selector> --json", "peek coord . --json"],
+    });
+  }
   const err = e as Error;
   if (err?.name === "CACError") {
     fail({
@@ -316,6 +385,217 @@ function printList(
   for (const r of rows) console.log(fmt(r));
 }
 
+function printCoordinationDigest(
+  digest: CoordinationDigest,
+  opts: { verbose?: boolean; cursorLocation?: string; suppressCursor?: boolean } = {},
+): void {
+  const high = digest.overlapHints.filter((hint) => hint.severity === "high").length;
+  const medium = digest.overlapHints.filter((hint) => hint.severity === "medium").length;
+  const risk = high ? `, ${high} high overlap${high === 1 ? "" : "s"}`
+    : medium ? `, ${medium} medium overlap${medium === 1 ? "" : "s"}` : "";
+  const snapshotLabel = digest.firstSnapshot
+    ? `first snapshot, ${digest.newSessionCount ?? digest.sessionCount} new`
+    : `${digest.changedSessionCount} changed`;
+  const countLabel = digest.totalSessionCount === digest.shownSessionCount
+    ? `${digest.shownSessionCount} sessions`
+    : `${digest.shownSessionCount}/${digest.totalSessionCount} sessions shown`;
+  console.log(`coordination: ${countLabel}, ${snapshotLabel}${risk}`);
+  if (digest.hiddenLowSignalSessionCount) console.log(`hidden low-signal: ${digest.hiddenLowSignalSessionCount} sessions (--all to include)`);
+  if (digest.hiddenUnchangedSessionCount) console.log(`hidden unchanged: ${digest.hiddenUnchangedSessionCount} sessions`);
+  if (digest.filteredSessionCount) console.log(`filtered: ${digest.filteredSessionCount} sessions`);
+  if (digest.cwd) console.log(`cwd: ${formatPath(digest.cwd)}`);
+  if (digest.sessions.length === 0) {
+    console.log("(no sessions)");
+    printCoordinationCursor(digest.nextCursor, opts);
+    return;
+  }
+  if (digest.overlapHints.length) {
+    console.log("\noverlap hints:");
+    for (const hint of digest.overlapHints.slice(0, opts.verbose ? undefined : 5)) {
+      console.log(indent(`${hint.severity.toUpperCase()} ${formatOverlapHint(hint)}`));
+    }
+    if (!opts.verbose && digest.overlapHints.length > 5) {
+      console.log(indent(`... ${digest.overlapHints.length - 5} more; rerun with --verbose`));
+    }
+  }
+  console.log("\nsessions:");
+  for (const session of digest.sessions) {
+    console.log(`${session.displayName} (${session.adapter}, ${session.status}${session.activity ? `, ${session.activity}` : ""}, ${formatCoordinationIntent(session.intent)})`);
+    if (session.currentTask) console.log(indent(`task: ${oneLine(session.currentTask)}`));
+    if (opts.verbose && session.changedMessageCount !== undefined) console.log(indent(`new messages: ${session.changedMessageCount}`));
+    if (opts.verbose && shouldShowLastAssistant(session)) console.log(indent(`last assistant: ${oneLine(session.lastAssistantMessage!)}`));
+    if (session.pendingTools.length) console.log(indent(`pending tools: ${session.pendingTools.join(", ")}`));
+    if (session.recentTools.length) console.log(indent(`recent tools: ${session.recentTools.join(", ")}`));
+    if (session.activeWritingFiles.length) console.log(indent(`active writing files: ${formatCoordinationFiles(session.activeWritingFiles, opts)}`));
+    if (session.recentWritingFiles.length && !sameStringSet(session.recentWritingFiles, session.activeWritingFiles)) {
+      console.log(indent(`recent writes: ${formatCoordinationFiles(session.recentWritingFiles, opts)}`));
+    }
+    if (session.hotFiles.length) console.log(indent(`hot files: ${formatCoordinationFiles(session.hotFiles, opts)}`));
+    else if (session.recentFiles.length) console.log(indent(`recent files: ${formatCoordinationFiles(session.recentFiles, opts)}`));
+    if (opts.verbose && session.knownFiles.length) console.log(indent(`known files: ${formatCoordinationFiles(session.knownFiles, opts)}`));
+    if (session.error) console.log(indent(`error: ${session.error}`));
+  }
+  printCoordinationCursor(digest.nextCursor, opts);
+}
+
+function formatCoordinationIntent(intent: CoordinationDigest["sessions"][number]["intent"]): string {
+  if (intent === "writing") return "recent-writing";
+  if (intent === "reading") return "recent-reading";
+  return "intent-unknown";
+}
+
+function shouldShowLastAssistant(session: CoordinationDigest["sessions"][number]): boolean {
+  if (!session.lastAssistantMessage) return false;
+  if (!session.currentTask) return true;
+  const task = oneLine(session.currentTask, 240).toLowerCase();
+  const last = oneLine(session.lastAssistantMessage, 240).toLowerCase();
+  return !task || !last.includes(task) && !task.includes(last);
+}
+
+function formatOverlapHint(hint: CoordinationDigest["overlapHints"][number]): string {
+  let message = hint.message;
+  if (hint.file) message = message.replaceAll(hint.file, formatPath(hint.file));
+  if (hint.cwd) message = message.replaceAll(hint.cwd, formatPath(hint.cwd));
+  if (hint.lastWritingAt) return `${message} Last writer ${relativeTime(hint.lastWritingAt)}.`;
+  if (hint.lastActivityAt) return `${message} Last activity ${relativeTime(hint.lastActivityAt)}.`;
+  return message;
+}
+
+function formatCoordinationFiles(files: string[], opts: { verbose?: boolean }): string {
+  const max = opts.verbose ? files.length : 5;
+  const visible = files.slice(0, max).map(formatPath).join(", ");
+  const remaining = files.length - max;
+  return remaining > 0 ? `${visible}, ... ${remaining} more` : visible;
+}
+
+function printCoordinationCursor(
+  cursor: string,
+  opts: { cursorLocation?: string; suppressCursor?: boolean } = {},
+): void {
+  if (opts.cursorLocation) {
+    console.log(`\nnextCursor: written to ${formatPath(opts.cursorLocation)}`);
+    return;
+  }
+  if (opts.suppressCursor) return;
+  printNextCursor(cursor);
+}
+
+function printNextCursor(cursor: string): void {
+  if (cursor.length <= 1200) {
+    console.log(`\nnextCursor: ${cursor}`);
+    return;
+  }
+  console.log(`\nnextCursor: ${cursor.slice(0, 80)}... (${cursor.length} chars; use --since-file .peek-cursor or --cursor-file .peek-cursor for polling)`);
+}
+
+function readCoordinationSince(opts: { since?: unknown; sinceFile?: string }): string | undefined {
+  if (opts.since !== undefined && opts.sinceFile) {
+    fail({
+      code: 5,
+      error: "invalid_usage",
+      message: "Cannot combine --since and --since-file.",
+      hint: "Use --since for an inline cursor or --since-file for a polling cursor file.",
+      next: ["peek coord . --since-file .peek-cursor --json"],
+    });
+  }
+  if (opts.since !== undefined) return String(opts.since);
+  if (!opts.sinceFile || !existsSync(opts.sinceFile)) return undefined;
+  const cursor = readFileSync(opts.sinceFile, "utf8").trim();
+  return cursor || undefined;
+}
+
+function writeCoordinationCursor(
+  cursor: string,
+  opts: { cursorFile?: unknown; cursorStderr?: boolean },
+): string | undefined {
+  let cursorLocation: string | undefined;
+  if (opts.cursorFile !== undefined) {
+    cursorLocation = resolve(String(opts.cursorFile));
+    writeFileSync(cursorLocation, `${cursor}\n`, "utf8");
+  }
+  if (opts.cursorStderr) {
+    console.error(`nextCursor: ${cursor}`);
+  }
+  return cursorLocation;
+}
+
+function projectCoordinationDigest(
+  digest: CoordinationDigest,
+  opts: { fields?: unknown; omitCursor?: boolean; cursorLocation?: string },
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = { ...digest };
+  if (opts.fields !== undefined) {
+    const fields = parseCoordinationFields(opts.fields);
+    projected.sessions = digest.sessions.map((session) => projectCoordinationSession(session, fields));
+  }
+  if (opts.omitCursor) delete projected.nextCursor;
+  if (opts.cursorLocation) projected.cursorFile = opts.cursorLocation;
+  return projected;
+}
+
+const COORDINATION_IDENTITY_FIELDS = ["id", "displayName", "adapter", "status", "lastSeen"] as const;
+const COORDINATION_SESSION_FIELDS = new Set([
+  ...COORDINATION_IDENTITY_FIELDS,
+  "activity",
+  "cwd",
+  "sourceType",
+  "messageCount",
+  "changedMessageCount",
+  "currentTask",
+  "lastAssistantMessage",
+  "pendingTools",
+  "recentTools",
+  "intent",
+  "recentFiles",
+  "knownFiles",
+  "hotFiles",
+  "activeWritingFiles",
+  "recentWritingFiles",
+  "writingFileEvents",
+  "writingFiles",
+  "writingFilesLastSeen",
+  "touchedFiles",
+  "error",
+]);
+
+function parseCoordinationFields(value: unknown): string[] {
+  const fields = String(value)
+    .split(",")
+    .map((field) => field.trim())
+    .filter(Boolean);
+  const invalid = fields.filter((field) => !COORDINATION_SESSION_FIELDS.has(field));
+  if (fields.length === 0 || invalid.length) {
+    fail({
+      code: 5,
+      error: "invalid_fields",
+      message: invalid.length
+        ? `Unknown coordination field(s): ${invalid.join(", ")}`
+        : "At least one coordination field is required.",
+      hint: `Use comma-separated session fields such as: currentTask,intent,activeWritingFiles,pendingTools.`,
+      next: ["peek coord . --json --fields currentTask,intent,activeWritingFiles,pendingTools"],
+    });
+  }
+  return [...new Set([...COORDINATION_IDENTITY_FIELDS, ...fields])];
+}
+
+function projectCoordinationSession(
+  session: CoordinationDigest["sessions"][number],
+  fields: string[],
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  const record = session as unknown as Record<string, unknown>;
+  for (const field of fields) {
+    if (record[field] !== undefined) projected[field] = record[field];
+  }
+  return projected;
+}
+
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((item) => bSet.has(item));
+}
+
 function withDisplayNames<T extends { id: string; name?: string; tag?: string; adapter: string; cwd?: string }>(
   list: T[],
 ): (T & { displayName: string })[] {
@@ -337,13 +617,13 @@ function parseStatus(value: unknown): SessionEntry["status"] | undefined {
 
 function parseMode(value: unknown): SnapshotMode {
   if (value === undefined || value === "raw") return "raw";
-  if (value === "structured" || value === "brief" || value === "summary") return value;
+  if (value === "structured" || value === "brief" || value === "summary" || value === "handoff") return value;
   fail({
     code: 5,
     error: "invalid_mode",
     message: `Invalid --mode: ${String(value)}`,
-    hint: "Mode must be one of: raw, structured, brief, summary.",
-    next: ["peek at <selector> --mode raw", "peek at <selector> --mode structured", "peek at <selector> --mode brief", "peek at <selector> --mode summary"],
+    hint: "Mode must be one of: raw, structured, brief, summary, handoff.",
+    next: ["peek at <selector> --mode raw", "peek at <selector> --mode structured", "peek at <selector> --mode brief", "peek at <selector> --mode summary", "peek at <selector> --mode handoff"],
   });
 }
 
@@ -617,6 +897,17 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
     console.log(`messages: ${s.messageCount}`);
     if (s.pendingTools.length) console.log(`pending tools: ${s.pendingTools.join(", ")}`);
     if (s.recentTools.length) console.log(`recent tools: ${s.recentTools.join(", ")}`);
+  } else if (s.mode === "handoff") {
+    console.log(`session: ${s.sessionId}`);
+    console.log(`messages: ${s.messageCount}`);
+    console.log(`activity: ${s.activity}`);
+    if (s.currentTask) console.log(`task: ${oneLine(s.currentTask)}`);
+    printListSection("decisions", s.decisions);
+    printListSection("open questions", s.openQuestions);
+    printListSection("next actions", s.nextActions);
+    printListSection("files", s.touchedFiles.map(formatPath));
+    if (s.pendingTools.length) console.log(`pending tools: ${s.pendingTools.join(", ")}`);
+    if (s.recentTools.length) console.log(`recent tools: ${s.recentTools.join(", ")}`);
   } else {
     console.log(s.summary);
     if (s.fallback) console.log(`(fallback: structured returned)`);
@@ -627,4 +918,15 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
 function indent(s: string, n = 2): string {
   const pad = " ".repeat(n);
   return s.split("\n").map((l) => pad + l).join("\n");
+}
+
+function printListSection(label: string, values: string[]): void {
+  if (!values.length) return;
+  console.log(`${label}:`);
+  for (const value of values) console.log(indent(`- ${value}`));
+}
+
+function oneLine(value: string, max = 160): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}...` : flat;
 }

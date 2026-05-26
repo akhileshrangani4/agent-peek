@@ -39,7 +39,7 @@ export interface CursorData {
 }
 export type Cursor = string; // opaque base64
 
-export type SnapshotMode = "raw" | "structured" | "brief" | "summary";
+export type SnapshotMode = "raw" | "structured" | "brief" | "summary" | "handoff";
 export type RawWindowFrom = "start" | "end";
 export type RawOrder = "oldest-first" | "newest-first";
 
@@ -88,10 +88,100 @@ export interface BriefSnapshot {
   recentTools: string[];
 }
 
-export type Snapshot = RawSnapshot | StructuredSnapshot | BriefSnapshot | SummarySnapshot;
+export interface HandoffSnapshot {
+  mode: "handoff";
+  sessionId: string;
+  messageCount: number;
+  activity: Activity;
+  currentTask?: string;
+  lastAssistantMessage?: string;
+  decisions: string[];
+  openQuestions: string[];
+  nextActions: string[];
+  touchedFiles: string[];
+  pendingTools: string[];
+  recentTools: string[];
+}
+
+export type Snapshot = RawSnapshot | StructuredSnapshot | BriefSnapshot | SummarySnapshot | HandoffSnapshot;
 
 export interface PeekResult {
   snapshot: Snapshot;
   nextCursor: Cursor;
   eof: boolean;
+}
+
+export type CoordinationCursor = string;
+
+export interface CoordinationWritingFileEvent {
+  file: string;
+  lastWritingAt: string;
+  active: boolean;
+}
+
+export interface CoordinationSession {
+  id: string;
+  displayName: string;
+  adapter: string;
+  status: SessionStatus;
+  activity?: Activity;
+  cwd?: string;
+  sourceType?: SessionSourceType;
+  lastSeen: string;
+  messageCount?: number;
+  changedMessageCount?: number;
+  currentTask?: string;
+  lastAssistantMessage?: string;
+  pendingTools: string[];
+  recentTools: string[];
+  intent: "writing" | "reading" | "unknown";
+  recentFiles: string[];
+  knownFiles: string[];
+  hotFiles: string[];
+  activeWritingFiles: string[];
+  recentWritingFiles: string[];
+  writingFileEvents: CoordinationWritingFileEvent[];
+  writingFiles: string[];
+  writingFilesLastSeen?: string;
+  touchedFiles: string[];
+  error?: string;
+}
+
+export interface CoordinationOverlapParticipant {
+  id: string;
+  displayName: string;
+  lastSeen: string;
+  activeWriting: boolean;
+  lastWritingAt?: string;
+}
+
+export interface CoordinationOverlap {
+  kind: "cwd" | "file";
+  severity: "high" | "medium" | "low";
+  message: string;
+  sessionIds: string[];
+  participants: CoordinationOverlapParticipant[];
+  cwd?: string;
+  file?: string;
+  lastActivityAt?: string;
+  lastWritingAt?: string;
+}
+
+export interface CoordinationDigest {
+  mode: "coordination";
+  generatedAt: string;
+  cwd?: string;
+  firstSnapshot: boolean;
+  sessionCount: number;
+  shownSessionCount: number;
+  totalSessionCount: number;
+  filteredSessionCount?: number;
+  newSessionCount?: number;
+  hiddenSessionCount?: number;
+  hiddenLowSignalSessionCount?: number;
+  hiddenUnchangedSessionCount?: number;
+  changedSessionCount: number;
+  sessions: CoordinationSession[];
+  overlapHints: CoordinationOverlap[];
+  nextCursor: CoordinationCursor;
 }

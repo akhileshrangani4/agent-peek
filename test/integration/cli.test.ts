@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { spawn } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, mkdir, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -142,6 +142,32 @@ describe("CLI integration", () => {
     expect(badLimit.stderr).toMatch(/error: invalid_limit/);
   });
 
+  it("rejects invalid cursors with agent-friendly diagnostics", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-cursor");
+    await mkdir(projDir, { recursive: true });
+    await writeFile(join(projDir, "cursor.jsonl"),
+      `{"type":"user","sessionId":"cursor","cwd":"/tmp/cursor","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hi"}}\n`,
+      "utf8");
+    const badCoord = await runCli(["coord", ".", "--since", "not-a-cursor"], { HOME: home });
+    expect(badCoord.code).toBe(5);
+    expect(badCoord.stderr).toMatch(/error: invalid_cursor/);
+
+    const badPeek = await runCli(["at", "cursor-claude", "--since", "not-a-cursor"], { HOME: home });
+    expect(badPeek.code).toBe(5);
+    expect(badPeek.stderr).toMatch(/error: invalid_cursor/);
+
+    const wrongAdapterCursor = Buffer.from(JSON.stringify({
+      adapter: "codex",
+      byteOffset: 0,
+      msgIndex: 0,
+    }), "utf8").toString("base64url");
+    const mismatch = await runCli(["at", "cursor-claude", "--since", wrongAdapterCursor], { HOME: home });
+    expect(mismatch.code).toBe(5);
+    expect(mismatch.stderr).toMatch(/error: invalid_cursor/);
+    expect(mismatch.stderr).toMatch(/Cursor was issued by adapter/);
+  });
+
   it("at supports brief mode and raw pagination flags", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const projDir = join(home, ".claude", "projects", "-tmp-page");
@@ -157,6 +183,11 @@ describe("CLI integration", () => {
     expect(brief.code).toBe(0);
     expect(brief.stdout).toMatch(/Task: third/);
 
+    const handoff = await runCli(["at", "page-claude", "--mode", "handoff"], { HOME: home });
+    expect(handoff.code).toBe(0);
+    expect(handoff.stdout).toMatch(/session: claude-code:page/);
+    expect(handoff.stdout).toMatch(/activity:/);
+
     const first = await runCli(["at", "page-claude", "--first", "1"], { HOME: home });
     expect(first.code).toBe(0);
     expect(first.stdout).toMatch(/messages: 1-1 of 3/);
@@ -166,6 +197,102 @@ describe("CLI integration", () => {
     const newest = await runCli(["at", "page-claude", "--last", "2", "--reverse"], { HOME: home });
     expect(newest.code).toBe(0);
     expect(newest.stdout.indexOf("third")).toBeLessThan(newest.stdout.indexOf("second"));
+  });
+
+  it("coord summarizes sessions for a cwd and returns a reusable cursor", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-coord");
+    await mkdir(projDir, { recursive: true });
+    const tx = join(projDir, "coord.jsonl");
+    await writeFile(tx, [
+      `{"type":"user","sessionId":"coord","cwd":"/tmp/coord","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"edit engine"}}`,
+      `{"type":"assistant","sessionId":"coord","cwd":"/tmp/coord","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"path":"src/core/engine.ts"}}]}}`,
+    ].join("\n") + "\n", "utf8");
+    await writeFile(join(projDir, "noise.jsonl"), [
+      `{"type":"user","sessionId":"noise","cwd":"/tmp/coord","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"Say ok"}}`,
+      `{"type":"assistant","sessionId":"noise","cwd":"/tmp/coord","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":"ok"}}`,
+    ].join("\n") + "\n", "utf8");
+
+    const human = await runCli(["coord", "/tmp/coord"], { HOME: home });
+    expect(human.code).toBe(0);
+    expect(human.stdout).toMatch(/coordination: 1\/2 sessions shown, first snapshot, 1 new/);
+    expect(human.stdout).toMatch(/hidden low-signal: 1 sessions/);
+    expect(human.stdout).toMatch(/sessions:/);
+    expect(human.stdout).toMatch(/coord-claude/);
+    expect(human.stdout).not.toMatch(/noise-claude/);
+    expect(human.stdout).toMatch(/coord-claude.*reading/);
+    expect(human.stdout).toMatch(/hot files: .*src\/core\/engine.ts/);
+    expect(human.stdout).not.toMatch(/known files:/);
+    expect(human.stdout).toMatch(/nextCursor:/);
+
+    const json = await runCli(["coord", "/tmp/coord", "--json"], { HOME: home });
+    expect(json.code).toBe(0);
+    const digest = JSON.parse(json.stdout);
+    expect(digest.mode).toBe("coordination");
+    expect(digest.firstSnapshot).toBe(true);
+    expect(digest.newSessionCount).toBe(1);
+    expect(digest.changedSessionCount).toBe(0);
+    expect(digest.hiddenSessionCount).toBe(1);
+    expect(digest.hiddenLowSignalSessionCount).toBe(1);
+    expect(digest.sessions[0].displayName).toBe("coord-claude");
+    expect(digest.sessions[0].intent).toBe("reading");
+    expect(digest.sessions[0].recentFiles).toEqual(["/tmp/coord/src/core/engine.ts"]);
+    expect(digest.sessions[0].knownFiles).toEqual(["/tmp/coord/src/core/engine.ts"]);
+    expect(digest.sessions[0].hotFiles).toEqual(["/tmp/coord/src/core/engine.ts"]);
+
+    const all = await runCli(["coord", "/tmp/coord", "--all", "--json"], { HOME: home });
+    expect(all.code).toBe(0);
+    expect(JSON.parse(all.stdout).sessionCount).toBe(2);
+
+    const next = await runCli(["coord", "/tmp/coord", "--since", digest.nextCursor, "--json"], { HOME: home });
+    expect(next.code).toBe(0);
+    const nextDigest = JSON.parse(next.stdout);
+    expect(nextDigest.firstSnapshot).toBe(false);
+    expect(nextDigest.changedSessionCount).toBe(0);
+    expect(nextDigest.sessions[0].recentFiles).toEqual([]);
+    expect(nextDigest.sessions[0].knownFiles).toEqual(["/tmp/coord/src/core/engine.ts"]);
+
+    const verbose = await runCli(["coord", "/tmp/coord", "--since", digest.nextCursor, "--verbose"], { HOME: home });
+    expect(verbose.code).toBe(0);
+    expect(verbose.stdout).toMatch(/known files: .*src\/core\/engine.ts/);
+
+    const cursorFile = join(home, "coord.cursor");
+    const projected = await runCli([
+      "coord", "/tmp/coord", "--json",
+      "--fields", "currentTask,intent,writingFiles",
+      "--cursor-file", cursorFile,
+    ], { HOME: home });
+    expect(projected.code).toBe(0);
+    const projectedDigest = JSON.parse(projected.stdout);
+    expect(projectedDigest.nextCursor).toBeUndefined();
+    expect(projectedDigest.cursorFile).toBe(cursorFile);
+    expect(projectedDigest.sessions[0]).toEqual({
+      id: "claude-code:coord",
+      displayName: "coord-claude",
+      adapter: "claude-code",
+      status: "active",
+      lastSeen: expect.any(String),
+      currentTask: "edit engine",
+      intent: "reading",
+      writingFiles: [],
+    });
+    expect((await readFile(cursorFile, "utf8")).trim()).toMatch(/^gz\./);
+
+    const sinceFile = await runCli([
+      "coord", "/tmp/coord", "--json",
+      "--since-file", cursorFile,
+      "--fields", "currentTask,intent,writingFiles",
+    ], { HOME: home });
+    expect(sinceFile.code).toBe(0);
+    const sinceFileDigest = JSON.parse(sinceFile.stdout);
+    expect(sinceFileDigest.firstSnapshot).toBe(false);
+    expect(sinceFileDigest.nextCursor).toBeUndefined();
+    expect(sinceFileDigest.cursorFile).toBe(cursorFile);
+    expect((await readFile(cursorFile, "utf8")).trim()).toMatch(/^gz\./);
+
+    const writingOnly = await runCli(["coord", "/tmp/coord", "--writing", "--json"], { HOME: home });
+    expect(writingOnly.code).toBe(0);
+    expect(JSON.parse(writingOnly.stdout).sessionCount).toBe(0);
   });
 
   it("doctor shows adapter availability", async () => {

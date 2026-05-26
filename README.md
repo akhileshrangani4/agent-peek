@@ -66,7 +66,7 @@ Give a session a stable name:
 
 ```bash
 peek tag researcher-codex as researcher
-peek at researcher --mode summary
+peek at researcher --mode brief
 ```
 
 ## CLI
@@ -82,6 +82,10 @@ peek list --ids                           # show raw session ids
 peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
 peek doctor                               # adapter availability and setup hints
+peek coord                                # summarize nearby agents in this cwd
+peek coord /path/to/repo --json           # machine-readable coordination digest
+peek coord . --json --fields currentTask,intent,activeWritingFiles --cursor-file .peek-cursor
+peek coord . --json --fields currentTask,intent,activeWritingFiles --since-file .peek-cursor
 
 peek ui                                   # interactive terminal browser
 peek ui --adapter codex
@@ -91,7 +95,7 @@ peek ui --terminals
 peek at <name|id|tag|cwd>                 # raw snapshot
 peek at <selector> --mode structured      # normalized status/task/tool fields
 peek at <selector> --mode brief           # compact local summary, no API key
-peek at <selector> --mode summary         # sentence-style summary, local by default
+peek at <selector> --mode handoff         # decisions, next actions, files, questions
 peek at <selector> --since <cursor>       # only messages since prior peek
 peek at <selector> --first 20             # first 20 raw messages
 peek at <selector> --last 50              # last 50 raw messages
@@ -117,14 +121,15 @@ with `peek list --ids`, and JSON output includes both `id` and `displayName`.
 
 ## Peek Modes
 
-`peek at` supports four scriptable output modes:
+`peek at` supports five scriptable output modes:
 
 | Mode | Use it for | API key |
 | --- | --- | --- |
 | `raw` | Reading transcript messages directly. Best for debugging or inspecting exactly what happened. | No |
 | `structured` | Stable fields for agents: current task, activity, last messages, pending tools, recent tools. | No |
 | `brief` | A compact local summary built from structured fields. Good default for humans and scripts that do not need raw logs. | No |
-| `summary` | Sentence-style summary. Uses a no-dependency local summary by default; can use Anthropic when explicitly configured. | No |
+| `handoff` | Local structured handoff: decisions, open questions, next actions, touched files, and tools. | No |
+| `summary` | Optional sentence-style summary. De-emphasized for agent loops; prefer `brief` unless you explicitly need prose. Can use Anthropic when configured. | No |
 
 Raw mode has pagination controls:
 
@@ -139,7 +144,8 @@ peek at researcher --last 50 --reverse
 By default, raw mode hides tool-only messages and tool-call status lines to keep
 the output readable. Add `--tools` or `--verbose` when you need that detail.
 
-`summary` does not require Ollama, Anthropic, or any other model runtime. If you
+`summary` is available for prose summaries, but it is not the recommended
+agent-facing default. Prefer `brief` for low-latency local inspection. If you
 want hosted LLM summaries, set `ANTHROPIC_API_KEY`. To force local summaries on
 a machine that also has an Anthropic key, set:
 
@@ -161,7 +167,7 @@ It starts in `structured` mode. Press `m` or Tab to cycle through:
 - `brief` — compact local summary, no API key
 - `timeline` — chronological role/text timeline for quick scanning
 - `raw` — recent transcript messages
-- `summary` — sentence-style summary, local by default
+- `summary` — optional sentence-style summary
 
 There is no separate command-line flag for timeline yet; open `peek ui`, then
 press `m`/Tab until the header shows `mode=timeline`.
@@ -202,6 +208,30 @@ peek at researcher --mode raw --json
 peek at researcher --mode raw --since <nextCursor> --json
 ```
 
+For parallel work, `peek coord` gives agents a compact coordination digest:
+
+```bash
+peek coord .
+peek coord . --since <nextCursor> --json
+peek coord . --json --fields currentTask,intent,activeWritingFiles --cursor-file .peek-cursor
+peek coord . --json --fields currentTask,intent,activeWritingFiles --since-file .peek-cursor
+```
+
+The digest includes active sessions under the cwd, each session's inferred task/activity,
+changed message count, recent tools, edit intent, active writing files, recent
+write context, hot/recent/known files, ranked overlap hints, and a coordination cursor for
+cheap follow-up checks. Low-signal login/no-op sessions are hidden by default.
+Historical/read-only overlap and directory-only touches are omitted from the
+default risk list, and overlap hints include last activity/writer timestamps so
+agents can judge stale conflicts. Human output shows the top overlap risks first;
+use `--verbose` for full file lists, `--all` to include low-signal sessions,
+`--status active` or `--writing` to reduce fleet noise, and `--fields` plus
+`--since-file`, `--cursor-file`, or `--cursor-stderr` to keep JSON payloads small
+while preserving the reusable cursor. `--since-file` is the polling-friendly path:
+it reads a prior cursor from the file when present and writes the next cursor back.
+`peek coord` is an awareness tool, not a lock manager; agents should treat
+active writing overlap as a signal to inspect or wait, not as enforced exclusion.
+
 ## MCP
 
 The MCP server command is:
@@ -209,6 +239,26 @@ The MCP server command is:
 ```bash
 agent-peek-mcp
 ```
+
+Exposed tools:
+
+- `list_sessions` — list discovered sessions with display names.
+- `peek_session` — read one session snapshot.
+- `coordination_digest` — summarize nearby session activity and overlap.
+- `tag_session` — assign a stable tag.
+
+Exposed resources:
+
+- `agent-peek://sessions` — active sessions as JSON.
+- `agent-peek://session/{selector}/brief` — brief snapshot for one session.
+- `agent-peek://session/{selector}/handoff` — handoff snapshot for one session.
+- `agent-peek://session/{selector}/tail` — raw tail for one session.
+
+Exposed prompts:
+
+- `coordinate-agents` — check nearby agents before continuing work.
+- `session-handoff` — prepare a concise handoff from one session.
+- `avoid-overlap` — inspect overlap hints before editing files.
 
 It is a local stdio server. Different clients use different config shapes.
 
@@ -378,7 +428,7 @@ import { createEngine } from "agent-peek";
 const engine = await createEngine();
 const sessions = await engine.list();
 
-const result = await engine.peek("researcher", { mode: "summary" });
+const result = await engine.peek("researcher", { mode: "brief" });
 const firstPage = await engine.peek("researcher", { mode: "raw", from: "start", limit: 50 });
 
 console.log(result.snapshot);

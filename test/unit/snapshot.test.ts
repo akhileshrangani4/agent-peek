@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toBrief, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
+import { toBrief, toHandoff, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
 import type { RawMessage } from "../../src/core/types.js";
 import { withEnv } from "../helpers/tmp-home.js";
 
@@ -44,6 +44,11 @@ describe("snapshot.toStructured", () => {
     expect(s.lastAssistantMessage).toBe("done");
   });
 
+  it("excludes tool result placeholders from recent tools", () => {
+    const s = toStructured("sid", msgs());
+    expect(s.lastToolCalls.map((tool) => tool.name)).toEqual(["Read"]);
+  });
+
   it("activity tool-running while a tool_use is unanswered", () => {
     const m: RawMessage[] = [
       { role: "user", text: "x", raw: {} },
@@ -79,6 +84,26 @@ describe("snapshot.toBrief", () => {
     expect(s.mode).toBe("brief");
     expect(s.brief).toMatch(/Task: do X/);
     expect(s.brief).toMatch(/Last assistant: done/);
+    expect(s.recentTools).toContain("Read");
+  });
+});
+
+describe("snapshot.toHandoff", () => {
+  it("extracts local handoff fields", () => {
+    const s = toHandoff("sid", [
+      { role: "system", text: "AskUserQuestion/Question: present choices?", raw: {} },
+      { role: "user", text: "Can you add resources?", raw: {} },
+      { role: "assistant", text: "Implemented MCP resources. Next I will add prompts.", raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Read", input: { path: "src/mcp/index.ts" }, status: "pending" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "exec_command", input: { cmd: "cat \"src/core/engine.ts\"" }, status: "pending" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "exec_command", input: { cmd: "curl https://example.com/foo/bar && echo Content-Type: application/json" }, status: "pending" }], raw: {} },
+    ], "/work/repo");
+    expect(s.mode).toBe("handoff");
+    expect(s.decisions).toContain("Implemented MCP resources.");
+    expect(s.nextActions).toContain("Next I will add prompts.");
+    expect(s.openQuestions).toContain("Can you add resources?");
+    expect(s.openQuestions).not.toContain("AskUserQuestion/Question: present choices?");
+    expect(s.touchedFiles).toEqual(["/work/repo/src/core/engine.ts", "/work/repo/src/mcp/index.ts"]);
     expect(s.recentTools).toContain("Read");
   });
 });

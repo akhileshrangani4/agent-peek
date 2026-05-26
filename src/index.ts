@@ -7,21 +7,26 @@ export type {
   SessionEntry, SessionStatus, Activity,
   RawMessage, ToolCall,
   Cursor, CursorData,
-  Snapshot, RawSnapshot, StructuredSnapshot, BriefSnapshot, SummarySnapshot,
+  Snapshot, RawSnapshot, StructuredSnapshot, BriefSnapshot, SummarySnapshot, HandoffSnapshot,
   SnapshotMode, RawWindowFrom, RawOrder,
   PeekResult,
+  CoordinationCursor, CoordinationSession, CoordinationOverlap, CoordinationDigest,
 } from "./core/types.js";
 
 export {
   SessionNotFoundError, AmbiguousSelectorError, AdapterError,
-  AdapterNotFoundError, CursorMismatchError, RegistryLockTimeoutError,
+  AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
   TranscriptUnreadableError, TranscriptCorruptError, SummaryUnavailableError,
 } from "./core/errors.js";
 
 export { Registry } from "./core/registry.js";
 export { Engine } from "./core/engine.js";
 export { encodeCursor, decodeCursor, cursorAdapter } from "./core/cursor.js";
-export { toRaw, toStructured, toBrief, toSummary } from "./core/snapshot.js";
+export { toRaw, toStructured, toBrief, toHandoff, toSummary } from "./core/snapshot.js";
+export {
+  encodeCoordinationCursor, decodeCoordinationCursor,
+  buildCoordinationDigest, buildCoordinationSession,
+} from "./core/coordination.js";
 
 export { AdapterLoader, discoverExternal } from "./adapters/loader.js";
 export type { Adapter, AdapterReadResult, AdapterModule } from "./adapters/types.js";
