@@ -25,11 +25,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.example("peek list --json");
   cli.example("peek at sessionseek-codex --mode structured");
   cli.example("peek coord");
+  cli.example("peek check src/core/engine.ts");
   cli.example("peek ui");
   cli.example("peek doctor");
 
   cli.command("list [target]", "List local agent sessions. Use `list adapters` for supported adapters.")
-    .usage("list [adapters] [--adapter <name>] [--status <status>] [--all] [--terminals] [--ids] [--json]")
+    .usage("list [adapters] [--adapter <name>] [--status <status>] [--all] [--terminals] [--ids] [--files] [--json]")
     .example("peek list")
     .example("peek list --adapter codex")
     .example("peek list --all --ids")
@@ -40,6 +41,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--all", "Include ended sessions")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--ids", "Show raw session ids")
+    .option("--files", "Show active/recent file context for coordination")
     .option("--json", "Output JSON with id, displayName, sourceType, cwd, and status")
     .action(async (target, opts) => {
       if (target === "adapters") {
@@ -65,8 +67,57 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       if (!status && !opts.all) {
         list = list.filter((entry) => entry.status !== "ended");
       }
+      if (opts.files) {
+        const digest = await engine.coordinate({
+          adapter: opts.adapter,
+          status,
+          includeEnded: Boolean(opts.all),
+          includeTerminal: opts.terminals || isTerminalAdapter(opts.adapter),
+        });
+        if (opts.json) { console.log(JSON.stringify(digest.sessions, null, 2)); return; }
+        printListWithFiles(digest.sessions, { showIds: Boolean(opts.ids) });
+        return;
+      }
       if (opts.json) { console.log(JSON.stringify(withDisplayNames(list), null, 2)); return; }
       printList(list, { showIds: Boolean(opts.ids) });
+    });
+
+  cli.command("check <file>", "Exit 1 when another active agent is writing a file.")
+    .usage("check <file> [--cwd <path>] [--adapter <name>] [--terminals] [--json]")
+    .example("peek check src/core/engine.ts")
+    .example("peek check src/core/engine.ts --json")
+    .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
+    .option("--adapter <name>", "Scan only one adapter")
+    .option("--terminals", "Include terminal capture adapters (tmux, screen)")
+    .option("--json", "Output machine-readable check result")
+    .action(async (file, opts) => {
+      const cwd = resolve(String(opts.cwd ?? process.cwd()));
+      const target = resolve(cwd, String(file));
+      const engine = await createEngine({ withExternal: true });
+      const digest = await engine.coordinate({
+        cwd,
+        adapter: opts.adapter,
+        includeTerminal: Boolean(opts.terminals) || isTerminalAdapter(opts.adapter),
+      });
+      const conflicts = activeFileConflicts(digest, target);
+      const result = {
+        ok: conflicts.length === 0,
+        file: target,
+        conflictCount: conflicts.length,
+        conflicts,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (conflicts.length) {
+        console.log(`conflict: ${formatPath(target)} is actively written by ${conflicts.length} session${conflicts.length === 1 ? "" : "s"}`);
+        for (const conflict of conflicts) {
+          console.log(indent(`${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` writing ${relativeTime(conflict.lastWritingAt)}` : ""}`));
+          if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
+        }
+      } else {
+        console.log(`ok: no active writing conflict for ${formatPath(target)}`);
+      }
+      if (conflicts.length) process.exitCode = 1;
     });
 
   cli.command("coord [cwd]", "Summarize nearby agent activity and possible overlap.")
@@ -383,6 +434,61 @@ function printList(
   const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
   console.log(fmt(headers));
   for (const r of rows) console.log(fmt(r));
+}
+
+function printListWithFiles(
+  sessions: CoordinationDigest["sessions"],
+  opts: { showIds?: boolean } = {},
+): void {
+  if (sessions.length === 0) { console.log("(no sessions)"); return; }
+  const rows = sessions.map((session) => {
+    const files = session.activeWritingFiles.length
+      ? `writing: ${formatCoordinationFiles(session.activeWritingFiles, { verbose: false })}`
+      : session.hotFiles.length
+        ? `hot: ${formatCoordinationFiles(session.hotFiles, { verbose: false })}`
+        : session.recentFiles.length
+          ? `recent: ${formatCoordinationFiles(session.recentFiles, { verbose: false })}`
+          : "-";
+    const row = [
+      session.displayName,
+      session.adapter,
+      session.status,
+      formatCoordinationIntent(session.intent),
+      relativeTime(session.lastSeen),
+      files,
+    ];
+    if (opts.showIds) row.push(session.id);
+    return row;
+  });
+  const headers = ["NAME", "ADAPTER", "STATUS", "INTENT", "UPDATED", "FILES"];
+  if (opts.showIds) headers.push("ID");
+  const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
+  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  console.log(fmt(headers));
+  for (const row of rows) console.log(fmt(row));
+}
+
+function activeFileConflicts(
+  digest: CoordinationDigest,
+  target: string,
+): {
+  id: string;
+  displayName: string;
+  adapter: string;
+  status: string;
+  currentTask?: string;
+  lastWritingAt?: string;
+}[] {
+  return digest.sessions
+    .filter((session) => session.activeWritingFiles.includes(target))
+    .map((session) => ({
+      id: session.id,
+      displayName: session.displayName,
+      adapter: session.adapter,
+      status: session.status,
+      currentTask: session.currentTask,
+      lastWritingAt: session.writingFileEvents.find((event) => event.file === target && event.active)?.lastWritingAt,
+    }));
 }
 
 function printCoordinationDigest(
@@ -888,6 +994,8 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
     console.log(`activity: ${s.activity}`);
     if (s.currentTask) console.log(`task: ${s.currentTask}`);
     if (s.lastAssistantMessage) console.log(`last assistant: ${s.lastAssistantMessage}`);
+    if (s.writingFiles.length) console.log(`writing files: ${s.writingFiles.map(formatPath).join(", ")}`);
+    if (s.touchedFiles.length) console.log(`touched files: ${s.touchedFiles.map(formatPath).join(", ")}`);
     if (s.pendingToolCalls.length) {
       console.log(`pending tools: ${s.pendingToolCalls.map((t) => t.name).join(", ")}`);
     }

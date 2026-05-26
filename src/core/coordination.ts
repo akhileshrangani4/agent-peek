@@ -213,14 +213,17 @@ export function expireStaleWritingState(
     writingFileEvents: recentEvents,
     writingFiles: activeWritingFiles,
     writingFilesLastSeen: latestWritingAt(recentEvents),
-    intent: session.intent === "writing" && activeWritingFiles.length === 0
-      ? session.recentFiles.length || session.knownFiles.length || recentWritingFiles.length ? "reading" : "unknown"
-      : session.intent,
+    intent: activeWritingFiles.length
+      ? "writing"
+      : session.intent === "writing"
+        ? session.recentFiles.length || session.knownFiles.length || recentWritingFiles.length ? "reading" : "unknown"
+        : session.intent,
   };
 }
 
 export function buildCoordinationDigest(opts: {
   sessions: CoordinationSession[];
+  overlapSessions?: CoordinationSession[];
   totalSessionCount?: number;
   filteredSessionCount?: number;
   firstSnapshot?: boolean;
@@ -255,7 +258,7 @@ export function buildCoordinationDigest(opts: {
     hiddenUnchangedSessionCount: hiddenUnchangedSessionCount || undefined,
     changedSessionCount,
     sessions: opts.sessions,
-    overlapHints: buildOverlapHints(opts.sessions),
+    overlapHints: buildOverlapHints(opts.overlapSessions ?? opts.sessions),
     nextCursor: opts.nextCursor,
   };
 }

@@ -79,9 +79,11 @@ peek list --adapter claude-code           # scan/list one adapter
 peek list --all                           # include ended sessions
 peek list --terminals                     # include tmux/screen terminal captures
 peek list --ids                           # show raw session ids
+peek list --files                         # include active/recent file context
 peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
 peek doctor                               # adapter availability and setup hints
+peek check src/core/engine.ts             # exit 1 if another agent is actively writing the file
 peek coord                                # summarize nearby agents in this cwd
 peek coord /path/to/repo --json           # machine-readable coordination digest
 peek coord . --json --fields currentTask,intent,activeWritingFiles --cursor-file .peek-cursor
@@ -231,6 +233,8 @@ while preserving the reusable cursor. `--since-file` is the polling-friendly pat
 it reads a prior cursor from the file when present and writes the next cursor back.
 `peek coord` is an awareness tool, not a lock manager; agents should treat
 active writing overlap as a signal to inspect or wait, not as enforced exclusion.
+For shell-gated write workflows, `peek check <file>` is the simplest primitive:
+it exits `0` when no active writer is detected and `1` when a conflict is present.
 
 ## MCP
 

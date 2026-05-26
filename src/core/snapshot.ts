@@ -2,7 +2,7 @@ import type {
   BriefSnapshot, HandoffSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
   StructuredSnapshot, SummarySnapshot, ToolCall,
 } from "./types.js";
-import { inferTouchedFiles } from "./coordination.js";
+import { inferTouchedFiles, inferWritingFiles } from "./coordination.js";
 
 export interface ToRawOpts {
   limit?: number;
@@ -44,7 +44,7 @@ export function toRaw(sessionId: string, messages: RawMessage[], opts: ToRawOpts
   };
 }
 
-export function toStructured(sessionId: string, messages: RawMessage[]): StructuredSnapshot {
+export function toStructured(sessionId: string, messages: RawMessage[], cwd?: string): StructuredSnapshot {
   let lastUserMessage: string | undefined;
   let lastAssistantMessage: string | undefined;
   const lastToolCalls: ToolCall[] = [];
@@ -63,6 +63,8 @@ export function toStructured(sessionId: string, messages: RawMessage[]): Structu
     lastUserMessage,
     lastAssistantMessage,
     currentTask,
+    touchedFiles: inferTouchedFiles(messages, cwd),
+    writingFiles: inferWritingFiles(messages, cwd),
     pendingToolCalls,
     lastToolCalls: lastToolCalls.slice(-5),
     activity,
@@ -94,7 +96,7 @@ export function toBrief(sessionId: string, messages: RawMessage[]): BriefSnapsho
 }
 
 export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: string): HandoffSnapshot {
-  const structured = toStructured(sessionId, messages);
+  const structured = toStructured(sessionId, messages, cwd);
   const assistantText = messages
     .filter((message) => message.role === "assistant" && message.text)
     .map((message) => message.text!);

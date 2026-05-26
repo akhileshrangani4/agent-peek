@@ -249,12 +249,12 @@ describe("CLI integration", () => {
     const nextDigest = JSON.parse(next.stdout);
     expect(nextDigest.firstSnapshot).toBe(false);
     expect(nextDigest.changedSessionCount).toBe(0);
-    expect(nextDigest.sessions[0].recentFiles).toEqual([]);
-    expect(nextDigest.sessions[0].knownFiles).toEqual(["/tmp/coord/src/core/engine.ts"]);
+    expect(nextDigest.sessions).toEqual([]);
+    expect(nextDigest.hiddenUnchangedSessionCount).toBe(1);
 
     const verbose = await runCli(["coord", "/tmp/coord", "--since", digest.nextCursor, "--verbose"], { HOME: home });
     expect(verbose.code).toBe(0);
-    expect(verbose.stdout).toMatch(/known files: .*src\/core\/engine.ts/);
+    expect(verbose.stdout).toMatch(/hidden unchanged: 1 sessions/);
 
     const cursorFile = join(home, "coord.cursor");
     const projected = await runCli([
@@ -293,6 +293,30 @@ describe("CLI integration", () => {
     const writingOnly = await runCli(["coord", "/tmp/coord", "--writing", "--json"], { HOME: home });
     expect(writingOnly.code).toBe(0);
     expect(JSON.parse(writingOnly.stdout).sessionCount).toBe(0);
+  });
+
+  it("check exits 1 for active writing conflicts and list --files shows file context", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-check");
+    await mkdir(projDir, { recursive: true });
+    await writeFile(join(projDir, "check.jsonl"), [
+      `{"type":"user","sessionId":"check","cwd":"/tmp/check","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"edit engine"}}`,
+      `{"type":"assistant","sessionId":"check","cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"path":"src/core/engine.ts"}}]}}`,
+    ].join("\n") + "\n", "utf8");
+
+    const conflict = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check"], { HOME: home });
+    expect(conflict.code).toBe(1);
+    expect(conflict.stdout).toMatch(/conflict:/);
+    expect(conflict.stdout).toMatch(/check-claude/);
+
+    const ok = await runCli(["check", "README.md", "--cwd", "/tmp/check"], { HOME: home });
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toMatch(/ok: no active writing conflict/);
+
+    const files = await runCli(["list", "--files", "--adapter", "claude-code"], { HOME: home });
+    expect(files.code).toBe(0);
+    expect(files.stdout).toMatch(/FILES/);
+    expect(files.stdout).toMatch(/writing: .*src\/core\/engine.ts/);
   });
 
   it("doctor shows adapter availability", async () => {

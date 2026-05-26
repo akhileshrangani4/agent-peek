@@ -267,11 +267,8 @@ describe("Engine", () => {
     expect(fullReads).toBe(2);
     expect(cursorReads).toBe(2);
     expect(second.changedSessionCount).toBe(0);
-    expect(second.sessions[0]!.touchedFiles).toEqual(["/work/repo/src/core/engine.ts"]);
-    expect(second.sessions[0]!.recentFiles).toEqual([]);
-    expect(second.sessions[0]!.knownFiles).toEqual(["/work/repo/src/core/engine.ts"]);
-    expect(second.sessions[0]!.hotFiles).toEqual([]);
-    expect(second.sessions[0]!.intent).toBe("reading");
+    expect(second.sessions).toEqual([]);
+    expect(second.hiddenUnchangedSessionCount).toBe(2);
     expect(second.overlapHints).toEqual([]);
   });
 
@@ -359,9 +356,8 @@ describe("Engine", () => {
     const second = await engine2.coordinate({ cwd: "/work", since: first.nextCursor });
 
     expect(second.changedSessionCount).toBe(0);
-    expect(second.sessions.find((session) => session.id === "fake:writer")?.writingFiles).toEqual([
-      "/work/repo/src/core/engine.ts",
-    ]);
+    expect(second.sessions).toEqual([]);
+    expect(second.hiddenUnchangedSessionCount).toBe(2);
     expect(second.overlapHints.find((hint) => hint.file?.endsWith("src/core/engine.ts"))?.severity).toBe("medium");
   });
 

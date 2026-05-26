@@ -62,6 +62,8 @@ export interface StructuredSnapshot {
   lastUserMessage?: string;
   lastAssistantMessage?: string;
   currentTask?: string;
+  touchedFiles: string[];
+  writingFiles: string[];
   pendingToolCalls: ToolCall[];
   lastToolCalls: ToolCall[];
   activity: Activity;

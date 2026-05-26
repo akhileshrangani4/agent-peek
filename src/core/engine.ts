@@ -106,7 +106,7 @@ export class Engine {
         order: opts.order,
       });
     }
-    else if (mode === "structured") snapshot = toStructured(entry.id, messages);
+    else if (mode === "structured") snapshot = toStructured(entry.id, messages, entry.cwd);
     else if (mode === "brief") snapshot = toBrief(entry.id, messages);
     else if (mode === "handoff") snapshot = toHandoff(entry.id, messages, entry.cwd);
     else snapshot = await toSummary(entry.id, messages, {
@@ -142,7 +142,7 @@ export class Engine {
         }
         const full = await adapter.read(entry);
         const changed = delta ?? full;
-        const structured = toStructured(entry.id, full.messages);
+        const structured = toStructured(entry.id, full.messages, entry.cwd);
         const session = mergeCoordinationSession(priorSession, buildCoordinationSession({
           entry,
           displayName: names[index]!,
@@ -174,6 +174,12 @@ export class Engine {
       sessions = sessions.filter((session) => session.intent === "writing" || session.activeWritingFiles.length > 0);
     }
     const filteredSessionCount = preFilterSessionCount - sessions.length;
+    const overlapSessions = sessions;
+    const beforeSemanticFilterCount = sessions.length;
+    if (opts.since && !opts.writingOnly) {
+      sessions = sessions.filter((session) => (session.changedMessageCount ?? 0) > 0 || Boolean(session.error));
+    }
+    const hiddenUnchangedSessionCount = beforeSemanticFilterCount - sessions.length;
     const visibleNames = displayNames(sessions);
     const visibleSessions = sessions.map((session, index) => ({
       ...session,
@@ -182,11 +188,12 @@ export class Engine {
 
     return buildCoordinationDigest({
       sessions: visibleSessions,
+      overlapSessions,
       totalSessionCount: normalizedSessions.length,
       filteredSessionCount,
       firstSnapshot,
       hiddenLowSignalSessionCount,
-      hiddenUnchangedSessionCount: 0,
+      hiddenUnchangedSessionCount,
       cwd: opts.cwd,
       nextCursor: encodeCoordinationCursor({ version: 1, sessions: nextCursors }),
     });

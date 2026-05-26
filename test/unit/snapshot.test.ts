@@ -44,6 +44,15 @@ describe("snapshot.toStructured", () => {
     expect(s.lastAssistantMessage).toBe("done");
   });
 
+  it("includes touched and writing file context", () => {
+    const s = toStructured("sid", [
+      { role: "user", text: "edit", raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Edit", input: { path: "src/a.ts" }, status: "pending" }], raw: {} },
+    ], "/repo");
+    expect(s.touchedFiles).toEqual(["/repo/src/a.ts"]);
+    expect(s.writingFiles).toEqual(["/repo/src/a.ts"]);
+  });
+
   it("excludes tool result placeholders from recent tools", () => {
     const s = toStructured("sid", msgs());
     expect(s.lastToolCalls.map((tool) => tool.name)).toEqual(["Read"]);
