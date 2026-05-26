@@ -56,14 +56,14 @@ export class ClaimsStore {
     return claim;
   }
 
-  async release(selector: string, now: Date = new Date()): Promise<number> {
-    let released = 0;
+  async release(selector: string, now: Date = new Date()): Promise<FileClaim[]> {
+    const released: FileClaim[] = [];
     await this.write((file) => {
       pruneExpired(file, now);
       for (const [id, claim] of Object.entries(file.claims)) {
         if (id === selector || claim.files.includes(selector)) {
           delete file.claims[id];
-          released++;
+          released.push(claim);
         }
       }
     });

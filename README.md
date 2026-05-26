@@ -84,6 +84,7 @@ peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
 peek doctor                               # adapter availability and setup hints
 peek check src/core/engine.ts             # exit 1 if another agent is actively writing the file
+peek check src/core/engine.ts --as codex-main
 peek check --files-from changed-files.txt # bulk conflict check
 peek claim src/core/engine.ts --ttl 2m    # declare temporary write intent
 peek claim src/core/engine.ts --files-from changed-files.txt --ttl 2m
@@ -242,6 +243,9 @@ it exits `0` when no active writer is detected and `1` when a conflict is presen
 Use `peek claim <file> --ttl 2m` before a planned edit to broadcast intent and
 close the check-then-write race window. Claims are local, TTL-bound, visible in
 `coord --writing`, and can be released with `peek release <file>` when done.
+Use `peek check --as <owner>` to ignore your own claims in claim-then-check
+loops. Usage/internal errors exit with `5`/`1`, so `0` is safe, `1` is conflict,
+and anything else should stop the workflow.
 
 ## MCP
 

@@ -92,11 +92,14 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--files-from <path>", "Read files to check from a newline-delimited file, or '-' for stdin")
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--adapter <name>", "Scan only one adapter")
+    .option("--as <owner>", "Ignore active claims owned by this agent")
+    .option("--ignore-self", "Ignore active claims owned by the default local owner")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--json", "Output machine-readable check result")
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
+      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? defaultClaimOwner() : undefined;
       const engine = await createEngine({ withExternal: true });
       const digest = await engine.coordinate({
         cwd,
@@ -105,7 +108,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       });
       const files = targets.map((target) => ({
         file: target,
-        conflicts: activeFileConflicts(digest, target),
+        conflicts: activeFileConflicts(digest, target, ignoredOwner),
       }));
       const conflicts = files.flatMap((item) => item.conflicts.map((conflict) => ({
         ...conflict,
@@ -160,22 +163,32 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     });
 
   cli.command("release <claimOrFile>", "Release a file claim by claim id or file path.")
-    .usage("release <claim-id|file> [--cwd <path>] [--json]")
+    .usage("release <claim-id|file> [--claim-id] [--cwd <path>] [--json]")
     .example("peek release src/core/engine.ts")
+    .example("peek release <claim-id> --claim-id --json")
+    .option("--claim-id", "Treat the argument as a claim id")
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--json", "Output machine-readable release result")
     .action(async (claimOrFile, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const rawSelector = String(claimOrFile);
-      const selector = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(rawSelector)
+      const selector = opts.claimId || /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(rawSelector)
         ? rawSelector
         : resolve(cwd, rawSelector);
-      const released = await new ClaimsStore().release(selector);
+      const releasedClaims = await new ClaimsStore().release(selector);
+      const result = {
+        released: releasedClaims.length,
+        claims: releasedClaims,
+        files: [...new Set(releasedClaims.flatMap((claim) => claim.files))].sort(),
+      };
       if (opts.json) {
-        console.log(JSON.stringify({ released }, null, 2));
+        console.log(JSON.stringify(result, null, 2));
         return;
       }
-      console.log(`released ${released} claim${released === 1 ? "" : "s"}`);
+      console.log(`released ${result.released} claim${result.released === 1 ? "" : "s"}`);
+      for (const claim of releasedClaims) {
+        console.log(indent(`${claim.id} (${claim.owner}) ${claim.files.length} file${claim.files.length === 1 ? "" : "s"}`));
+      }
     });
 
   cli.command("coord [cwd]", "Summarize nearby agent activity and possible overlap.")
@@ -231,7 +244,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       printCoordinationDigest(digest, {
         verbose: Boolean(opts.verbose),
         cursorLocation,
-        suppressCursor: omitCursor,
+        suppressCursor: omitCursor || !opts.verbose,
       });
     });
 
@@ -529,6 +542,7 @@ function printListWithFiles(
 function activeFileConflicts(
   digest: CoordinationDigest,
   target: string,
+  ignoredOwner?: string,
 ): {
   id: string;
   displayName: string;
@@ -539,6 +553,7 @@ function activeFileConflicts(
 }[] {
   return digest.sessions
     .filter((session) => session.activeWritingFiles.includes(target))
+    .filter((session) => !ignoredOwner || session.adapter !== "claim" || session.displayName !== `claim-${ignoredOwner}`)
     .map((session) => ({
       id: session.id,
       displayName: session.displayName,

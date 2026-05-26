@@ -223,7 +223,11 @@ describe("CLI integration", () => {
     expect(human.stdout).toMatch(/coord-claude.*reading/);
     expect(human.stdout).toMatch(/hot files: .*src\/core\/engine.ts/);
     expect(human.stdout).not.toMatch(/known files:/);
-    expect(human.stdout).toMatch(/nextCursor:/);
+    expect(human.stdout).not.toMatch(/nextCursor:/);
+
+    const verboseCursor = await runCli(["coord", "/tmp/coord", "--verbose"], { HOME: home });
+    expect(verboseCursor.code).toBe(0);
+    expect(verboseCursor.stdout).toMatch(/nextCursor:/);
 
     const json = await runCli(["coord", "/tmp/coord", "--json"], { HOME: home });
     expect(json.code).toBe(0);
@@ -342,6 +346,10 @@ describe("CLI integration", () => {
     expect(check.ok).toBe(false);
     expect(check.conflicts[0].displayName).toBe("claim-tester");
 
+    const selfCheck = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--as", "tester", "--json"], { HOME: home });
+    expect(selfCheck.code).toBe(0);
+    expect(JSON.parse(selfCheck.stdout).ok).toBe(true);
+
     const filesList = join(home, "files.txt");
     await writeFile(filesList, "README.md\nsrc/other.ts\n", "utf8");
     const bulk = await runCli(["check", "--files-from", filesList, "--cwd", "/tmp/claim", "--json"], { HOME: home });
@@ -352,9 +360,12 @@ describe("CLI integration", () => {
     expect(coord.code).toBe(0);
     expect(JSON.parse(coord.stdout).sessions[0].displayName).toBe("claim-tester");
 
-    const release = await runCli(["release", "src/core/engine.ts", "--cwd", "/tmp/claim"], { HOME: home });
+    const release = await runCli(["release", claimed.id, "--claim-id", "--json"], { HOME: home });
     expect(release.code).toBe(0);
-    expect(release.stdout).toMatch(/released 1 claim/);
+    const released = JSON.parse(release.stdout);
+    expect(released.released).toBe(1);
+    expect(released.claims[0].id).toBe(claimed.id);
+    expect(released.files).toEqual(["/tmp/claim/README.md", "/tmp/claim/src/core/engine.ts"]);
 
     const clear = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim"], { HOME: home });
     expect(clear.code).toBe(0);
