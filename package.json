@@ -1,6 +1,6 @@
 {
   "name": "agent-peek",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Read-only peek into other AI agent chat sessions.",
   "type": "module",
   "main": "./dist/index.js",
@@ -40,7 +40,7 @@
     "demo:studio": "remotion studio remotion/index.ts",
     "demo:mp4": "remotion render remotion/index.ts AgentPeekDemo docs/demo.mp4 --codec=h264 --overwrite",
     "demo:gif": "remotion render remotion/index.ts AgentPeekDemo docs/demo.gif --codec=gif --every-nth-frame=2 --scale=0.75 --overwrite",
-    "demo:png": "remotion still remotion/index.ts AgentPeekDemo docs/demo.png --frame=230 --overwrite",
+    "demo:png": "remotion still remotion/index.ts AgentPeekDemo docs/demo.png --frame=500 --overwrite",
     "demo:render": "npm run demo:mp4 && npm run demo:gif && npm run demo:png",
     "test": "vitest run",
     "test:watch": "vitest",

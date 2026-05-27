@@ -13,126 +13,316 @@ const clamp = {
 };
 
 const easeOut = Easing.bezier(0.16, 1, 0.3, 1);
+const mono =
+  '"SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace';
 
-const timeline = [
-  { at: 18, kind: "cmd", text: "peek claim src/payments/reconcile.ts --ttl 2m --as demo-agent" },
-  { at: 58, kind: "ok", text: "claimed 1 file until 2026-05-27T19:20:59.265Z" },
-  { at: 68, kind: "text", text: "  id: 95ef9f0d-39e2-443d-a582-2b8fe51d79e7" },
-  { at: 78, kind: "text", text: "  ~/work/ledgerforge/src/payments/reconcile.ts" },
+const question =
+  "what was i doing yesterday with codex?";
 
-  { at: 104, kind: "cmd", text: "peek coord . --writing" },
-  { at: 134, kind: "text", text: "coordination: 1 sessions, first snapshot, 1 new" },
-  { at: 144, kind: "dim", text: "cwd: ~/work/ledgerforge" },
-  { at: 154, kind: "text", text: "" },
-  { at: 164, kind: "table", text: "sessions:" },
-  { at: 174, kind: "text", text: "claim-demo-agent (claim, active, tool-running, recent-writing)" },
-  { at: 184, kind: "text", text: "  task: Claimed 1 file until 2026-05-27T19:20:59.265Z" },
-  { at: 194, kind: "text", text: "  active writing files: ~/work/ledgerforge/src/payments/reconcile.ts" },
-  { at: 204, kind: "text", text: "  hot files: ~/work/ledgerforge/src/payments/reconcile.ts" },
+const sessions = [
+  {
+    at: 188,
+    name: "dashboard-codex",
+    status: "yesterday - 4:18 PM",
+    cwd: "~/work/dashboard",
+  },
+  {
+    at: 212,
+    name: "api-codex",
+    status: "yesterday - 11:02 AM",
+    cwd: "~/work/api",
+  },
+  {
+    at: 236,
+    name: "mobile-codex",
+    status: "2 days ago",
+    cwd: "~/work/mobile",
+  },
+];
 
-  { at: 230, kind: "cmd", text: "peek check src/payments/reconcile.ts --as other-agent" },
-  { at: 266, kind: "warn", text: "conflict: 1 active file conflict" },
-  { at: 276, kind: "warn", text: "  ~/work/ledgerforge/src/payments/reconcile.ts claimed/written by claim-demo-agent (claim, active) 0s ago" },
-  { at: 286, kind: "warn", text: "    task: Claimed 1 file until 2026-05-27T19:20:59.265Z" },
-
-  { at: 310, kind: "cmd", text: "peek release 95ef9f0d-39e2-443d-a582-2b8fe51d79e7 --claim-id" },
-  { at: 342, kind: "ok", text: "released 1 claim" },
-  { at: 352, kind: "text", text: "  95ef9f0d-39e2-443d-a582-2b8fe51d79e7 (demo-agent) 1 file" },
+const handoff = [
+  {
+    at: 322,
+    label: "current task",
+    value: "debugging slow dashboard filters after the metrics refactor",
+  },
+  {
+    at: 348,
+    label: "last decision",
+    value: "cache the account list and leave chart rendering untouched",
+  },
+  {
+    at: 374,
+    label: "next step",
+    value: "add a regression test for filtered dashboard loads",
+  },
+  {
+    at: 400,
+    label: "files",
+    value: "src/dashboard/filters.ts  test/dashboard/filters.test.ts",
+  },
 ];
 
 export const AgentPeekDemo: React.FC = () => {
   const frame = useCurrentFrame();
-  const boot = progress(frame, 0, 28);
+  const headerIn = progress(frame, 0, 22);
+  const promptIn = progress(frame, 34, 16);
+  const typedQuestion = Math.floor(question.length * progress(frame, 52, 46));
+  const thoughtIn = progress(frame, 112, 16);
+  const listIn = progress(frame, 150, 16);
+  const handoffIn = progress(frame, 286, 18);
+  const finalIn = progress(frame, 438, 24);
+  const workOpacity = interpolate(frame, [424, 456], [1, 0], clamp);
 
   return (
     <AbsoluteFill style={styles.root}>
       <div
         style={{
-          ...styles.terminal,
-          opacity: boot,
-          transform: `translateY(${interpolate(boot, [0, 1], [18, 0])}px)`,
+          ...styles.stage,
+          opacity: headerIn,
+          transform: `translateY(${interpolate(headerIn, [0, 1], [20, 0])}px)`,
         }}
       >
-        <div style={styles.titlebar}>
-          <div style={styles.lights}>
-            <span style={{ ...styles.light, background: "#ff5f57" }} />
-            <span style={{ ...styles.light, background: "#ffbd2e" }} />
-            <span style={{ ...styles.light, background: "#28c840" }} />
-          </div>
-          <div style={styles.title}>agent-peek — zsh — 160x48</div>
+        <Header />
+        <div style={styles.rule} />
+
+        <div
+          style={{
+            ...styles.prompt,
+            opacity: promptIn,
+            transform: `translateY(${interpolate(promptIn, [0, 1], [8, 0])}px)`,
+          }}
+        >
+          <span style={styles.chevron}>›</span>
+          <span style={styles.question}>{question.slice(0, typedQuestion)}</span>
+          {frame < 108 ? <span style={styles.cursor}>█</span> : null}
         </div>
 
-        <div style={styles.body}>
-          <div style={styles.banner}>agent-peek</div>
-          <div style={styles.explainer}>
-            Read-only visibility into your other AI agent sessions.
-          </div>
-          <div style={styles.workflow}>
-            {"tool calls for agents: claim intent -> coord reads sessions -> check catches overlap -> release clears claim"}
-          </div>
-          {timeline.map((line) => (
-            <TerminalLine key={`${line.at}-${line.text}`} frame={frame} line={line} />
-          ))}
-          <Cursor frame={frame} />
+        <div style={{ opacity: workOpacity }}>
+          <AssistantThought opacity={thoughtIn} />
+          <SessionList frame={frame} opacity={listIn} />
+          <Handoff frame={frame} opacity={handoffIn} />
         </div>
+
+        <FinalState frame={frame} opacity={finalIn} />
       </div>
     </AbsoluteFill>
   );
 };
 
-const TerminalLine: React.FC<{
+const Header: React.FC = () => (
+  <div style={styles.header}>
+    <ClaudeMark />
+    <div>
+      <div style={styles.product}>Claude Code</div>
+      <div style={styles.cwd}>/work/dashboard</div>
+    </div>
+  </div>
+);
+
+const ClaudeMark: React.FC = () => {
+  const blocks = [
+    [1, 0],
+    [2, 0],
+    [3, 0],
+    [0, 1],
+    [1, 1],
+    [2, 1],
+    [3, 1],
+    [4, 1],
+    [1, 2],
+    [2, 2],
+    [3, 2],
+    [1, 3],
+    [3, 3],
+  ];
+
+  return (
+    <div style={styles.mark}>
+      {blocks.map(([x, y]) => (
+        <span
+          key={`${x}-${y}`}
+          style={{
+            ...styles.markBlock,
+            left: x * 24,
+            top: y * 24,
+          }}
+        />
+      ))}
+    </div>
+  );
+};
+
+const AssistantThought: React.FC<{ opacity: number }> = ({ opacity }) => (
+  <div
+    style={{
+      ...styles.thought,
+      opacity,
+      transform: `translateY(${interpolate(opacity, [0, 1], [8, 0])}px)`,
+    }}
+  >
+    <span style={styles.thoughtPrefix}>Claude</span>
+    <span>I need yesterday's Codex history for this repo. I will use </span>
+    <span style={styles.inlineCode}>peek</span>
+    <span> to inspect it read-only.</span>
+  </div>
+);
+
+const SessionList: React.FC<{ frame: number; opacity: number }> = ({
+  frame,
+  opacity,
+}) => (
+  <div
+    style={{
+      ...styles.block,
+      opacity,
+      transform: `translateY(${interpolate(opacity, [0, 1], [10, 0])}px)`,
+    }}
+  >
+    <Line frame={frame} at={154} color="#f6c200" text="$ peek list --adapter codex --all" />
+    <Line frame={frame} at={170} color="#e07b5f" text=":: found Codex sessions" />
+    {sessions.map((session) => (
+      <SessionRow key={session.name} frame={frame} session={session} />
+    ))}
+  </div>
+);
+
+const SessionRow: React.FC<{
   frame: number;
-  line: (typeof timeline)[number];
-}> = ({ frame, line }) => {
-  const enter = progress(frame, line.at, 10);
-  const typed =
-    line.kind === "cmd"
-      ? Math.floor(line.text.length * progress(frame, line.at, 30))
-      : line.text.length;
+  session: (typeof sessions)[number];
+}> = ({ frame, session }) => {
+  const enter = progress(frame, session.at, 12);
+  const selected = session.name === "dashboard-codex";
+  const select = selected ? progress(frame, 252, 18) : 0;
+
+  return (
+    <div
+      style={{
+        ...styles.sessionRow,
+        opacity: enter,
+        transform: `translateY(${interpolate(enter, [0, 1], [8, 0])}px)`,
+      }}
+    >
+      <div
+        style={{
+          ...styles.selector,
+          opacity: selected ? 1 : 0,
+          transform: `scaleX(${interpolate(select, [0, 1], [0.2, 1])})`,
+        }}
+      />
+      <span style={styles.check}>✓</span>
+      <span style={selected ? styles.sessionNameActive : styles.sessionName}>
+        {session.name}
+      </span>
+      <span style={styles.sessionStatus}>{session.status}</span>
+      <div style={styles.sessionCwd}>{session.cwd}</div>
+    </div>
+  );
+};
+
+const Handoff: React.FC<{ frame: number; opacity: number }> = ({
+  frame,
+  opacity,
+}) => (
+  <div
+    style={{
+      ...styles.handoff,
+      opacity,
+      transform: `translateY(${interpolate(opacity, [0, 1], [12, 0])}px)`,
+    }}
+  >
+    <Line
+      frame={frame}
+      at={292}
+      color="#f6c200"
+      text="$ peek at dashboard-codex --mode handoff"
+    />
+    <div style={styles.handoffRows}>
+      {handoff.map((item) => (
+        <HandoffRow key={item.label} frame={frame} item={item} />
+      ))}
+    </div>
+  </div>
+);
+
+const HandoffRow: React.FC<{
+  frame: number;
+  item: (typeof handoff)[number];
+}> = ({ frame, item }) => {
+  const enter = progress(frame, item.at, 12);
+
+  return (
+    <div
+      style={{
+        ...styles.handoffRow,
+        opacity: enter,
+        transform: `translateY(${interpolate(enter, [0, 1], [8, 0])}px)`,
+      }}
+    >
+      <span style={styles.handoffLabel}>{item.label}</span>
+      <span style={styles.handoffValue}>{item.value}</span>
+    </div>
+  );
+};
+
+const FinalState: React.FC<{ frame: number; opacity: number }> = ({
+  frame,
+  opacity,
+}) => {
+  const bar = interpolate(frame, [462, 500], [0, 1], clamp);
+  const sub = progress(frame, 488, 16);
+
+  return (
+    <div
+      style={{
+        ...styles.final,
+        opacity,
+        transform: `translateY(${interpolate(opacity, [0, 1], [24, 0])}px)`,
+      }}
+    >
+      <div style={styles.finalTitle}>✓ Found your session</div>
+      <div style={styles.finalCopy}>
+        Claude Code used Agent Peek to recover yesterday's Codex context for the current project.
+      </div>
+      <div style={styles.meter}>
+        <div style={{ ...styles.meterFill, width: `${bar * 100}%` }} />
+      </div>
+      <div
+        style={{
+          ...styles.finalTags,
+          opacity: sub,
+          transform: `translateY(${interpolate(sub, [0, 1], [8, 0])}px)`,
+        }}
+      >
+        <span>natural question</span>
+        <span>peek CLI</span>
+        <span>yesterday's Codex context</span>
+      </div>
+    </div>
+  );
+};
+
+const Line: React.FC<{
+  frame: number;
+  at: number;
+  text: string;
+  color: string;
+}> = ({ frame, at, text, color }) => {
+  const enter = progress(frame, at, 10);
 
   return (
     <div
       style={{
         ...styles.line,
-        ...styleForKind(line.kind),
+        color,
         opacity: enter,
         transform: `translateY(${interpolate(enter, [0, 1], [7, 0])}px)`,
       }}
     >
-      {line.kind === "cmd" ? (
-        <>
-          <span style={styles.dollar}>$ </span>
-          <span>{line.text.slice(0, typed)}</span>
-          {frame >= line.at && frame < line.at + 36 ? <span style={styles.cursor}>_</span> : null}
-        </>
-      ) : (
-        <span>{line.text}</span>
-      )}
+      {text}
     </div>
   );
 };
-
-const Cursor: React.FC<{ frame: number }> = ({ frame }) => {
-  const show = progress(frame, 344, 12);
-
-  return (
-    <div style={{ ...styles.line, opacity: show }}>
-      <span style={styles.dollar}>$ </span>
-      <span style={{ opacity: Math.sin(frame / 5) > 0 ? 1 : 0 }}>_</span>
-    </div>
-  );
-};
-
-function styleForKind(kind: string): CSSProperties {
-  if (kind === "cmd") return { color: "#f3f4e8", marginTop: 18 };
-  if (kind === "warn") return { color: "#ffb86c" };
-  if (kind === "exit") return { color: "#ff6b6b" };
-  if (kind === "ok") return { color: "#78d8a4" };
-  if (kind === "json") return { color: "#9cdcfe" };
-  if (kind === "table") return { color: "#a9b7c6", marginTop: 8 };
-  if (kind === "dim") return { color: "#7f8c8d" };
-  return { color: "#d7dac8" };
-}
 
 function progress(frame: number, from: number, duration: number) {
   return interpolate(frame, [from, from + duration], [0, 1], {
@@ -141,86 +331,198 @@ function progress(frame: number, from: number, duration: number) {
   });
 }
 
-const mono =
-  '"SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace';
-
 const styles: Record<string, CSSProperties> = {
   root: {
-    background: "#111111",
+    background: "#050505",
+    color: "#f2f2ed",
     fontFamily: mono,
   },
-  terminal: {
+  stage: {
     position: "absolute",
-    inset: 46,
-    borderRadius: 18,
-    background: "#0b0d0e",
-    border: "1px solid #2a2f31",
-    boxShadow: "0 26px 90px rgba(0, 0, 0, 0.55)",
-    overflow: "hidden",
+    inset: "74px 88px",
   },
-  titlebar: {
-    height: 58,
-    display: "grid",
-    gridTemplateColumns: "160px 1fr 160px",
-    alignItems: "center",
-    background: "#171a1c",
-    borderBottom: "1px solid #2a2f31",
-  },
-  lights: {
+  header: {
+    height: 180,
     display: "flex",
-    gap: 10,
-    paddingLeft: 22,
+    alignItems: "center",
+    gap: 48,
   },
-  light: {
-    width: 15,
-    height: 15,
-    borderRadius: 999,
+  mark: {
+    position: "relative",
+    width: 120,
+    height: 96,
+    flex: "0 0 auto",
   },
-  title: {
-    color: "#b8b8b8",
-    textAlign: "center",
-    fontSize: 18,
+  markBlock: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    background: "#dd7657",
+  },
+  product: {
+    color: "#f4f4f0",
+    fontSize: 39,
+    fontWeight: 800,
+    lineHeight: 1.18,
     letterSpacing: 0,
-  },
-  body: {
-    padding: "30px 34px",
-  },
-  banner: {
-    color: "#f3f4e8",
-    fontSize: 28,
-    lineHeight: 1.2,
-    marginBottom: 4,
-  },
-  explainer: {
-    color: "#d7dac8",
-    fontSize: 20,
-    lineHeight: 1.28,
-  },
-  workflow: {
-    color: "#7f8c8d",
-    fontSize: 18,
-    lineHeight: 1.28,
-    marginTop: 4,
-    marginBottom: 18,
-  },
-  line: {
-    minHeight: 30,
-    whiteSpace: "pre",
-    fontSize: 21,
-    lineHeight: 1.28,
-    letterSpacing: 0,
-  },
-  prompt: {
-    color: "#78d8a4",
-    fontWeight: 700,
   },
   cwd: {
-    color: "#9cdcfe",
+    color: "#686868",
+    fontSize: 38,
+    lineHeight: 1.18,
+    letterSpacing: 0,
+    marginTop: 14,
   },
-  dollar: {
-    color: "#c586c0",
+  rule: {
+    height: 1,
+    background: "#242424",
+  },
+  prompt: {
+    height: 104,
+    borderBottom: "1px solid #1c1c1c",
+    display: "flex",
+    alignItems: "center",
+    fontSize: 50,
+    lineHeight: 1,
+  },
+  chevron: {
+    color: "#777777",
+    fontSize: 68,
+    marginRight: 28,
+    transform: "translateY(-4px)",
+  },
+  question: {
+    color: "#f2f2ed",
   },
   cursor: {
-    color: "#f3f4e8",
+    color: "#d9d9d4",
+    fontSize: 52,
+    marginLeft: 8,
+  },
+  thought: {
+    marginTop: 24,
+    minHeight: 42,
+    color: "#d8d8d1",
+    fontSize: 25,
+    lineHeight: 1.34,
+  },
+  thoughtPrefix: {
+    color: "#7b7b7b",
+    marginRight: 22,
+  },
+  inlineCode: {
+    color: "#f6c200",
+  },
+  block: {
+    marginTop: 18,
+  },
+  line: {
+    minHeight: 34,
+    fontSize: 24,
+    lineHeight: 1.34,
+    letterSpacing: 0,
+    whiteSpace: "pre",
+  },
+  sessionRow: {
+    position: "relative",
+    minHeight: 62,
+    fontSize: 28,
+    lineHeight: 1.24,
+    letterSpacing: 0,
+  },
+  selector: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 1,
+    height: 58,
+    background:
+      "linear-gradient(90deg, rgba(80,217,122,0.17), rgba(80,217,122,0.04) 58%, rgba(80,217,122,0))",
+    transformOrigin: "left center",
+  },
+  check: {
+    position: "relative",
+    display: "inline-block",
+    width: 48,
+    color: "#64e58c",
+  },
+  sessionName: {
+    position: "relative",
+    color: "#45a765",
+  },
+  sessionNameActive: {
+    position: "relative",
+    color: "#65e38d",
+    fontWeight: 800,
+  },
+  sessionStatus: {
+    position: "absolute",
+    right: 22,
+    color: "#777777",
+  },
+  sessionCwd: {
+    position: "relative",
+    color: "#777777",
+    fontSize: 22,
+    marginTop: 4,
+    paddingLeft: 74,
+  },
+  handoff: {
+    marginTop: 16,
+  },
+  handoffRows: {
+    marginTop: 10,
+  },
+  handoffRow: {
+    display: "grid",
+    gridTemplateColumns: "220px 1fr",
+    alignItems: "baseline",
+    minHeight: 40,
+    fontSize: 25,
+    lineHeight: 1.32,
+  },
+  handoffLabel: {
+    color: "#797979",
+  },
+  handoffValue: {
+    color: "#f0f0e8",
+  },
+  final: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 490,
+  },
+  finalTitle: {
+    color: "#65e38d",
+    fontSize: 56,
+    fontWeight: 800,
+    lineHeight: 1.12,
+    letterSpacing: 0,
+  },
+  finalCopy: {
+    color: "#f2f2ed",
+    fontSize: 30,
+    lineHeight: 1.3,
+    marginTop: 16,
+    maxWidth: 1480,
+  },
+  meter: {
+    width: 940,
+    height: 30,
+    background: "#1d1d1d",
+    marginTop: 32,
+  },
+  meterFill: {
+    height: "100%",
+    background: "#50d97a",
+  },
+  finalTags: {
+    display: "flex",
+    gap: 42,
+    marginTop: 22,
+    color: "#8a8a8a",
+    fontSize: 25,
+    lineHeight: 1.2,
   },
 };
