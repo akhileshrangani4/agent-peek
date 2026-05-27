@@ -79,21 +79,10 @@ peek list --adapter claude-code           # scan/list one adapter
 peek list --all                           # include ended sessions
 peek list --terminals                     # include tmux/screen terminal captures
 peek list --ids                           # show raw session ids
-peek list --files                         # include active/recent file context
 peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
 peek doctor                               # adapter availability and setup hints
-peek check src/core/engine.ts             # exit 1 if another agent is actively writing the file
-peek check src/core/engine.ts --as codex-main
-peek check --files-from changed-files.txt # bulk conflict check
-peek claim src/core/engine.ts --ttl 2m    # declare temporary write intent
-peek claim src/core/engine.ts --files-from changed-files.txt --ttl 2m
-peek release src/core/engine.ts           # release a prior claim
-peek release <claim-id> --claim-id --files-from done-files.txt
 peek coord                                # summarize nearby agents in this cwd
-peek coord /path/to/repo --json           # machine-readable coordination digest
-peek coord . --json --fields currentTask,intent,activeWritingFiles --cursor-file .peek-cursor
-peek coord . --json --fields currentTask,intent,activeWritingFiles --since-file .peek-cursor
 
 peek ui                                   # interactive terminal browser
 peek ui --adapter codex
@@ -219,36 +208,24 @@ peek at researcher --mode raw --since <nextCursor> --json
 For parallel work, `peek coord` gives agents a compact coordination digest:
 
 ```bash
-peek coord .
-peek coord . --since <nextCursor> --json
-peek coord . --json --fields currentTask,intent,activeWritingFiles --cursor-file .peek-cursor
-peek coord . --json --fields currentTask,intent,activeWritingFiles --since-file .peek-cursor
+peek coord . --writing
+peek check src/core/engine.ts
+peek claim src/core/engine.ts --ttl 2m --as codex-main
+peek release <claim-id> --claim-id --json
 ```
 
-The digest includes active sessions under the cwd, each session's inferred task/activity,
-changed message count, recent tools, edit intent, active writing files, recent
-write context, hot/recent/known files, ranked overlap hints, and a coordination cursor for
-cheap follow-up checks. Low-signal login/no-op sessions are hidden by default.
-Historical/read-only overlap and directory-only touches are omitted from the
-default risk list, and overlap hints include last activity/writer timestamps so
-agents can judge stale conflicts. Human output shows the top overlap risks first;
-use `--verbose` for full file lists, `--all` to include low-signal sessions,
-`--status active` or `--writing` to reduce fleet noise, and `--fields` plus
-`--since-file`, `--cursor-file`, or `--cursor-stderr` to keep JSON payloads small
-while preserving the reusable cursor. `--since-file` is the polling-friendly path:
-it reads a prior cursor from the file when present and writes the next cursor back.
-`peek coord` is an awareness tool, not a lock manager; agents should treat
-active writing overlap as a signal to inspect or wait, not as enforced exclusion.
-For shell-gated write workflows, `peek check <file>` is the simplest primitive:
-it exits `0` when no active writer is detected and `1` when a conflict is present.
-Use `peek claim <file> --ttl 2m` before a planned edit to broadcast intent and
-close the check-then-write race window. Claims are local, TTL-bound, visible in
-`coord --writing`, and can be released with `peek release <file>` when done.
-Use `peek check --as <owner>` to ignore your own claims in claim-then-check
-loops. Usage/internal errors exit with `5`/`1`, so `0` is safe, `1` is conflict,
-and anything else should stop the workflow.
-Claims are cooperative, local coordination signals; `--as` is an unverified
-owner label for well-behaved agents, not authentication or access control.
+Useful details:
+
+- `peek coord . --writing` shows active writers and file claims, hiding idle noise.
+- `peek check <file>` exits `0` when clear and `1` on conflict.
+- `peek check --files-from changed-files.txt` bulk-checks a planned edit.
+- `peek claim <file> --ttl 2m` broadcasts temporary write intent.
+- `peek check <file> --as <owner>` ignores your own claims in claim-then-check loops.
+- `peek release <claim-id> --claim-id --files-from done-files.txt` partially releases a claim.
+- `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` is the polling-friendly JSON path.
+
+Claims are cooperative local signals, not authentication or access control.
+Use them to help well-behaved agents avoid overlap.
 
 ## MCP
 
