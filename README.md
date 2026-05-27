@@ -81,6 +81,10 @@ peek list --terminals                     # include tmux/screen terminal capture
 peek list --ids                           # show raw session ids
 peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
+peek help                                 # focused command overview
+peek version                              # installed version
+peek update                               # update global install from npm
+peek update --check                       # check latest version without installing
 peek doctor                               # adapter availability and setup hints
 peek coord                                # summarize nearby agents in this cwd
 

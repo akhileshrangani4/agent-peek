@@ -28,6 +28,40 @@ describe("CLI integration", () => {
     expect(r.stderr).toBe("");
   });
 
+  it("help command prints focused agent help", async () => {
+    const overview = await runCli(["help"]);
+    expect(overview.code).toBe(0);
+    expect(overview.stdout).toMatch(/Common commands:/);
+    expect(overview.stdout).toMatch(/peek coord \. --writing/);
+
+    const coord = await runCli(["help", "coord"]);
+    expect(coord.code).toBe(0);
+    expect(coord.stdout).toMatch(/peek coord/);
+    expect(coord.stdout).toMatch(/Full options: peek coord --help/);
+  });
+
+  it("version command prints installed version", async () => {
+    const text = await runCli(["version"]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toMatch(/^agent-peek \d+\.\d+\.\d+/);
+
+    const json = await runCli(["version", "--json"]);
+    expect(json.code).toBe(0);
+    expect(JSON.parse(json.stdout).name).toBe("agent-peek");
+  });
+
+  it("update command reports npm status", async () => {
+    const current = await runCli(["update", "--check"], { AGENT_PEEK_LATEST_VERSION: "0.0.0" });
+    expect(current.code).toBe(0);
+    expect(current.stdout).toMatch(/status up-to-date/);
+
+    const newer = await runCli(["update", "--check", "--json"], { AGENT_PEEK_LATEST_VERSION: "9.9.9" });
+    expect(newer.code).toBe(0);
+    const info = JSON.parse(newer.stdout);
+    expect(info.status).toBe("update-available");
+    expect(info.command).toBe("npm install -g agent-peek@latest");
+  });
+
   it("ui help is available", async () => {
     const r = await runCli(["ui", "--help"]);
     expect(r.code).toBe(0);
@@ -388,8 +422,10 @@ describe("CLI integration", () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["doctor"], { HOME: home });
     expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/agent-peek \d+\.\d+\.\d+/);
     expect(r.stdout).toMatch(/ADAPTER/);
     expect(r.stdout).toMatch(/claude-code/);
     expect(r.stdout).toMatch(/tmux/);
+    expect(r.stdout).toMatch(/next:/);
   });
 });

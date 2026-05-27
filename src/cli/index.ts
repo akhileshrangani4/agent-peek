@@ -24,12 +24,56 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.usage("<command> [options]");
   cli.example("peek list");
   cli.example("peek list --json");
-  cli.example("peek at sessionseek-codex --mode structured");
+  cli.example("peek at ledgerforge-codex --mode structured");
   cli.example("peek coord");
   cli.example("peek check src/core/engine.ts");
   cli.example("peek claim src/core/engine.ts --ttl 2m");
+  cli.example("peek version");
+  cli.example("peek update");
   cli.example("peek ui");
   cli.example("peek doctor");
+
+  cli.command("help [command]", "Show focused help for humans and agents.")
+    .usage("help [command]")
+    .example("peek help")
+    .example("peek help coord")
+    .action((command) => {
+      printFocusedHelp(command === undefined ? undefined : String(command));
+    });
+
+  cli.command("version", "Print the installed agent-peek version.")
+    .usage("version [--json]")
+    .example("peek version")
+    .example("peek version --json")
+    .option("--json", "Output machine-readable version info")
+    .action((opts) => {
+      const result = { name: "agent-peek", version: VERSION };
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else console.log(`agent-peek ${VERSION}`);
+    });
+
+  cli.command("update", "Update the global agent-peek install from npm.")
+    .usage("update [--check] [--force] [--json]")
+    .example("peek update")
+    .example("peek update --check")
+    .example("peek update --json")
+    .option("--check", "Only check the latest npm version; do not install")
+    .option("--force", "Run the install command even when the latest version matches")
+    .option("--json", "Output machine-readable update info")
+    .action(async (opts) => {
+      const result = await updateInfo();
+      if (opts.check) {
+        if (opts.json) console.log(JSON.stringify(result, null, 2));
+        else printUpdateInfo(result);
+        return;
+      }
+      const update = await performUpdate(result, { force: Boolean(opts.force) });
+      if (opts.json) {
+        console.log(JSON.stringify(update, null, 2));
+        return;
+      }
+      printUpdateResult(update);
+    });
 
   cli.command("list [target]", "List local agent sessions. Use `list adapters` for supported adapters.")
     .usage("list [adapters] [--adapter <name>] [--status <status>] [--all] [--terminals] [--ids] [--files] [--json]")
@@ -250,7 +294,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
 
   cli.command("at <selector>", "Read a session by displayName, id, tag, or cwd.")
     .usage("at <selector> [--mode raw|structured|brief|summary|handoff] [--since <cursor>] [--limit <n>] [--json]")
-    .example("peek at sessionseek-codex --mode structured")
+    .example("peek at ledgerforge-codex --mode structured")
     .example("peek at codex:abc123 --mode raw --last 50")
     .example("peek at codex:abc123 --mode raw --first 20")
     .example("peek at codex:abc123 --mode raw --around 100 --limit 30")
@@ -398,7 +442,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         error: "unknown_command",
         message: `Unknown or missing command: ${argv.slice(2).join(" ") || "(none)"}`,
         hint: "Run `peek --help` for commands, or use `peek list` to discover sessions.",
-        next: ["peek --help", "peek list", "peek doctor"],
+        next: ["peek help", "peek list", "peek doctor"],
       });
     }
     await cli.runMatchedCommand();
@@ -470,7 +514,7 @@ function handleError(e: unknown): number {
       error: "invalid_usage",
       message: err.message,
       hint: "Run command help for the expected arguments and options.",
-      next: ["peek --help", "peek list --help", "peek at --help"],
+      next: ["peek help", "peek list --help", "peek at --help"],
     });
   }
   fail({
@@ -984,6 +1028,212 @@ function fail(opts: {
   process.exit(opts.code);
 }
 
+function printFocusedHelp(command?: string): void {
+  const commands: Record<string, string[]> = {
+    list: [
+      "peek list                         # show active local sessions",
+      "peek list --json                  # script-friendly session list",
+      "peek list --files                 # include active/recent file context",
+      "peek list adapters                # show adapter names",
+    ],
+    at: [
+      "peek at <selector> --mode brief       # compact local status",
+      "peek at <selector> --mode structured  # stable fields for agents",
+      "peek at <selector> --mode handoff     # decisions, files, next actions",
+      "peek at <selector> --last 50 --tools  # inspect raw transcript details",
+    ],
+    coord: [
+      "peek coord . --writing",
+      "peek coord . --json --fields currentTask,intent,activeWritingFiles",
+      "peek coord . --since-file .peek-cursor --json",
+    ],
+    check: [
+      "peek check src/core/engine.ts",
+      "peek check --files-from changed-files.txt",
+      "peek check docs/demo.mp4 --as demo-agent",
+    ],
+    claim: [
+      "peek claim src/core/engine.ts --ttl 2m --as codex-main",
+      "peek claim src/core/engine.ts --files-from changed-files.txt --ttl 2m",
+    ],
+    release: [
+      "peek release src/core/engine.ts",
+      "peek release <claim-id> --claim-id --json",
+    ],
+    doctor: [
+      "peek doctor",
+      "peek doctor --json",
+    ],
+    update: [
+      "peek version",
+      "peek update              # install agent-peek@latest globally",
+      "peek update --check      # check only",
+      "npm install -g agent-peek@latest",
+    ],
+  };
+
+  if (command) {
+    const lines = commands[command];
+    if (!lines) {
+      fail({
+        code: 5,
+        error: "unknown_help_topic",
+        message: `Unknown help topic: ${command}`,
+        hint: "Use `peek help` for the overview, or `peek <command> --help` for full command options.",
+        next: ["peek help", "peek list --help", "peek coord --help"],
+      });
+    }
+    console.log(`peek ${command}`);
+    console.log("");
+    for (const line of lines) console.log(line);
+    console.log("");
+    console.log(`Full options: peek ${command} --help`);
+    return;
+  }
+
+  console.log("agent-peek");
+  console.log("Read-only visibility and coordination for local AI agent sessions.");
+  console.log("");
+  console.log("Common commands:");
+  console.log("  peek list                         show active sessions");
+  console.log("  peek at <selector> --mode brief   read one session without touching it");
+  console.log("  peek coord . --writing            see active writers in this repo");
+  console.log("  peek check <file>                 exit 1 if another agent is writing it");
+  console.log("  peek claim <file> --ttl 2m        broadcast temporary write intent");
+  console.log("  peek release <claim-id> --claim-id");
+  console.log("  peek ui                           browse sessions interactively");
+  console.log("  peek doctor                       diagnose adapter availability");
+  console.log("  peek version                      show installed version");
+  console.log("  peek update                       install the latest npm version globally");
+  console.log("");
+  console.log("Focused help:");
+  console.log("  peek help coord");
+  console.log("  peek help check");
+  console.log("  peek help update");
+  console.log("");
+  console.log("Full options:");
+  console.log("  peek <command> --help");
+}
+
+interface UpdateInfo {
+  name: "agent-peek";
+  current: string;
+  latest?: string;
+  status: "up-to-date" | "update-available" | "unknown";
+  command: string;
+  error?: string;
+}
+
+interface UpdateResult extends UpdateInfo {
+  installStatus: "skipped" | "installed" | "failed";
+  stdout?: string;
+  stderr?: string;
+}
+
+async function updateInfo(): Promise<UpdateInfo> {
+  const command = "npm install -g agent-peek@latest";
+  try {
+    const latest = await latestNpmVersion();
+    return {
+      name: "agent-peek",
+      current: VERSION,
+      latest,
+      status: compareVersions(latest, VERSION) > 0 ? "update-available" : "up-to-date",
+      command,
+    };
+  } catch (e) {
+    return {
+      name: "agent-peek",
+      current: VERSION,
+      status: "unknown",
+      command,
+      error: (e as Error)?.message ?? String(e),
+    };
+  }
+}
+
+async function performUpdate(info: UpdateInfo, opts: { force?: boolean }): Promise<UpdateResult> {
+  if (!opts.force && info.status === "up-to-date") {
+    return { ...info, installStatus: "skipped" };
+  }
+  try {
+    const { stdout, stderr } = await execFileAsync("npm", ["install", "-g", "agent-peek@latest"], {
+      encoding: "utf8",
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024,
+    });
+    return {
+      ...info,
+      installStatus: "installed",
+      stdout: stdout.trim() || undefined,
+      stderr: stderr.trim() || undefined,
+    };
+  } catch (e) {
+    const err = e as Error & { stdout?: string; stderr?: string };
+    return {
+      ...info,
+      installStatus: "failed",
+      error: err.message,
+      stdout: err.stdout?.trim() || undefined,
+      stderr: err.stderr?.trim() || undefined,
+    };
+  }
+}
+
+async function latestNpmVersion(): Promise<string> {
+  const override = process.env.AGENT_PEEK_LATEST_VERSION;
+  if (override) return override.trim();
+  const { stdout } = await execFileAsync("npm", ["view", "agent-peek", "version"], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  const latest = stdout.trim();
+  if (!latest) throw new Error("npm returned an empty version");
+  return latest;
+}
+
+function printUpdateInfo(info: UpdateInfo): void {
+  console.log(`agent-peek ${info.current}`);
+  if (info.latest) console.log(`latest ${info.latest}`);
+  else console.log("latest unavailable");
+  console.log(`status ${info.status}`);
+  if (info.status === "update-available") console.log(`run: ${info.command}`);
+  else if (info.status === "unknown") {
+    console.log(`run: ${info.command}`);
+    if (info.error) console.log(`note: could not check npm (${oneLine(info.error)})`);
+  }
+}
+
+function printUpdateResult(result: UpdateResult): void {
+  printUpdateInfo(result);
+  if (result.installStatus === "skipped") {
+    console.log("install skipped: already up to date");
+    return;
+  }
+  if (result.installStatus === "installed") {
+    console.log("install complete");
+    if (result.stdout) console.log(result.stdout);
+    if (result.stderr) console.error(result.stderr);
+    return;
+  }
+  console.log("install failed");
+  if (result.stdout) console.log(result.stdout);
+  if (result.stderr) console.error(result.stderr);
+  process.exitCode = 1;
+}
+
+function compareVersions(a: string, b: string): number {
+  const left = a.split(/[.-]/).map((part) => Number.parseInt(part, 10));
+  const right = b.split(/[.-]/).map((part) => Number.parseInt(part, 10));
+  const max = Math.max(left.length, right.length);
+  for (let i = 0; i < max; i += 1) {
+    const l = Number.isFinite(left[i]) ? left[i]! : 0;
+    const r = Number.isFinite(right[i]) ? right[i]! : 0;
+    if (l !== r) return l > r ? 1 : -1;
+  }
+  return 0;
+}
+
 interface DoctorRow {
   adapter: string;
   source: string;
@@ -1058,18 +1308,29 @@ function shellQuote(value: string): string {
 }
 
 function printDoctor(rows: DoctorRow[]): void {
+  const ready = rows.filter((row) => row.status === "ready").length;
+  const optIn = rows.filter((row) => row.status === "opt-in").length;
+  const blocked = rows.filter((row) => row.status === "needs command").length;
   const table = rows.map((row) => [
     row.adapter,
-    row.source,
     row.status,
+    row.source,
     row.path ? formatPath(row.path) : row.command ?? "-",
     row.note ?? "",
   ]);
-  const headers = ["ADAPTER", "SOURCE", "STATUS", "TARGET", "NOTE"];
+  const headers = ["ADAPTER", "STATUS", "SOURCE", "TARGET", "NOTE"];
   const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  console.log(`agent-peek ${VERSION}`);
+  console.log(`ready: ${ready}  opt-in: ${optIn}  needs-command: ${blocked}`);
+  console.log("");
   console.log(fmt(headers));
   for (const row of table) console.log(fmt(row));
+  console.log("");
+  console.log("next:");
+  console.log("  - use `peek list` to discover ready file/database adapters");
+  console.log("  - use `peek list --terminals` to opt into tmux/screen capture");
+  console.log("  - use `peek update` to check whether this CLI is current");
 }
 
 function isTerminalAdapter(adapter: unknown): boolean {

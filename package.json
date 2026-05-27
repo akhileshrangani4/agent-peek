@@ -1,6 +1,6 @@
 {
   "name": "agent-peek",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Read-only peek into other AI agent chat sessions.",
   "type": "module",
   "main": "./dist/index.js",
@@ -37,6 +37,11 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "demo:studio": "remotion studio remotion/index.ts",
+    "demo:mp4": "remotion render remotion/index.ts AgentPeekDemo docs/demo.mp4 --codec=h264 --overwrite",
+    "demo:gif": "remotion render remotion/index.ts AgentPeekDemo docs/demo.gif --codec=gif --every-nth-frame=2 --scale=0.75 --overwrite",
+    "demo:png": "remotion still remotion/index.ts AgentPeekDemo docs/demo.png --frame=230 --overwrite",
+    "demo:render": "npm run demo:mp4 && npm run demo:gif && npm run demo:png",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -58,10 +63,14 @@
     "url": "git+https://github.com/akhileshrangani4/agent-peek.git"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.468",
     "@types/node": "^22.0.0",
     "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^1.6.1",
+    "react-dom": "^19.2.6",
+    "remotion": "^4.0.468",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
