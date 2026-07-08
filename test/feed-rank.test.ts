@@ -34,6 +34,15 @@ describe("scorePost", () => {
     expect(subtree).toBeGreaterThan(none);
   });
 
+  it("scores root-level paths in the same-directory tier, not the no-overlap floor", () => {
+    const rootCtx: RankContext = { contextPaths: ["package.json"], readerSession: "codex:9", now };
+    const sameDir = scorePost(make({ paths: ["tsconfig.json"] }), rootCtx);
+    const exact = scorePost(make({ paths: ["package.json"] }), rootCtx);
+    const none = scorePost(make({ paths: ["docs/x.md"] }), rootCtx);
+    expect(sameDir).toBeGreaterThan(none);
+    expect(sameDir).toBeLessThan(exact);
+  });
+
   it("drifted posts score lower than fresh ones", () => {
     const fresh = make();
     const drifted = make();
@@ -41,10 +50,20 @@ describe("scorePost", () => {
     expect(scorePost(drifted, ctx)).toBeLessThan(scorePost(fresh, ctx));
   });
 
-  it("excludes superseded and expired posts", () => {
+  it("excludes superseded posts", () => {
     const gone = make();
     gone.lifecycle.validity = "superseded";
     expect(scorePost(gone, ctx)).toBe(0);
+  });
+
+  it("excludes fresh posts whose expiresAt has already passed", () => {
+    const pastDate = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+    const expired = validatePost({
+      type: "finding", title: "t", text: "some body text", project: "p",
+      author: { session: "a" }, paths: ["src/payments/webhook.ts"], ttlMs: 60_000,
+    } as never, pastDate);
+    expect(expired.lifecycle.validity).toBe("fresh");
+    expect(scorePost(expired, ctx)).toBe(0);
   });
 
   it("decays status posts hard with age, but not warnings", () => {
@@ -72,6 +91,21 @@ describe("packFeed", () => {
     const packed = packFeed([], 600, ctx);
     expect(packed.items).toEqual([]);
     expect(packed.omitted).toBe(0);
+  });
+
+  it("falls back to a title-only item when the full body overflows but the title line fits", () => {
+    const post = make({ text: "word ".repeat(100) });
+    const packed = packFeed([post], 15, ctx);
+    expect(packed.items).toHaveLength(1);
+    expect(packed.items[0]?.presentation).toBe("title");
+    expect(packed.omitted).toBe(0);
+  });
+
+  it("omits the post entirely when the budget is under the title-only cost", () => {
+    const post = make({ text: "word ".repeat(100) });
+    const packed = packFeed([post], 14, ctx);
+    expect(packed.items).toEqual([]);
+    expect(packed.omitted).toBe(1);
   });
 });
 

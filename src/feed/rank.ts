@@ -33,7 +33,7 @@ function relevance(post: FeedPost, ctx: RankContext): number {
   for (const path of post.scope.paths) {
     if (ctx.contextPaths.includes(path)) { best = Math.max(best, 1); continue; }
     const dir = dirOf(path);
-    if (dir && [...readerDirs].some((d) => d === dir || d.startsWith(`${dir}/`) || dir.startsWith(`${d}/`))) {
+    if ([...readerDirs].some((d) => d === dir || d.startsWith(`${dir}/`) || dir.startsWith(`${d}/`))) {
       best = Math.max(best, 0.6);
     }
   }
