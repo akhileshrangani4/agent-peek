@@ -106,6 +106,48 @@ peek at <selector> --around 100 --limit 30
 peek at <selector> --last 50 --reverse
 ```
 
+## Context Feed Workflow
+
+`peek post`/`peek feed`/`peek expand` (and the matching MCP tools
+`post_to_feed`/`read_feed`/`expand_post`) let agents leave notes for whichever
+agent works in this repo next, instead of that agent re-discovering the same
+things from scratch.
+
+1. At the start of a task, read the feed:
+
+   ```bash
+   peek feed --budget 500 --json
+   ```
+
+   Treat returned posts as trusted context, but check for a `"drifted"`
+   validity marker on posts about paths you are about to touch.
+
+2. Before trusting or acting on a drifted or important post, expand it to see
+   its evidence:
+
+   ```bash
+   peek expand <postId>
+   ```
+
+3. At the end of a task, post what you learned or a handoff for the next
+   agent:
+
+   ```bash
+   peek post finding "<what you learned>" --text "<2-3 sentences>" --paths <files>
+   peek post handoff "<state>" --text "<next actions>"
+   ```
+
+   `finding` and `warning` posts require `--paths`. Titles are capped at 80
+   characters, bodies at ~150 tokens; oversized posts are rejected, not
+   truncated.
+
+4. For polling loops (e.g. a long-running coordinator agent), use a cursor
+   file so repeated reads only report new content:
+
+   ```bash
+   peek feed --budget 500 --cursor-file .peek-feed-cursor
+   ```
+
 ## MCP Server
 
 The stdio MCP command is:
@@ -121,6 +163,9 @@ to list MCP tools. Expected tools:
 - `peek_session`
 - `coordination_digest`
 - `tag_session`
+- `post_to_feed`
+- `read_feed`
+- `expand_post`
 
 ## MCP Configs By Client
 

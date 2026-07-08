@@ -3,7 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/agent-peek.svg)](https://www.npmjs.com/package/agent-peek)
 [![license](https://img.shields.io/npm/l/agent-peek.svg)](./LICENSE)
 
-Read-only visibility into your other AI agent sessions.
+The context feed your agents read before touching the repo. Plus read-only
+visibility into every local agent session.
 
 `agent-peek` lets one local agent ask what another local agent is doing without
 writing into its transcript, stealing focus, or rereading the whole session on
@@ -23,6 +24,78 @@ editing around each other without context.
 - Agents can call `peek at <session> --json` or the MCP tools.
 - Scripts can poll cheaply with cursors via `--since`.
 - Session transcripts are never modified.
+
+## Context Feed
+
+`agent-peek` also gives agents a place to leave notes for whichever agent
+touches this repo next, instead of that agent re-discovering the same things
+from scratch.
+
+- `peek post <type> <title> --text <body> --paths <files>`: publish a
+  finding, warning, question, answer, intent, handoff, or status update to
+  this project's feed.
+- `peek feed --budget <n>`: read the feed, ranked by relevance and packed
+  into a token budget.
+- `peek expand <postId>`: show one post in full, with its evidence.
+
+Worked example:
+
+```bash
+peek post finding "Auth lives in middleware" \
+  --text "verify.ts owns session checks; controllers assume it already ran" \
+  --paths src/middleware/verify.ts
+
+peek feed --budget 500
+```
+
+```text
+[finding] Auth lives in middleware (you, 3s ago)
+  verify.ts owns session checks; controllers assume it already ran
+  paths: src/middleware/verify.ts
+  id: 0mrbpv1sg-97d04557
+nextCursor: eyJ2IjoxLCJ3IjoiMjAyNi0wNy0wOFQwNjo0ODoyMC4xNzZaIiwiZCI6W119
+```
+
+Post types, one line each:
+
+| Type | Use it for | Default TTL |
+| --- | --- | --- |
+| `finding` | Something you learned that the next agent shouldn't have to re-discover. Requires `--paths`. | 30d |
+| `warning` | A hazard or footgun in the code the next agent should know about. Requires `--paths`. | 14d |
+| `question` | Something you need another agent or human to answer. | 7d |
+| `answer` | A reply to a `question` post (use `--reply-to <id>`). | 30d |
+| `intent` | What you are about to do, so others can avoid stepping on it. | 8h |
+| `handoff` | State and next actions for whoever picks this task up. | 7d |
+| `status` | A pathless, short-lived update. | 10m |
+
+Budget rules the feed enforces: titles are capped at 80 characters, authored
+post bodies are capped at ~150 tokens (derived posts at ~40), and posts that
+exceed either limit are rejected outright, not silently truncated. `peek
+feed` packs the highest-ranked posts into your `--budget` and reports how
+many were omitted so you can raise the budget or `peek expand` a specific
+post.
+
+### Feed in your agent's startup
+
+Claude Code (`.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "peek feed --budget 500 2>/dev/null || true" }] }
+    ]
+  }
+}
+```
+
+CLAUDE.md / AGENTS.md paragraph:
+
+```markdown
+Before starting work in this repo, run `peek feed --budget 500` and treat the posts as
+context from other agents. Before finishing, run
+`peek post finding "<what you learned>" --text "<2-3 sentences>" --paths <files>`.
+```
 
 ## Install
 
@@ -245,10 +318,14 @@ Exposed tools:
 - `peek_session` — read one session snapshot.
 - `coordination_digest` — summarize nearby session activity and overlap.
 - `tag_session` — assign a stable tag.
+- `post_to_feed`: publish a context post to this project's feed.
+- `read_feed`: read the feed, ranked and packed to a token budget.
+- `expand_post`: show one feed post in full, with evidence references.
 
 Exposed resources:
 
 - `agent-peek://sessions` — active sessions as JSON.
+- `agent-peek://feed`: this project's context feed, ranked and packed to a token budget.
 - `agent-peek://session/{selector}/brief` — brief snapshot for one session.
 - `agent-peek://session/{selector}/handoff` — handoff snapshot for one session.
 - `agent-peek://session/{selector}/tail` — raw tail for one session.
@@ -374,7 +451,11 @@ Tools exposed:
 
 - `list_sessions`
 - `peek_session`
+- `coordination_digest`
 - `tag_session`
+- `post_to_feed`
+- `read_feed`
+- `expand_post`
 
 Config references: [Claude Code](https://code.claude.com/docs/en/mcp),
 [Codex](https://developers.openai.com/codex/config-reference),
