@@ -17,6 +17,7 @@ import type {
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
 import type { PostType } from "../feed/schema.js";
+import { resolveAuthor } from "../feed/identity.js";
 
 const execFileAsync = promisify(execFile);
 const TERMINAL_ADAPTERS = new Set(["tmux", "screen"]);
@@ -145,7 +146,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
-      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? defaultClaimOwner() : undefined;
+      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? await defaultClaimOwner() : undefined;
       const engine = await createEngine({ withExternal: true });
       const digest = await engine.coordinate({
         cwd,
@@ -194,7 +195,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const claim = await claims.claim({
         files: targets,
         cwd,
-        owner: opts.as ? String(opts.as) : defaultClaimOwner(),
+        owner: opts.as ? String(opts.as) : await defaultClaimOwner(),
         ttlMs: parseDurationMs(opts.ttl, "--ttl"),
       });
       if (opts.json) {
@@ -823,9 +824,10 @@ function parseEvidence(value: unknown): { kind: "file" | "commit" | "session"; p
   });
 }
 
-function defaultClaimOwner(): string {
-  const user = userInfo().username || "agent";
-  return `${user}@${hostname()}:${process.pid}`;
+async function defaultClaimOwner(): Promise<string> {
+  const author = await resolveAuthor({ cwd: process.cwd() });
+  if (!author.anonymous) return author.session;
+  return `${userInfo().username || "agent"}@${hostname()}:${process.pid}`;
 }
 
 function printCoordinationDigest(

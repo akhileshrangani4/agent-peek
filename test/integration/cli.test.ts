@@ -418,6 +418,14 @@ describe("CLI integration", () => {
     expect(clear.stdout).toMatch(/ok: no active writing conflict/);
   });
 
+  it("claim uses CLAUDE_SESSION_ID when present instead of user@host:pid", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const r = await runCli(["claim", "test-file.ts", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(r.code).toBe(0);
+    const claim = JSON.parse(r.stdout);
+    expect(claim.owner).toBe("claude-code:sess-42");
+  });
+
   it("doctor shows adapter availability", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["doctor"], { HOME: home });
