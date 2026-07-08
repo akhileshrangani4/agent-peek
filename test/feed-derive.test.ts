@@ -29,6 +29,22 @@ function repoWithConflictingWorktrees(): string {
   return dir;
 }
 
+function trunkRepoWithConflictingWorktrees(): string {
+  const dir = mkdtempSync(join(tmpdir(), "peek-feed-derive-trunk-"));
+  roots.push(dir);
+  git(dir, "init", "-q", "-b", "trunk");
+  writeFileSync(join(dir, "shared.ts"), "export const x = 1;\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+  for (const branch of ["feat-a", "feat-b"]) {
+    const wt = join(dir, `.wt-${branch}`);
+    git(dir, "worktree", "add", "-q", wt, "-b", branch);
+    writeFileSync(join(wt, "shared.ts"), `export const x = "${branch}";\n`);
+    git(wt, "commit", "-qam", `change on ${branch}`);
+  }
+  return dir;
+}
+
 describe("deriveOverlapWarnings", () => {
   it("emits one warning for two branches touching the same file", async () => {
     const dir = repoWithConflictingWorktrees();
@@ -57,6 +73,17 @@ describe("deriveOverlapWarnings", () => {
     const result = await deriveOverlapWarnings(dir, "p");
     expect(result.posts).toEqual([]);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("resolves the default branch to the main worktree's branch in trunk-only repos (no origin/main/master)", async () => {
+    const dir = trunkRepoWithConflictingWorktrees();
+    const result = await deriveOverlapWarnings(dir, "test-project");
+    expect(result.errors).toEqual([]);
+    expect(result.posts).toHaveLength(1);
+    const warning = result.posts[0]!;
+    expect(warning.body.title).toContain("feat-a");
+    expect(warning.body.title).toContain("feat-b");
+    expect(warning.body.title).not.toContain("trunk");
   });
 });
 

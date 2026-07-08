@@ -75,12 +75,17 @@ async function listWorktrees(dir: string): Promise<Worktree[]> {
   return worktrees;
 }
 
-async function defaultBranch(dir: string): Promise<string> {
+async function defaultBranch(dir: string, worktrees: Worktree[]): Promise<string> {
   try {
     const ref = await git(dir, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
     return ref.replace("refs/remotes/origin/", "");
   } catch {
-    try { await git(dir, ["rev-parse", "--verify", "main"]); return "main"; } catch { return "master"; }
+    try {
+      await git(dir, ["rev-parse", "--verify", "main"]);
+      return "main";
+    } catch {
+      return worktrees[0]?.branch ?? "master";
+    }
   }
 }
 
@@ -91,7 +96,7 @@ export async function deriveOverlapWarnings(dir: string, projectLabel: string, n
   let base: string;
   try {
     worktrees = await listWorktrees(dir);
-    base = await defaultBranch(dir);
+    base = await defaultBranch(dir, worktrees);
   } catch (error) {
     return { posts, errors: [`overlap: ${(error as Error).message}`] };
   }
@@ -113,16 +118,20 @@ export async function deriveOverlapWarnings(dir: string, projectLabel: string, n
       const b = names[j]!;
       const overlap = (changed.get(a) ?? []).filter((f) => (changed.get(b) ?? []).includes(f)).sort();
       if (overlap.length === 0) continue;
-      const post = validatePost({
-        type: "warning",
-        origin: "derived",
-        title: clip(`Branches ${a} and ${b} both modify ${overlap.length} file${overlap.length === 1 ? "" : "s"}`, 80),
-        text: clip(`Overlapping vs merge-base: ${overlap.join(", ")}`, 150),
-        project: projectLabel,
-        author: { session: "agent-peek:derived" },
-        paths: overlap.slice(0, 20),
-      }, now);
-      posts.push({ ...post, id: `drv-${hashKey(`overlap:${a}:${b}:${overlap.join(",")}`)}` });
+      try {
+        const post = validatePost({
+          type: "warning",
+          origin: "derived",
+          title: clip(`Branches ${a} and ${b} both modify ${overlap.length} file${overlap.length === 1 ? "" : "s"}`, 80),
+          text: clip(`Overlapping vs merge-base: ${overlap.join(", ")}`, 150),
+          project: projectLabel,
+          author: { session: "agent-peek:derived" },
+          paths: overlap.slice(0, 20),
+        }, now);
+        posts.push({ ...post, id: `drv-${hashKey(`overlap:${a}:${b}:${overlap.join(",")}`)}` });
+      } catch (error) {
+        errors.push(`overlap: ${a}/${b}: ${(error as Error).message}`);
+      }
     }
   }
   return { posts, errors };
