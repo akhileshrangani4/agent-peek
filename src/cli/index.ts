@@ -10,11 +10,14 @@ import { ClaimsStore } from "../core/claims.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError,
   AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
+  PostRejectedError, PostNotFoundError, NotAProjectError,
 } from "../core/errors.js";
 import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
+import type { PostType } from "../feed/schema.js";
+import { resolveAuthor } from "../feed/identity.js";
 
 const execFileAsync = promisify(execFile);
 const TERMINAL_ADAPTERS = new Set(["tmux", "screen"]);
@@ -143,7 +146,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
-      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? defaultClaimOwner() : undefined;
+      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? await defaultClaimOwner() : undefined;
       const engine = await createEngine({ withExternal: true });
       const digest = await engine.coordinate({
         cwd,
@@ -192,7 +195,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const claim = await claims.claim({
         files: targets,
         cwd,
-        owner: opts.as ? String(opts.as) : defaultClaimOwner(),
+        owner: opts.as ? String(opts.as) : await defaultClaimOwner(),
         ttlMs: parseDurationMs(opts.ttl, "--ttl"),
       });
       if (opts.json) {
@@ -421,6 +424,128 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       if (code !== 0) process.exit(code);
     });
 
+  cli.command("post <type> <title>", "Publish a context post to this project's feed.")
+    .usage("post <type> <title> --text <body> [--paths a,b] [--topics t1,t2] [--evidence file:src/a.ts:41,commit:abc] [--reply-to <id>] [--supersedes <id>] [--mention <selector>] [--ttl <duration>] [--as <selector>] [--dir <path>] [--json]")
+    .example('peek post finding "Auth lives in middleware" --text "verify.ts owns it" --paths src/verify.ts')
+    .option("--text <body>", "Post body (<= 150 tokens). Required.")
+    .option("--paths <list>", "Comma-separated repo-relative paths (required for finding/warning)")
+    .option("--topics <list>", "Comma-separated free-form topics")
+    .option("--evidence <list>", "Comma-separated refs: file:<path>[:line] | commit:<sha> | session:<id>")
+    .option("--reply-to <id>", "Post id this answers")
+    .option("--supersedes <id>", "Post id this replaces")
+    .option("--mention <selector>", "Session/tag to notify (repeatable)")
+    .option("--ttl <duration>", "Override lifetime, e.g. 30m, 4h, 7d")
+    .option("--as <selector>", "Author identity override")
+    .option("--dir <path>", "Project directory. Defaults to cwd.")
+    .option("--json", "Output the stored post as JSON")
+    .action(async (type, title, opts) => {
+      const { postToFeed } = await import("../feed/index.js");
+      const dir = resolve(String(opts.dir ?? process.cwd()));
+      if (opts.text === undefined) {
+        throw new PostRejectedError("--text is required. Provide the post body (<= 150 tokens).");
+      }
+      // A bare `--text` flag (no value) or a repeated `--text` flag is
+      // parsed by the CLI as boolean `true` or an array, not a string.
+      // Reject it here instead of letting String() coerce it into the
+      // literal text "true" (or "true,<other value>").
+      if (typeof opts.text !== "string") {
+        throw new PostRejectedError("--text requires a single string value. Provide the post body (<= 150 tokens).");
+      }
+      const engine = await createEngine({ withExternal: true });
+      const post = await postToFeed({
+        dir,
+        engine,
+        as: opts.as ? String(opts.as) : undefined,
+        input: {
+          type: String(type) as PostType,
+          title: String(title),
+          text: String(opts.text),
+          paths: splitList(opts.paths),
+          topics: splitList(opts.topics),
+          evidence: parseEvidence(opts.evidence),
+          replyTo: opts.replyTo ? String(opts.replyTo) : undefined,
+          supersedes: opts.supersedes ? String(opts.supersedes) : undefined,
+          mentions: splitList(opts.mention),
+          ttlMs: opts.ttl ? parseDurationMs(opts.ttl, "--ttl") : undefined,
+        },
+      });
+      if (opts.json) { console.log(JSON.stringify(post, null, 2)); return; }
+      console.log(`posted ${post.type} ${post.id} (expires ${relativeTime(post.lifecycle.expiresAt)})`);
+    });
+
+  cli.command("feed [dir]", "Read this project's context feed, ranked and packed to a token budget.")
+    .usage("feed [dir] [--budget <n>] [--context-paths a,b] [--since <cursor>] [--cursor-file <path>] [--type t1,t2] [--reader <selector>] [--no-derived] [--stats] [--json]")
+    .example("peek feed")
+    .example("peek feed . --budget 500 --json")
+    .option("--budget <n>", "Token budget for the packed feed", { default: 600 })
+    .option("--context-paths <list>", "Comma-separated paths the reader is working on (improves ranking)")
+    .option("--since <cursor>", "Only content newer than this cursor")
+    .option("--cursor-file <path>", "Read the cursor from this file and write nextCursor back to it")
+    .option("--type <list>", "Comma-separated post types to include")
+    .option("--reader <selector>", "Reader identity (boosts mentions; logged in stats)")
+    .option("--no-derived", "Skip derived posts (status, overlap warnings)")
+    .option("--stats", "Print feed usage stats instead of the feed")
+    .option("--json", "Machine-readable output")
+    .action(async (dirArg, opts) => {
+      const { readFeed, feedStats } = await import("../feed/index.js");
+      const dir = resolve(String(dirArg ?? process.cwd()));
+      if (opts.stats) {
+        const stats = await feedStats({ dir });
+        if (opts.json) { console.log(JSON.stringify(stats, null, 2)); return; }
+        console.log(`project: ${stats.projectLabel}`);
+        console.log(indent(`posts: ${stats.posts} (${Object.entries(stats.byType).map(([t, n]) => `${t} ${n}`).join(", ") || "none"})`));
+        console.log(indent(`feeds served: ${stats.feedsServed}, tokens delivered: ${stats.tokensServed}`));
+        return;
+      }
+      const since = opts.cursorFile && existsSync(String(opts.cursorFile))
+        ? readFileSync(String(opts.cursorFile), "utf8").trim() || undefined
+        : opts.since ? String(opts.since) : undefined;
+      const engine = await createEngine({ withExternal: true });
+      const result = await readFeed({
+        dir,
+        engine,
+        budget: Number(opts.budget),
+        contextPaths: splitList(opts.contextPaths),
+        since,
+        types: opts.type ? (splitList(opts.type) as PostType[]) : undefined,
+        reader: opts.reader ? String(opts.reader) : undefined,
+        includeDerived: opts.derived !== false,
+      });
+      if (opts.cursorFile) writeFileSync(String(opts.cursorFile), result.nextCursor, "utf8");
+      if (opts.json) { console.log(JSON.stringify(result, null, 2)); return; }
+      if (result.recovered) console.log("note: feed db was corrupt and has been reset (backup kept alongside).");
+      if (result.items.length === 0) console.log("(feed is empty for this project)");
+      for (const item of result.items) {
+        const p = item.post;
+        const marker = p.lifecycle.validity === "drifted" ? " [drifted]" : "";
+        console.log(`[${p.type}]${marker} ${p.body.title} (${p.author.name ?? p.author.session}, ${relativeTime(p.lifecycle.createdAt)})`);
+        if (item.presentation === "full" && p.body.text) console.log(indent(p.body.text));
+        if (item.presentation === "full" && p.scope.paths.length) console.log(indent(`paths: ${p.scope.paths.join(", ")}`));
+        console.log(indent(`id: ${p.id}`));
+      }
+      if (result.omitted > 0) console.log(`(${result.omitted} more below the fold; raise --budget or peek expand <id>)`);
+      if (result.derivedErrors.length > 0) console.log(`(derived skipped: ${result.derivedErrors.join("; ")})`);
+      if (!opts.cursorFile) console.log(`nextCursor: ${result.nextCursor}`);
+    });
+
+  cli.command("expand <postId>", "Show one feed post in full, with evidence references.")
+    .usage("expand <postId> [--dir <path>] [--json]")
+    .example("peek expand 01j9xq-ab12cd34")
+    .option("--dir <path>", "Project directory. Defaults to cwd.")
+    .option("--json", "Machine-readable output")
+    .action(async (postId, opts) => {
+      const { expandPost } = await import("../feed/index.js");
+      const dir = resolve(String(opts.dir ?? process.cwd()));
+      const post = await expandPost({ dir, postId: String(postId) });
+      if (opts.json) { console.log(JSON.stringify(post, null, 2)); return; }
+      console.log(`[${post.type}] ${post.body.title}`);
+      console.log(indent(`author: ${post.author.name ?? post.author.session} (${relativeTime(post.lifecycle.createdAt)}, validity: ${post.lifecycle.validity})`));
+      if (post.body.text) console.log(indent(post.body.text));
+      for (const ev of post.body.evidence) {
+        console.log(indent(`evidence: ${ev.kind} ${ev.path ?? ev.ref ?? ""}${ev.line ? `:${ev.line}` : ""}`));
+      }
+    });
+
   cli.command("doctor", "Explain adapter availability, missing paths, dependencies, and opt-in terminal capture.")
     .example("peek doctor")
     .example("peek doctor --json")
@@ -505,6 +630,33 @@ function handleError(e: unknown): number {
       message: e.message,
       hint: "Use the nextCursor returned by the matching prior command.",
       next: ["peek at <selector> --json", "peek coord . --json"],
+    });
+  }
+  if (e instanceof PostRejectedError) {
+    fail({
+      code: 5,
+      error: "post_rejected",
+      message: e.message,
+      hint: "Posts are token-budgeted context units. Shorten the body and link evidence instead of inlining it.",
+      next: ["peek post --help"],
+    });
+  }
+  if (e instanceof PostNotFoundError) {
+    fail({
+      code: 2,
+      error: "post_not_found",
+      message: e.message,
+      hint: "Use `peek feed --json` to list current post ids.",
+      next: ["peek feed --json"],
+    });
+  }
+  if (e instanceof NotAProjectError) {
+    fail({
+      code: 5,
+      error: "not_a_project",
+      message: e.message,
+      hint: "Pass an existing directory with --dir or run from inside the project.",
+      next: ["peek feed --help"],
     });
   }
   const err = e as Error;
@@ -662,9 +814,27 @@ function parseDurationMs(value: unknown, flag: string): number {
   return ms;
 }
 
-function defaultClaimOwner(): string {
-  const user = userInfo().username || "agent";
-  return `${user}@${hostname()}:${process.pid}`;
+function splitList(value: unknown): string[] {
+  if (value === undefined) return [];
+  return String(value).split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+function parseEvidence(value: unknown): { kind: "file" | "commit" | "session"; path?: string; line?: number; ref?: string }[] {
+  return splitList(value).map((entry) => {
+    const [kind, ...rest] = entry.split(":");
+    if (kind === "file") {
+      const line = rest.length > 1 && /^\d+$/.test(rest[rest.length - 1]!) ? Number(rest.pop()) : undefined;
+      return { kind: "file" as const, path: rest.join(":"), line };
+    }
+    if (kind === "commit" || kind === "session") return { kind, ref: rest.join(":") };
+    throw new PostRejectedError(`evidence "${entry}" must start with file:, commit:, or session:`);
+  });
+}
+
+async function defaultClaimOwner(): Promise<string> {
+  const author = await resolveAuthor({ cwd: process.cwd() });
+  if (!author.anonymous) return author.session;
+  return `${userInfo().username || "agent"}@${hostname()}:${process.pid}`;
 }
 
 function printCoordinationDigest(
@@ -1355,7 +1525,19 @@ function formatPath(path: string): string {
 function relativeTime(iso: string): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return iso;
-  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  const diffMs = then - Date.now();
+  if (diffMs > 0) {
+    const seconds = Math.floor(diffMs / 1000);
+    if (seconds < 60) return `in ${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `in ${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `in ${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `in ${days}d`;
+    return iso.slice(0, 10);
+  }
+  const seconds = Math.max(0, Math.floor(-diffMs / 1000));
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;

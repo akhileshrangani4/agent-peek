@@ -61,3 +61,24 @@ export class SummaryUnavailableError extends Error {
     super(`Summary mode unavailable: ${reason}`);
   }
 }
+
+export class PostRejectedError extends Error {
+  readonly name = "PostRejectedError";
+  constructor(public reason: string) {
+    super(`Post rejected: ${reason}`);
+  }
+}
+
+export class PostNotFoundError extends Error {
+  readonly name = "PostNotFoundError";
+  constructor(public postId: string) {
+    super(`No post found with id: ${postId}`);
+  }
+}
+
+export class NotAProjectError extends Error {
+  readonly name = "NotAProjectError";
+  constructor(public dir: string) {
+    super(`Not a usable project directory: ${dir}`);
+  }
+}

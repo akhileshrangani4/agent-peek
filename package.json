@@ -1,7 +1,7 @@
 {
   "name": "agent-peek",
-  "version": "0.2.3",
-  "description": "Read-only peek into other AI agent chat sessions.",
+  "version": "0.3.0",
+  "description": "Context feed and read-only visibility for local AI coding agents.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -32,7 +32,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "scripts": {
     "build": "tsup",
