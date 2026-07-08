@@ -6,30 +6,96 @@
 The context feed your agents read before touching the repo. Plus read-only
 visibility into every local agent session.
 
-`agent-peek` lets one local agent ask what another local agent is doing without
-writing into its transcript, stealing focus, or rereading the whole session on
-every poll. It ships as a CLI, MCP server, and TypeScript library.
+`agent-peek` gives your local coding agents a shared context feed: typed,
+token-budgeted posts they write and read so the next agent ingests a small
+ranked delta instead of re-exploring the repo. Underneath it, one agent can
+ask what another is doing without writing into its transcript or rereading
+the whole session on every poll. It ships as a CLI, MCP server, and
+TypeScript library.
 
 ![agent-peek demo](https://raw.githubusercontent.com/akhileshrangani4/agent-peek/main/docs/demo.gif)
 
 ## Why
 
-When you run multiple coding agents in parallel, each one normally works in its
-own bubble. That leads to duplicated research, missed discoveries, and agents
-editing around each other without context.
+Every agent that starts work in a repo pays the same tax: it re-reads files,
+re-traces where auth lives, re-discovers the footgun in the migration script,
+and re-learns whatever the last agent already figured out an hour ago. Run
+several agents in parallel, or in sequence across sessions, and that
+exploration cost multiplies: each one re-derives the same facts from scratch.
 
-`agent-peek` gives them a shared read-only window:
+Git worktrees solve a different problem. They isolate working directories so
+agents don't stomp each other's uncommitted changes, but a fresh worktree
+starts with zero memory: it has no idea what a parallel agent in another
+worktree just learned, or what the last session on this branch already
+figured out. Isolation is not context sharing.
+
+`agent-peek`'s context feed is where that discovery gets written down once and
+read many times. An agent posts a finding, a warning, a question, or a
+handoff; the next agent, whatever worktree or terminal it is in, reads the
+feed instead of re-exploring. Because reads are ranked, budgeted, and
+cursor-based, catching up is a delta: you pull what changed since your last
+read, not the whole history.
+
+Underneath the feed sits a plain observation layer: read-only visibility into
+what every local agent session is doing right now. That is what powers the
+feed's automatic overlap warnings, and it is also available directly:
 
 - Humans can browse active sessions with `peek ui`.
 - Agents can call `peek at <session> --json` or the MCP tools.
 - Scripts can poll cheaply with cursors via `--since`.
 - Session transcripts are never modified.
 
+For coordination that git worktrees genuinely don't cover, such as a shared
+dev server, a migration two agents both plan to run, or a file that two
+agents in two different worktrees still both intend to touch, `agent-peek`
+also has cooperative `coord`/`check`/`claim` commands. They are advisory
+signals, not locks.
+
+## Install
+
+```bash
+npm i -g agent-peek
+```
+
+Installed commands:
+
+- `peek`: CLI
+- `apeek`: alias for `peek`, useful if another tool owns that name
+- `agent-peek-mcp`: MCP server for Claude Code, Codex, and other MCP clients
+
+## Quick Start
+
+Post something before you dig in, then read what other agents already found:
+
+```bash
+peek post finding "Auth lives in middleware" \
+  --text "verify.ts owns session checks; controllers assume it already ran" \
+  --paths src/middleware/verify.ts
+
+peek feed --budget 500
+```
+
+That's the core loop: post what you learn, read what others posted. See
+[Context Feed](#context-feed) for the full output shape, post types, and TTLs.
+
+Once you've read the feed, you can also look at what other sessions are doing
+right now:
+
+```bash
+peek list
+peek at researcher-codex --mode structured
+peek tag researcher-codex as researcher
+peek at researcher --mode brief
+```
+
+See [Observation](#observation) for every mode `peek at` supports, and
+[Coordination](#coordination) for checking and claiming files before you
+write.
+
 ## Context Feed
 
-`agent-peek` also gives agents a place to leave notes for whichever agent
-touches this repo next, instead of that agent re-discovering the same things
-from scratch.
+`peek post`, `peek feed`, and `peek expand` are the three commands behind the
+loop from Quick Start:
 
 - `peek post <type> <title> --text <body> --paths <files>`: publish a
   finding, warning, question, answer, intent, handoff, or status update to
@@ -97,19 +163,12 @@ context from other agents. Before finishing, run
 `peek post finding "<what you learned>" --text "<2-3 sentences>" --paths <files>`.
 ```
 
-## Install
+## Observation
 
-```bash
-npm i -g agent-peek
-```
-
-Installed commands:
-
-- `peek` — CLI
-- `apeek` — alias for `peek`, useful if another tool owns that name
-- `agent-peek-mcp` — MCP server for Claude Code, Codex, and other MCP clients
-
-## Quick Start
+This is the read-only layer the feed's derived posts, like automatic overlap
+warnings, are built on. It's also available directly, for humans in a
+terminal and for agents that want to check on a session without touching the
+feed.
 
 List discovered sessions:
 
@@ -117,34 +176,7 @@ List discovered sessions:
 peek list
 ```
 
-Open the interactive browser:
-
-```bash
-peek ui
-```
-
-Peek at a session by display name, id, tag, or cwd:
-
-```bash
-peek at researcher-codex --mode structured
-```
-
-Get a compact local summary without an API key:
-
-```bash
-peek at researcher-codex --mode brief
-```
-
-Give a session a stable name:
-
-```bash
-peek tag researcher-codex as researcher
-peek at researcher --mode brief
-```
-
-## CLI
-
-Common commands:
+Common `peek list` flags:
 
 ```bash
 peek list                                 # show discovered sessions
@@ -152,35 +184,9 @@ peek list --adapter claude-code           # scan/list one adapter
 peek list --all                           # include ended sessions
 peek list --terminals                     # include tmux/screen terminal captures
 peek list --ids                           # show raw session ids
+peek list --files                         # show active/recent file context
 peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
-peek help                                 # focused command overview
-peek version                              # installed version
-peek update                               # update global install from npm
-peek update --check                       # check latest version without installing
-peek doctor                               # adapter availability and setup hints
-peek coord                                # summarize nearby agents in this cwd
-
-peek ui                                   # interactive terminal browser
-peek ui --adapter codex
-peek ui --all
-peek ui --terminals
-
-peek at <name|id|tag|cwd>                 # raw snapshot
-peek at <selector> --mode structured      # normalized status/task/tool fields
-peek at <selector> --mode brief           # compact local summary, no API key
-peek at <selector> --mode handoff         # decisions, next actions, files, questions
-peek at <selector> --since <cursor>       # only messages since prior peek
-peek at <selector> --first 20             # first 20 raw messages
-peek at <selector> --last 50              # last 50 raw messages
-peek at <selector> --around 100 --limit 30 # raw window around message 100
-peek at <selector> --last 50 --reverse    # newest-first raw output
-peek at <selector> --tools                # include tool-only raw messages
-
-peek tag <selector> as researcher
-peek untag researcher
-peek register <adapter:id> at <path> [--as <name>]
-peek forget <id>
 ```
 
 Default `peek list` output is compact and human-first:
@@ -193,7 +199,11 @@ sessionseek-codex  codex    active  0s ago   file    ~/Documents/sessionseek/ses
 The `NAME` column is the selector to use with `peek at`. Raw ids stay available
 with `peek list --ids`, and JSON output includes both `id` and `displayName`.
 
-## Peek Modes
+Peek at a session by display name, id, tag, or cwd:
+
+```bash
+peek at researcher-codex --mode structured
+```
 
 `peek at` supports five scriptable output modes:
 
@@ -204,6 +214,11 @@ with `peek list --ids`, and JSON output includes both `id` and `displayName`.
 | `brief` | A compact local summary built from structured fields. Good default for humans and scripts that do not need raw logs. | No |
 | `handoff` | Local structured handoff: decisions, open questions, next actions, touched files, and tools. | No |
 | `summary` | Optional sentence-style summary. De-emphasized for agent loops; prefer `brief` unless you explicitly need prose. Can use Anthropic when configured. | No |
+
+```bash
+peek at researcher-codex --mode brief
+peek at researcher-codex --mode handoff
+```
 
 Raw mode has pagination controls:
 
@@ -227,41 +242,19 @@ set:
 AGENT_PEEK_SUMMARY_PROVIDER=anthropic
 ```
 
-Timeline is not a `peek at --mode` value. It is an interactive-only view inside
-`peek ui`.
+Give a session a stable name so you don't have to retype the generated one:
 
-## Terminal UI
+```bash
+peek tag researcher-codex as researcher
+peek at researcher --mode brief
+```
 
-`peek ui` is for humans browsing in a real terminal. It shows a session list and
-a detail pane for the selected session.
+Cursor polling lets an agent fetch only new messages after a prior peek:
 
-It starts in `structured` mode. Press `m` or Tab to cycle through:
-
-- `structured` — current task, activity, last messages, pending tools, recent tools
-- `brief` — compact local summary, no API key
-- `timeline` — chronological role/text timeline for quick scanning
-- `raw` — recent transcript messages
-- `summary` — optional sentence-style summary
-
-There is no separate command-line flag for timeline yet; open `peek ui`, then
-press `m`/Tab until the header shows `mode=timeline`.
-
-The detail pane shows useful metadata: raw id, adapter, source type, status,
-tag, cwd, transcript path, and last update time. It intentionally does not show
-cursors; cursors are for JSON/API callers that need incremental polling.
-
-Keyboard controls:
-
-- up/down or `j`/`k` — select a session
-- Enter or Space — refresh the selected session detail
-- `m` or Tab — switch detail mode
-- `r` — rescan sessions
-- `q` or Escape — exit
-
-For pipes, scripts, and agent harnesses, use `peek list`, `peek at`, and
-`peek at --json` instead of `peek ui`.
-
-## Agent-Friendly Output
+```bash
+peek at researcher --mode raw --json
+peek at researcher --mode raw --since <nextCursor> --json
+```
 
 CLI failures are printed to stderr in a stable shape:
 
@@ -275,16 +268,68 @@ next:
 exitCode: 2
 ```
 
-Cursor polling lets an agent fetch only new messages after a prior peek:
+### Terminal UI
+
+`peek ui` is for humans browsing in a real terminal. It shows a session list and
+a detail pane for the selected session.
 
 ```bash
-peek at researcher --mode raw --json
-peek at researcher --mode raw --since <nextCursor> --json
+peek ui
+peek ui --adapter codex
+peek ui --all
+peek ui --terminals
 ```
 
-For parallel work, `peek coord` gives agents a compact coordination digest:
+It starts in `structured` mode. Press `m` or Tab to cycle through:
+
+- `structured`: current task, activity, last messages, pending tools, recent tools
+- `brief`: compact local summary, no API key
+- `timeline`: chronological role/text timeline for quick scanning
+- `raw`: recent transcript messages
+- `summary`: optional sentence-style summary
+
+There is no separate command-line flag for timeline yet; open `peek ui`, then
+press `m`/Tab until the header shows `mode=timeline`.
+
+The detail pane shows useful metadata: raw id, adapter, source type, status,
+tag, cwd, transcript path, and last update time. It intentionally does not show
+cursors; cursors are for JSON/API callers that need incremental polling.
+
+Keyboard controls:
+
+- up/down or `j`/`k`: select a session
+- Enter or Space: refresh the selected session detail
+- `m` or Tab: switch detail mode
+- `r`: rescan sessions
+- `q` or Escape: exit
+
+For pipes, scripts, and agent harnesses, use `peek list`, `peek at`, and
+`peek at --json` instead of `peek ui`.
+
+Other useful commands:
 
 ```bash
+peek help                                 # focused command overview
+peek version                              # installed version
+peek update                               # update global install from npm
+peek update --check                       # check latest version without installing
+peek doctor                               # adapter availability and setup hints
+peek register <adapter:id> at <path> [--as <name>]
+peek forget <id>
+peek untag researcher
+```
+
+## Coordination
+
+Git worktrees already give each agent its own working directory, so file
+conflicts inside a single git-tracked checkout usually aren't the problem.
+What worktrees don't cover: a shared dev server, a database migration two
+agents both plan to run, a shared external resource, or a file that two
+agents in two different worktrees still both intend to touch. For that,
+`agent-peek` has cooperative, advisory signals.
+
+```bash
+peek coord
 peek coord . --writing
 peek check src/core/engine.ts
 peek claim src/core/engine.ts --ttl 2m --as codex-main
@@ -294,15 +339,17 @@ peek release <claim-id> --claim-id --json
 Useful details:
 
 - `peek coord . --writing` shows active writers and file claims, hiding idle noise.
+- `peek list --files` gives the same file-context view as part of a regular session list.
 - `peek check <file>` exits `0` when clear and `1` on conflict.
 - `peek check --files-from changed-files.txt` bulk-checks a planned edit.
-- `peek claim <file> --ttl 2m` broadcasts temporary write intent.
 - `peek check <file> --as <owner>` ignores your own claims in claim-then-check loops.
+- `peek claim <file> --ttl 2m` broadcasts temporary write intent (2m is the default TTL if you omit `--ttl`).
 - `peek release <claim-id> --claim-id --files-from done-files.txt` partially releases a claim.
 - `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` is the polling-friendly JSON path.
 
 Claims are cooperative local signals, not authentication or access control.
-Use them to help well-behaved agents avoid overlap.
+Use them to help well-behaved agents avoid overlap on the things worktrees
+don't isolate.
 
 ## MCP
 
@@ -314,21 +361,21 @@ agent-peek-mcp
 
 Exposed tools:
 
-- `list_sessions` — list discovered sessions with display names.
-- `peek_session` — read one session snapshot.
-- `coordination_digest` — summarize nearby session activity and overlap.
-- `tag_session` — assign a stable tag.
+- `list_sessions`: list discovered sessions with display names.
+- `peek_session`: read one session snapshot.
+- `coordination_digest`: summarize nearby session activity and overlap.
+- `tag_session`: assign a stable tag.
 - `post_to_feed`: publish a context post to this project's feed.
 - `read_feed`: read the feed, ranked and packed to a token budget.
 - `expand_post`: show one feed post in full, with evidence references.
 
 Exposed resources:
 
-- `agent-peek://sessions` — active sessions as JSON.
+- `agent-peek://sessions`: active sessions as JSON.
 - `agent-peek://feed`: this project's context feed, ranked and packed to a token budget.
-- `agent-peek://session/{selector}/brief` — brief snapshot for one session.
-- `agent-peek://session/{selector}/handoff` — handoff snapshot for one session.
-- `agent-peek://session/{selector}/tail` — raw tail for one session.
+- `agent-peek://session/{selector}/brief`: brief snapshot for one session.
+- `agent-peek://session/{selector}/handoff`: handoff snapshot for one session.
+- `agent-peek://session/{selector}/tail`: raw tail for one session.
 
 The `agent-peek://feed` resource always serves the feed for the MCP server's
 own working directory, not the caller's. Launch the server from the project
@@ -337,9 +384,9 @@ whose feed you want (or configure your client to set its `cwd`), or use the
 
 Exposed prompts:
 
-- `coordinate-agents` — check nearby agents before continuing work.
-- `session-handoff` — prepare a concise handoff from one session.
-- `avoid-overlap` — inspect overlap hints before editing files.
+- `coordinate-agents`: check nearby agents before continuing work.
+- `session-handoff`: prepare a concise handoff from one session.
+- `avoid-overlap`: inspect overlap hints before editing files.
 
 It is a local stdio server. Different clients use different config shapes.
 
@@ -452,16 +499,6 @@ VS Code uses top-level `servers`, not `mcpServers`. Add to workspace
 }
 ```
 
-Tools exposed:
-
-- `list_sessions`
-- `peek_session`
-- `coordination_digest`
-- `tag_session`
-- `post_to_feed`
-- `read_feed`
-- `expand_post`
-
 Config references: [Claude Code](https://code.claude.com/docs/en/mcp),
 [Codex](https://developers.openai.com/codex/config-reference),
 [Cursor](https://docs.cursor.com/advanced/model-context-protocol),
@@ -520,22 +557,24 @@ console.log(result.snapshot);
 console.log(result.nextCursor);
 ```
 
-## Built-In Adapters
+## Adapters
 
-- `claude-code` — reads `~/.claude/projects/*/<uuid>.jsonl`
-- `codex` — reads Codex CLI transcripts in `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl`
-- `copilot-cli` — reads GitHub Copilot CLI session-state directories in `~/.copilot/session-state/*`
-- `gemini` — reads Gemini CLI transcripts in `~/.gemini/tmp/<project>/chats/session-*.json`
-- `goose` — reads Goose session records in `~/.local/share/goose/sessions/sessions.db`
-- `opencode` — reads OpenCode filesystem storage in `~/.local/share/opencode/storage/{session,message,part}`
-- `screen` — captures GNU screen scrollback via `hardcopy -h`
-- `tmux` — captures tmux pane output
+### Built-in
+
+- `claude-code`: reads `~/.claude/projects/*/<uuid>.jsonl`
+- `codex`: reads Codex CLI transcripts in `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl`
+- `copilot-cli`: reads GitHub Copilot CLI session-state directories in `~/.copilot/session-state/*`
+- `gemini`: reads Gemini CLI transcripts in `~/.gemini/tmp/<project>/chats/session-*.json`
+- `goose`: reads Goose session records in `~/.local/share/goose/sessions/sessions.db`
+- `opencode`: reads OpenCode filesystem storage in `~/.local/share/opencode/storage/{session,message,part}`
+- `screen`: captures GNU screen scrollback via `hardcopy -h`
+- `tmux`: captures tmux pane output
 
 Terminal adapters are opt-in for default CLI/MCP listing because they capture
 terminal scrollback, not structured agent transcript files. Use
 `peek list --terminals` or `peek list --adapter tmux`.
 
-## External Adapters
+### External
 
 Set `AGENT_PEEK_ADAPTER_PATH` to a colon-separated list of adapter modules.
 Each module's default export must implement the `Adapter` interface from

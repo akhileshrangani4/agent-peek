@@ -16,63 +16,58 @@ const easeOut = Easing.bezier(0.16, 1, 0.3, 1);
 const mono =
   '"SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace';
 
-const question =
-  "what was i doing yesterday with codex?";
+const labelA = "agent A - finishing a task";
+const labelB = "agent B - new session, same repo";
 
-const sessions = [
-  {
-    at: 188,
-    name: "dashboard-codex",
-    status: "yesterday - 4:18 PM",
-    cwd: "~/work/dashboard",
-  },
-  {
-    at: 212,
-    name: "api-codex",
-    status: "yesterday - 11:02 AM",
-    cwd: "~/work/api",
-  },
-  {
-    at: 236,
-    name: "mobile-codex",
-    status: "2 days ago",
-    cwd: "~/work/mobile",
-  },
-];
+const postCommandLine1 =
+  '$ peek post finding "Webhook dedup lives in middleware" \\';
+const postCommandLine2 =
+  '    --text "verify.ts owns retry dedup. Don\'t re-add checks in handlers." --paths src/middleware/verify.ts';
+const postResponse = "posted finding 01k2xq-9f21ac34 (expires in 30d)";
 
-const handoff = [
+const feedCommand = "$ peek feed --budget 500";
+
+type FeedRowType = "warning" | "finding" | "status";
+
+const feedRows: Array<{
+  at: number;
+  type: FeedRowType;
+  title: string;
+  body?: string;
+  meta?: string;
+}> = [
   {
-    at: 322,
-    label: "current task",
-    value: "debugging slow dashboard filters after the metrics refactor",
+    at: 306,
+    type: "warning",
+    title: "Branches feat-auth and feat-payments both modify src/shared/types.ts",
+    meta: "derived - worktree overlap",
   },
   {
-    at: 348,
-    label: "last decision",
-    value: "cache the account list and leave chart rendering untouched",
+    at: 338,
+    type: "finding",
+    title: "Webhook dedup lives in middleware",
+    body: "verify.ts owns retry dedup. Don't re-add checks in handlers.",
+    meta: "agent A - 2m ago",
   },
   {
     at: 374,
-    label: "next step",
-    value: "add a regression test for filtered dashboard loads",
-  },
-  {
-    at: 400,
-    label: "files",
-    value: "src/dashboard/filters.ts  test/dashboard/filters.test.ts",
+    type: "status",
+    title: "codex session active: refactoring auth",
   },
 ];
 
 export const AgentPeekDemo: React.FC = () => {
   const frame = useCurrentFrame();
   const headerIn = progress(frame, 0, 22);
-  const promptIn = progress(frame, 34, 16);
-  const typedQuestion = Math.floor(question.length * progress(frame, 52, 46));
-  const thoughtIn = progress(frame, 112, 16);
-  const listIn = progress(frame, 150, 16);
-  const handoffIn = progress(frame, 286, 18);
-  const finalIn = progress(frame, 438, 24);
-  const workOpacity = interpolate(frame, [424, 456], [1, 0], clamp);
+
+  const labelAIn = progress(frame, 34, 20);
+  const groupAOut = interpolate(frame, [196, 230], [1, 0], clamp);
+  const labelBIn = progress(frame, 222, 20);
+
+  const groupBOut = interpolate(frame, [440, 468], [1, 0], clamp);
+  const thoughtIn = progress(frame, 404, 18);
+
+  const finalIn = progress(frame, 478, 24);
 
   return (
     <AbsoluteFill style={styles.root}>
@@ -86,22 +81,45 @@ export const AgentPeekDemo: React.FC = () => {
         <Header />
         <div style={styles.rule} />
 
-        <div
-          style={{
-            ...styles.prompt,
-            opacity: promptIn,
-            transform: `translateY(${interpolate(promptIn, [0, 1], [8, 0])}px)`,
-          }}
-        >
+        <div style={styles.prompt}>
           <span style={styles.chevron}>›</span>
-          <span style={styles.question}>{question.slice(0, typedQuestion)}</span>
-          {frame < 108 ? <span style={styles.cursor}>█</span> : null}
+          <span
+            style={{
+              ...styles.question,
+              ...styles.promptLabel,
+              opacity: labelAIn * groupAOut,
+            }}
+          >
+            {labelA}
+          </span>
+          <span
+            style={{
+              ...styles.question,
+              ...styles.promptLabel,
+              opacity: labelBIn,
+            }}
+          >
+            {labelB}
+          </span>
         </div>
 
-        <div style={{ opacity: workOpacity }}>
-          <AssistantThought opacity={thoughtIn} />
-          <SessionList frame={frame} opacity={listIn} />
-          <Handoff frame={frame} opacity={handoffIn} />
+        <div style={styles.contentArea}>
+          <div style={{ ...styles.layer, opacity: groupAOut }}>
+            <Line frame={frame} at={72} color="#f6c200" text={postCommandLine1} />
+            <Line frame={frame} at={88} color="#f6c200" text={postCommandLine2} />
+            <Line frame={frame} at={146} color="#65e38d" text={postResponse} />
+          </div>
+
+          <div style={{ ...styles.layer, opacity: groupBOut }}>
+            <Line frame={frame} at={266} color="#e07b5f" text=":: SessionStart hook" />
+            <Line frame={frame} at={282} color="#f6c200" text={feedCommand} />
+            <div style={styles.feedRows}>
+              {feedRows.map((row) => (
+                <FeedRow key={row.title} frame={frame} row={row} />
+              ))}
+            </div>
+            <AssistantThought opacity={thoughtIn} />
+          </div>
         </div>
 
         <FinalState frame={frame} opacity={finalIn} />
@@ -115,7 +133,7 @@ const Header: React.FC = () => (
     <ClaudeMark />
     <div>
       <div style={styles.product}>Claude Code</div>
-      <div style={styles.cwd}>/work/dashboard</div>
+      <div style={styles.cwd}>~/work/payments</div>
     </div>
   </div>
 );
@@ -162,105 +180,39 @@ const AssistantThought: React.FC<{ opacity: number }> = ({ opacity }) => (
     }}
   >
     <span style={styles.thoughtPrefix}>Claude</span>
-    <span>I need yesterday's Codex history for this repo. I will use </span>
-    <span style={styles.inlineCode}>peek</span>
-    <span> to inspect it read-only.</span>
+    <span>Feed says dedup is handled in </span>
+    <span style={styles.inlineCode}>verify.ts</span>
+    <span>. Skipping rediscovery, starting directly on the handler.</span>
   </div>
 );
 
-const SessionList: React.FC<{ frame: number; opacity: number }> = ({
-  frame,
-  opacity,
-}) => (
-  <div
-    style={{
-      ...styles.block,
-      opacity,
-      transform: `translateY(${interpolate(opacity, [0, 1], [10, 0])}px)`,
-    }}
-  >
-    <Line frame={frame} at={154} color="#f6c200" text="$ peek list --adapter codex --all" />
-    <Line frame={frame} at={170} color="#e07b5f" text=":: found Codex sessions" />
-    {sessions.map((session) => (
-      <SessionRow key={session.name} frame={frame} session={session} />
-    ))}
-  </div>
-);
-
-const SessionRow: React.FC<{
+const FeedRow: React.FC<{
   frame: number;
-  session: (typeof sessions)[number];
-}> = ({ frame, session }) => {
-  const enter = progress(frame, session.at, 12);
-  const selected = session.name === "dashboard-codex";
-  const select = selected ? progress(frame, 252, 18) : 0;
+  row: (typeof feedRows)[number];
+}> = ({ frame, row }) => {
+  const enter = progress(frame, row.at, 14);
+  const tagColor =
+    row.type === "warning"
+      ? "#ff8a5b"
+      : row.type === "finding"
+        ? "#65e38d"
+        : "#8a8a8a";
+  const titleColor = row.type === "status" ? "#8a8a8a" : "#f0f0e8";
 
   return (
     <div
       style={{
-        ...styles.sessionRow,
+        ...styles.feedRow,
         opacity: enter,
         transform: `translateY(${interpolate(enter, [0, 1], [8, 0])}px)`,
       }}
     >
-      <div
-        style={{
-          ...styles.selector,
-          opacity: selected ? 1 : 0,
-          transform: `scaleX(${interpolate(select, [0, 1], [0.2, 1])})`,
-        }}
-      />
-      <span style={styles.check}>✓</span>
-      <span style={selected ? styles.sessionNameActive : styles.sessionName}>
-        {session.name}
+      <span style={{ ...styles.feedTag, color: tagColor }}>
+        [{row.type}]
       </span>
-      <span style={styles.sessionStatus}>{session.status}</span>
-      <div style={styles.sessionCwd}>{session.cwd}</div>
-    </div>
-  );
-};
-
-const Handoff: React.FC<{ frame: number; opacity: number }> = ({
-  frame,
-  opacity,
-}) => (
-  <div
-    style={{
-      ...styles.handoff,
-      opacity,
-      transform: `translateY(${interpolate(opacity, [0, 1], [12, 0])}px)`,
-    }}
-  >
-    <Line
-      frame={frame}
-      at={292}
-      color="#f6c200"
-      text="$ peek at dashboard-codex --mode handoff"
-    />
-    <div style={styles.handoffRows}>
-      {handoff.map((item) => (
-        <HandoffRow key={item.label} frame={frame} item={item} />
-      ))}
-    </div>
-  </div>
-);
-
-const HandoffRow: React.FC<{
-  frame: number;
-  item: (typeof handoff)[number];
-}> = ({ frame, item }) => {
-  const enter = progress(frame, item.at, 12);
-
-  return (
-    <div
-      style={{
-        ...styles.handoffRow,
-        opacity: enter,
-        transform: `translateY(${interpolate(enter, [0, 1], [8, 0])}px)`,
-      }}
-    >
-      <span style={styles.handoffLabel}>{item.label}</span>
-      <span style={styles.handoffValue}>{item.value}</span>
+      <span style={{ color: titleColor }}>{row.title}</span>
+      {row.body ? <div style={styles.feedBody}>{row.body}</div> : null}
+      {row.meta ? <div style={styles.feedMeta}>{row.meta}</div> : null}
     </div>
   );
 };
@@ -269,8 +221,8 @@ const FinalState: React.FC<{ frame: number; opacity: number }> = ({
   frame,
   opacity,
 }) => {
-  const bar = interpolate(frame, [462, 500], [0, 1], clamp);
-  const sub = progress(frame, 488, 16);
+  const bar = interpolate(frame, [502, 540], [0, 1], clamp);
+  const sub = progress(frame, 528, 16);
 
   return (
     <div
@@ -280,9 +232,9 @@ const FinalState: React.FC<{ frame: number; opacity: number }> = ({
         transform: `translateY(${interpolate(opacity, [0, 1], [24, 0])}px)`,
       }}
     >
-      <div style={styles.finalTitle}>✓ Found your session</div>
+      <div style={styles.finalTitle}>✓ Context ingested, not re-explored</div>
       <div style={styles.finalCopy}>
-        Claude Code used Agent Peek to recover yesterday's Codex context for the current project.
+        Agent B started with agent A's knowledge for ~400 tokens instead of re-reading the repo.
       </div>
       <div style={styles.meter}>
         <div style={{ ...styles.meterFill, width: `${bar * 100}%` }} />
@@ -294,9 +246,9 @@ const FinalState: React.FC<{ frame: number; opacity: number }> = ({
           transform: `translateY(${interpolate(sub, [0, 1], [8, 0])}px)`,
         }}
       >
-        <span>natural question</span>
-        <span>peek CLI</span>
-        <span>yesterday's Codex context</span>
+        <span>peek post</span>
+        <span>peek feed --budget 500</span>
+        <span>npm i -g agent-peek</span>
       </div>
     </div>
   );
@@ -378,6 +330,7 @@ const styles: Record<string, CSSProperties> = {
     background: "#242424",
   },
   prompt: {
+    position: "relative",
     height: 104,
     borderBottom: "1px solid #1c1c1c",
     display: "flex",
@@ -394,10 +347,12 @@ const styles: Record<string, CSSProperties> = {
   question: {
     color: "#f2f2ed",
   },
-  cursor: {
-    color: "#d9d9d4",
-    fontSize: 52,
-    marginLeft: 8,
+  promptLabel: {
+    position: "absolute",
+    left: 96,
+    right: 0,
+    top: "50%",
+    transform: "translateY(-50%)",
   },
   thought: {
     marginTop: 24,
@@ -413,8 +368,15 @@ const styles: Record<string, CSSProperties> = {
   inlineCode: {
     color: "#f6c200",
   },
-  block: {
+  contentArea: {
+    position: "relative",
     marginTop: 18,
+  },
+  layer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
   },
   line: {
     minHeight: 34,
@@ -423,69 +385,33 @@ const styles: Record<string, CSSProperties> = {
     letterSpacing: 0,
     whiteSpace: "pre",
   },
-  sessionRow: {
-    position: "relative",
-    minHeight: 62,
-    fontSize: 28,
-    lineHeight: 1.24,
-    letterSpacing: 0,
+  feedRows: {
+    marginTop: 12,
   },
-  selector: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 1,
-    height: 58,
-    background:
-      "linear-gradient(90deg, rgba(80,217,122,0.17), rgba(80,217,122,0.04) 58%, rgba(80,217,122,0))",
-    transformOrigin: "left center",
-  },
-  check: {
+  feedRow: {
     position: "relative",
+    marginTop: 20,
+    fontSize: 26,
+    lineHeight: 1.3,
+  },
+  feedTag: {
     display: "inline-block",
-    width: 48,
-    color: "#64e58c",
-  },
-  sessionName: {
-    position: "relative",
-    color: "#45a765",
-  },
-  sessionNameActive: {
-    position: "relative",
-    color: "#65e38d",
+    width: 150,
     fontWeight: 800,
   },
-  sessionStatus: {
-    position: "absolute",
-    right: 22,
-    color: "#777777",
-  },
-  sessionCwd: {
-    position: "relative",
-    color: "#777777",
+  feedBody: {
+    color: "#c9c9c2",
     fontSize: 22,
+    lineHeight: 1.3,
+    marginTop: 6,
+    paddingLeft: 150,
+  },
+  feedMeta: {
+    color: "#777777",
+    fontSize: 20,
+    lineHeight: 1.3,
     marginTop: 4,
-    paddingLeft: 74,
-  },
-  handoff: {
-    marginTop: 16,
-  },
-  handoffRows: {
-    marginTop: 10,
-  },
-  handoffRow: {
-    display: "grid",
-    gridTemplateColumns: "220px 1fr",
-    alignItems: "baseline",
-    minHeight: 40,
-    fontSize: 25,
-    lineHeight: 1.32,
-  },
-  handoffLabel: {
-    color: "#797979",
-  },
-  handoffValue: {
-    color: "#f0f0e8",
+    paddingLeft: 150,
   },
   final: {
     position: "absolute",
