@@ -71,9 +71,12 @@ export async function readFeed(opts: {
     for (const post of all) checkDrift(store, post, opts.dir);
     // Re-read validity after drift writes so packed output reflects it.
     const refreshed = all.map((p) => store.get(p.id) ?? p);
-    const stored = cursor.watermark
-      ? refreshed.filter((p) => p.lifecycle.createdAt > cursor.watermark!)
-      : refreshed;
+    const refreshedById = new Map(refreshed.map((p) => [p.id, p]));
+    const stored = refreshed.filter((p) => {
+      if (cursor.watermark && p.lifecycle.createdAt <= cursor.watermark) return false;
+      if (cursor.seenStored.includes(p.id)) return false;
+      return true;
+    });
 
     const derivedErrors: string[] = [];
     let derived: FeedPost[] = [];
@@ -97,13 +100,53 @@ export async function readFeed(opts: {
     // presentation). Budget-omitted posts must remain eligible on the next
     // read, otherwise they're permanently skipped once the watermark passes
     // their createdAt.
+    //
+    // packFeed orders by score, not time, so a single read can deliver a
+    // NEWER post while budget-omitting an OLDER one. If the watermark simply
+    // advanced to the max delivered createdAt, that older omitted post would
+    // be silently skipped forever (its createdAt would fall below the new
+    // watermark on the next incremental read). So when something stored gets
+    // omitted, the watermark only advances up to just below the oldest
+    // omission, and any newer stored post we DID deliver (because it scored
+    // high enough) is tracked in `seenStored` so it isn't redelivered once
+    // the watermark eventually catches up past it.
     const storedIds = new Set(stored.map((p) => p.id));
     const deliveredStored = packed.items.filter((item) => storedIds.has(item.post.id));
+    const deliveredStoredIds = new Set(deliveredStored.map((item) => item.post.id));
     const deliveredDerivedIds = packed.items.filter((item) => !storedIds.has(item.post.id)).map((item) => item.post.id);
-    const watermark = deliveredStored.reduce(
-      (max, item) => (item.post.lifecycle.createdAt > max ? item.post.lifecycle.createdAt : max),
-      cursor.watermark ?? "",
-    );
+    const omittedStored = stored.filter((p) => !deliveredStoredIds.has(p.id));
+
+    let watermark: string;
+    if (omittedStored.length === 0) {
+      watermark = deliveredStored.reduce(
+        (max, item) => (item.post.lifecycle.createdAt > max ? item.post.lifecycle.createdAt : max),
+        cursor.watermark ?? "",
+      );
+    } else {
+      const oldestOmittedCreatedAt = omittedStored.reduce(
+        (min, p) => (p.lifecycle.createdAt < min ? p.lifecycle.createdAt : min),
+        omittedStored[0]!.lifecycle.createdAt,
+      );
+      watermark = deliveredStored.reduce((max, item) => {
+        const createdAt = item.post.lifecycle.createdAt;
+        return createdAt < oldestOmittedCreatedAt && createdAt > max ? createdAt : max;
+      }, cursor.watermark ?? "");
+    }
+
+    // Carry forward any previously-tracked stored id whose post still sorts
+    // above the (possibly advanced) watermark, plus anything delivered this
+    // round that also sits above it. Ids whose post is gone (expired) are
+    // dropped: scorePost already zeroes them out, so they pose no
+    // redelivery risk.
+    const seenStoredSet = new Set<string>();
+    for (const id of cursor.seenStored) {
+      const createdAt = refreshedById.get(id)?.lifecycle.createdAt;
+      if (createdAt !== undefined && createdAt > watermark) seenStoredSet.add(id);
+    }
+    for (const item of deliveredStored) {
+      if (item.post.lifecycle.createdAt > watermark) seenStoredSet.add(item.post.id);
+    }
+    const seenStored = [...seenStoredSet];
     const seenDerived = [...cursor.seenDerived, ...deliveredDerivedIds];
     store.logIngestion({ reader: opts.reader, tokens: packed.tokensUsed, postCount: packed.items.length, now });
     return {
@@ -112,7 +155,7 @@ export async function readFeed(opts: {
       items: packed.items,
       tokensUsed: packed.tokensUsed,
       omitted: packed.omitted,
-      nextCursor: encodeFeedCursor({ watermark, seenDerived }),
+      nextCursor: encodeFeedCursor({ watermark, seenDerived, seenStored }),
       derivedErrors,
       recovered: store.recovered,
     };

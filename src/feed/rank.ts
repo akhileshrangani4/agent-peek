@@ -87,18 +87,25 @@ export function packFeed(posts: FeedPost[], budget: number, ctx: RankContext): P
 }
 
 const CURSOR_MAX_DERIVED = 64;
+const CURSOR_MAX_STORED = 64;
 
-export function encodeFeedCursor(c: { watermark: string; seenDerived: string[] }): string {
+export function encodeFeedCursor(c: { watermark: string; seenDerived: string[]; seenStored?: string[] }): string {
   const seenDerived = c.seenDerived.slice(-CURSOR_MAX_DERIVED);
-  return Buffer.from(JSON.stringify({ v: 1, w: c.watermark, d: seenDerived }), "utf8").toString("base64url");
+  const seenStored = (c.seenStored ?? []).slice(-CURSOR_MAX_STORED);
+  return Buffer.from(JSON.stringify({ v: 1, w: c.watermark, d: seenDerived, s: seenStored }), "utf8").toString("base64url");
 }
 
-export function decodeFeedCursor(cursor?: string): { watermark?: string; seenDerived: string[] } {
-  if (!cursor) return { watermark: undefined, seenDerived: [] };
+export function decodeFeedCursor(cursor?: string): { watermark?: string; seenDerived: string[]; seenStored: string[] } {
+  if (!cursor) return { watermark: undefined, seenDerived: [], seenStored: [] };
   try {
     const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
     if (parsed?.v !== 1) throw new Error("bad version");
-    return { watermark: typeof parsed.w === "string" ? parsed.w : undefined, seenDerived: Array.isArray(parsed.d) ? parsed.d : [] };
+    return {
+      watermark: typeof parsed.w === "string" ? parsed.w : undefined,
+      seenDerived: Array.isArray(parsed.d) ? parsed.d : [],
+      // Pre-fix cursors never carried `s`; tolerate its absence so old cursors still decode.
+      seenStored: Array.isArray(parsed.s) ? parsed.s : [],
+    };
   } catch (error) {
     throw new InvalidCursorError(`feed cursor: ${(error as Error).message}`);
   }

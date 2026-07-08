@@ -122,6 +122,46 @@ describe("postToFeed / readFeed round trip", () => {
     expect(second.items.map((i) => i.post.body.title)).toContain("Status short");
   });
 
+  it("resurfaces a budget-omitted OLDER post even when a NEWER post was delivered ahead of it by score", async () => {
+    // packFeed orders by score, not time. Construct t1 < t2 < t3 (by createdAt)
+    // where scoring delivers t3 (newest, warning on the reader's exact file)
+    // and t1 (oldest, finding on the reader's exact file) ahead of t2 (finding
+    // with non-overlapping paths), so the budget-limited pack omits t2 even
+    // though it's chronologically in the middle. A single watermark that
+    // simply advances to the max delivered createdAt (t3) would push past t2
+    // forever. The fix must resurface t2 on the next read, and must NOT
+    // redeliver t3 or t1 once it does.
+    const { dir, home } = tmpProject();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, "lib"), { recursive: true });
+    writeFileSync(join(dir, "src", "a.ts"), "a");
+    writeFileSync(join(dir, "lib", "unrelated.ts"), "u");
+
+    await postToFeed({
+      dir, home, as: "x",
+      input: { type: "finding", title: "Finding old", text: "x".repeat(40), paths: ["src/a.ts"] }, // t1
+    });
+    await postToFeed({
+      dir, home, as: "x",
+      input: { type: "finding", title: "Finding gap", text: "y".repeat(40), paths: ["lib/unrelated.ts"] }, // t2
+    });
+    await postToFeed({
+      dir, home, as: "x",
+      input: { type: "warning", title: "Warning new", text: "z".repeat(40), paths: ["src/a.ts"] }, // t3
+    });
+
+    const readOpts = { dir, home, includeDerived: false, budget: 38, contextPaths: ["src/a.ts"] };
+    const first = await readFeed(readOpts);
+    expect(first.items.map((i) => i.post.body.title)).toEqual(["Warning new", "Finding old"]);
+    expect(first.omitted).toBe(1);
+
+    const second = await readFeed({ ...readOpts, since: first.nextCursor });
+    expect(second.items.map((i) => i.post.body.title)).toEqual(["Finding gap"]);
+
+    const third = await readFeed({ ...readOpts, since: second.nextCursor });
+    expect(third.items).toHaveLength(0);
+  });
+
   it("feedStats counts posts and ingestions", async () => {
     const { dir, home } = tmpProject();
     await postToFeed({ dir, home, input, as: "x" });

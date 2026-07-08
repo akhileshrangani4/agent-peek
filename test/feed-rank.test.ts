@@ -110,9 +110,9 @@ describe("packFeed", () => {
 });
 
 describe("feed cursor", () => {
-  it("round-trips watermark and derived hashes", () => {
-    const cursor = encodeFeedCursor({ watermark: "2026-07-07T00:00:00Z", seenDerived: ["a", "b"] });
-    expect(decodeFeedCursor(cursor)).toEqual({ watermark: "2026-07-07T00:00:00Z", seenDerived: ["a", "b"] });
+  it("round-trips watermark, derived hashes, and seen stored ids", () => {
+    const cursor = encodeFeedCursor({ watermark: "2026-07-07T00:00:00Z", seenDerived: ["a", "b"], seenStored: ["p1", "p2"] });
+    expect(decodeFeedCursor(cursor)).toEqual({ watermark: "2026-07-07T00:00:00Z", seenDerived: ["a", "b"], seenStored: ["p1", "p2"] });
   });
 
   it("caps seenDerived at 64, evicting oldest first", () => {
@@ -122,8 +122,20 @@ describe("feed cursor", () => {
     expect(decoded.seenDerived[0]).toBe("h36");
   });
 
+  it("caps seenStored at 64, evicting oldest first", () => {
+    const seen = Array.from({ length: 100 }, (_, i) => `p${i}`);
+    const decoded = decodeFeedCursor(encodeFeedCursor({ watermark: "w", seenDerived: [], seenStored: seen }));
+    expect(decoded.seenStored).toHaveLength(64);
+    expect(decoded.seenStored[0]).toBe("p36");
+  });
+
+  it("decodes a pre-fix cursor missing seenStored as an empty array", () => {
+    const legacyCursor = Buffer.from(JSON.stringify({ v: 1, w: "2026-07-07T00:00:00Z", d: ["a"] }), "utf8").toString("base64url");
+    expect(decodeFeedCursor(legacyCursor)).toEqual({ watermark: "2026-07-07T00:00:00Z", seenDerived: ["a"], seenStored: [] });
+  });
+
   it("returns empty state for undefined and throws on garbage", () => {
-    expect(decodeFeedCursor(undefined)).toEqual({ watermark: undefined, seenDerived: [] });
+    expect(decodeFeedCursor(undefined)).toEqual({ watermark: undefined, seenDerived: [], seenStored: [] });
     expect(() => decodeFeedCursor("!!not-base64!!")).toThrowError(InvalidCursorError);
   });
 });
