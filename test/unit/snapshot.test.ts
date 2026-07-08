@@ -128,6 +128,23 @@ describe("snapshot.toSummary", () => {
     });
   });
 
+  it("does not pick the anthropic provider from ANTHROPIC_API_KEY alone", async () => {
+    const savedKey = process.env.ANTHROPIC_API_KEY;
+    const savedProvider = process.env.AGENT_PEEK_SUMMARY_PROVIDER;
+    try {
+      process.env.ANTHROPIC_API_KEY = "sk-test-not-real";
+      delete process.env.AGENT_PEEK_SUMMARY_PROVIDER;
+      const s = await toSummary("sid", msgs(), { deltaMessageCount: 5, cacheKey: "k-privacy" });
+      expect(s.fallback ?? false).toBe(false); // local is the primary path, not a fallback
+      expect(s.summary.length).toBeGreaterThan(0);
+    } finally {
+      if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = savedKey;
+      if (savedProvider === undefined) delete process.env.AGENT_PEEK_SUMMARY_PROVIDER;
+      else process.env.AGENT_PEEK_SUMMARY_PROVIDER = savedProvider;
+    }
+  });
+
   it("can force the local summary provider even when an Anthropic key is present", async () => {
     await withEnv({ ANTHROPIC_API_KEY: "test-key", AGENT_PEEK_SUMMARY_PROVIDER: "local" }, async () => {
       const s = await toSummary("sid", msgs(), { deltaMessageCount: 5 });

@@ -250,7 +250,9 @@ export async function toSummary(
 
   const provider = opts.client
     ? "anthropic"
-    : (process.env.AGENT_PEEK_SUMMARY_PROVIDER ?? (process.env.ANTHROPIC_API_KEY ? "anthropic" : "local"));
+    : process.env.AGENT_PEEK_SUMMARY_PROVIDER === "anthropic"
+    ? "anthropic"
+    : "local";
   if (provider !== "anthropic") {
     const summary = renderLocalSummary(structured, messages);
     if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });

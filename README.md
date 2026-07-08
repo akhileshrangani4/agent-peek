@@ -146,12 +146,12 @@ By default, raw mode hides tool-only messages and tool-call status lines to keep
 the output readable. Add `--tools` or `--verbose` when you need that detail.
 
 `summary` is available for prose summaries, but it is not the recommended
-agent-facing default. Prefer `brief` for low-latency local inspection. If you
-want hosted LLM summaries, set `ANTHROPIC_API_KEY`. To force local summaries on
-a machine that also has an Anthropic key, set:
+agent-facing default. Prefer `brief` for low-latency local inspection. Summaries
+are local by default. To use hosted LLM summaries (requires `ANTHROPIC_API_KEY`),
+set:
 
 ```bash
-AGENT_PEEK_SUMMARY_PROVIDER=local
+AGENT_PEEK_SUMMARY_PROVIDER=anthropic
 ```
 
 Timeline is not a `peek at --mode` value. It is an interactive-only view inside
