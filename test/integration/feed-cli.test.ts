@@ -67,6 +67,28 @@ describe("peek post / feed / expand", () => {
     expect(r.stderr).toMatch(/error: post_rejected/);
   });
 
+  it("rejects a bare --text flag with no value with exit code 5", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
+    const dir = await makeProject(home);
+    const r = await runCli([
+      "post", "status", "hello", "--as", "tester", "--dir", dir, "--text",
+    ], { HOME: home });
+    expect(r.code).toBe(5);
+    expect(r.stderr).toMatch(/error: (invalid_usage|post_rejected)/);
+  });
+
+  it("rejects a repeated --text flag (array coercion) instead of writing a garbled body", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
+    const dir = await makeProject(home);
+    const r = await runCli([
+      "post", "status", "hello", "--text", "--text", "actual body", "--as", "tester", "--dir", dir,
+    ], { HOME: home });
+    expect(r.code).toBe(5);
+    expect(r.stderr).toMatch(/error: post_rejected/);
+  });
+
   it("rejects a pathless finding with exit code 5", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
     tempRoots.push(home);
@@ -76,6 +98,18 @@ describe("peek post / feed / expand", () => {
     ], { HOME: home });
     expect(r.code).toBe(5);
     expect(r.stderr).toMatch(/error: post_rejected/);
+  });
+
+  it("prints a future-relative expiry instead of '0s ago'", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
+    const dir = await makeProject(home);
+    const posted = await runCli([
+      "post", "status", "hello", "--text", "x", "--as", "tester", "--dir", dir,
+    ], { HOME: home });
+    expect(posted.code).toBe(0);
+    expect(posted.stdout).toMatch(/expires in \d+[smhd]\)/);
+    expect(posted.stdout).not.toMatch(/expires 0s ago/);
   });
 
   it("expand returns the full post; unknown id exits 2", async () => {

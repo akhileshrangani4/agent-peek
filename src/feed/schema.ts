@@ -98,6 +98,7 @@ export function validatePost(input: PostInput, now: Date = new Date()): FeedPost
     throw new PostRejectedError(`title is ${title.length} chars; max is ${TITLE_MAX_CHARS}. Shorten it.`);
   }
   const text = input.text.trim();
+  if (text.length === 0) throw new PostRejectedError("text is required.");
   const maxTokens = origin === "derived" ? DERIVED_BODY_MAX_TOKENS : AUTHORED_BODY_MAX_TOKENS;
   const tokens = estimateTokens(text);
   if (tokens > maxTokens) {

@@ -90,6 +90,38 @@ describe("postToFeed / readFeed round trip", () => {
     await expect(expandPost({ dir, home, postId: "missing" })).rejects.toThrowError(PostNotFoundError);
   });
 
+  it("resurfaces budget-omitted posts on the next read instead of skipping them forever", async () => {
+    const { dir, home } = tmpProject();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "a.ts"), "a");
+    writeFileSync(join(dir, "src", "b.ts"), "b");
+
+    // p1 and p2 are high-weight "warning" posts (fresh, non-decaying score);
+    // p3 is a low-weight "status" post created LAST (chronologically newest)
+    // but scores far lower, so it's processed last by the packer and gets
+    // fully omitted under a tight budget despite being the newest candidate.
+    await postToFeed({
+      dir, home, as: "x",
+      input: { type: "warning", title: "Warning one", text: "x".repeat(40), paths: ["src/a.ts"] },
+    });
+    await postToFeed({
+      dir, home, as: "x",
+      input: { type: "warning", title: "Warning two", text: "y".repeat(40), paths: ["src/b.ts"] },
+    });
+    await postToFeed({
+      dir, home, as: "x",
+      input: { type: "status", title: "Status short", text: "z".repeat(10) },
+    });
+
+    const first = await readFeed({ dir, home, includeDerived: false, budget: 38 });
+    expect(first.items).toHaveLength(2);
+    expect(first.items.map((i) => i.post.body.title)).toEqual(["Warning two", "Warning one"]);
+    expect(first.omitted).toBe(1);
+
+    const second = await readFeed({ dir, home, includeDerived: false, since: first.nextCursor, budget: 38 });
+    expect(second.items.map((i) => i.post.body.title)).toContain("Status short");
+  });
+
   it("feedStats counts posts and ingestions", async () => {
     const { dir, home } = tmpProject();
     await postToFeed({ dir, home, input, as: "x" });

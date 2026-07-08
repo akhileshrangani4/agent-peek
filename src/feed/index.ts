@@ -93,8 +93,18 @@ export async function readFeed(opts: {
     const ctx: RankContext = { contextPaths: opts.contextPaths ?? [], readerSession: opts.reader, now };
     const budget = opts.budget ?? 600;
     const packed = packFeed([...stored, ...derived], budget, ctx);
-    const watermark = stored.reduce((max, p) => (p.lifecycle.createdAt > max ? p.lifecycle.createdAt : max), cursor.watermark ?? "");
-    const seenDerived = [...cursor.seenDerived, ...derived.map((p) => p.id)];
+    // Only advance the cursor over posts actually delivered (full or title
+    // presentation). Budget-omitted posts must remain eligible on the next
+    // read, otherwise they're permanently skipped once the watermark passes
+    // their createdAt.
+    const storedIds = new Set(stored.map((p) => p.id));
+    const deliveredStored = packed.items.filter((item) => storedIds.has(item.post.id));
+    const deliveredDerivedIds = packed.items.filter((item) => !storedIds.has(item.post.id)).map((item) => item.post.id);
+    const watermark = deliveredStored.reduce(
+      (max, item) => (item.post.lifecycle.createdAt > max ? item.post.lifecycle.createdAt : max),
+      cursor.watermark ?? "",
+    );
+    const seenDerived = [...cursor.seenDerived, ...deliveredDerivedIds];
     store.logIngestion({ reader: opts.reader, tokens: packed.tokensUsed, postCount: packed.items.length, now });
     return {
       project: identity.id,

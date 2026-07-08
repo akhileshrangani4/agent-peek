@@ -6,6 +6,13 @@ import { createRequire } from "node:module";
 import type { DatabaseSync } from "node:sqlite";
 import type { FeedPost, PostType } from "./schema.js";
 
+const CORRUPTION_PATTERN = /SQLITE_CORRUPT|SQLITE_NOTADB|malformed|not a database/i;
+
+function isCorruptionError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return CORRUPTION_PATTERN.test(message);
+}
+
 const nodeRequire = createRequire(import.meta.url);
 // Lazy-load node:sqlite: requiring it emits Node's ExperimentalWarning on
 // stderr, which must not happen for CLI commands that never touch the feed.
@@ -61,14 +68,17 @@ export class FeedStore {
     try {
       this.db = new (databaseSyncCtor())(this.path);
       this.db.exec("PRAGMA journal_mode = WAL;");
+      this.db.exec("PRAGMA busy_timeout = 5000;");
       this.db.exec(SCHEMA);
-    } catch {
+    } catch (err) {
+      if (!isCorruptionError(err)) throw err;
       if (existsSync(this.path)) {
         renameSync(this.path, `${this.path}.corrupt-${Date.now()}`);
         this.recovered = true;
       }
       this.db = new (databaseSyncCtor())(this.path);
       this.db.exec("PRAGMA journal_mode = WAL;");
+      this.db.exec("PRAGMA busy_timeout = 5000;");
       this.db.exec(SCHEMA);
     }
   }

@@ -61,6 +61,11 @@ describe("validatePost", () => {
     expect(() => validatePost({ ...base, text: "word ".repeat(200) })).toThrowError(/150/);
   });
 
+  it("rejects empty or whitespace-only text", () => {
+    expect(() => validatePost({ ...base, text: "" })).toThrowError(PostRejectedError);
+    expect(() => validatePost({ ...base, text: "   " })).toThrowError(/text/);
+  });
+
   it("allows derived body up to 40 tokens only", () => {
     const text41 = "x".repeat(41 * 4);
     expect(() => validatePost({ ...base, origin: "derived", text: text41 })).toThrowError(/40/);

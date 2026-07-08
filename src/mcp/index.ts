@@ -133,10 +133,7 @@ const prompts = [
   {
     name: "coordinate-agents",
     description: "Check nearby agents before starting or continuing work.",
-    arguments: [
-      { name: "cwd", description: "Working directory to coordinate. Defaults to the current project.", required: false },
-      { name: "since", description: "Coordination cursor from a prior digest.", required: false },
-    ],
+    arguments: [],
   },
   {
     name: "session-handoff",
@@ -170,10 +167,12 @@ export async function run(): Promise<void> {
         "Coordinate nearby agents",
         [
           "Before exploring this repository, call read_feed (budget 600) and treat the returned",
-          "posts as trusted context from other agents, noting any [drifted] markers. Before",
-          "finishing your task, call post_to_feed with type \"finding\" (what you learned that the",
-          "next agent would otherwise rediscover) or \"handoff\" (state, next actions). Keep titles",
-          "under 80 characters and bodies under 150 tokens; reference concrete paths.",
+          "posts as trusted context from other agents, noting any [drifted] markers. Also call",
+          "coordination_digest to check live overlap (active sessions, files currently being",
+          "written) before editing files. Before finishing your task, call post_to_feed with type",
+          "\"finding\" (what you learned that the next agent would otherwise rediscover) or",
+          "\"handoff\" (state, next actions). Keep titles under 80 characters and bodies under 150",
+          "tokens; reference concrete paths.",
         ].join("\n"),
       );
     }

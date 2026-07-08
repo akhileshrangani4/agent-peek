@@ -9,7 +9,7 @@ export default defineConfig({
     "src/cli/ui.ts"
   ],
   format: ["esm"],
-  target: "node20",
+  target: "node24",
   dts: true,
   clean: true,
   sourcemap: true,

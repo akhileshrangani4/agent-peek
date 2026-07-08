@@ -49,7 +49,7 @@ peek feed --budget 500
 ```
 
 ```text
-[finding] Auth lives in middleware (you, 3s ago)
+[finding] Auth lives in middleware (claude-code:9f21ac, 3s ago)
   verify.ts owns session checks; controllers assume it already ran
   paths: src/middleware/verify.ts
   id: 0mrbpv1sg-97d04557
@@ -330,6 +330,11 @@ Exposed resources:
 - `agent-peek://session/{selector}/handoff` — handoff snapshot for one session.
 - `agent-peek://session/{selector}/tail` — raw tail for one session.
 
+The `agent-peek://feed` resource always serves the feed for the MCP server's
+own working directory, not the caller's. Launch the server from the project
+whose feed you want (or configure your client to set its `cwd`), or use the
+`read_feed` tool with an explicit `dir` argument instead of the resource.
+
 Exposed prompts:
 
 - `coordinate-agents` — check nearby agents before continuing work.
@@ -544,6 +549,14 @@ Each module's default export must implement the `Adapter` interface from
 - Access control is your local filesystem permissions.
 - Session access is read-only.
 - `agent-peek` never writes to another agent's transcript.
+- Feed posts are stored persistently in `~/.agent-peek/feed/<project>.db`,
+  protected only by your file permissions, and expire per-type on a TTL
+  rather than being deleted immediately.
+- `read_feed` and derived status posts surface other local sessions' current
+  task and the files they are writing to any local reader; treat the feed as
+  visible to anyone who can run `peek` or the MCP server as your user.
+- Transcripts themselves remain read-only and unmodified; the feed database
+  is the only place `agent-peek` writes data of its own.
 
 ## License
 

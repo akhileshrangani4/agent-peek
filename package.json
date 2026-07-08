@@ -1,7 +1,7 @@
 {
   "name": "agent-peek",
   "version": "0.3.0",
-  "description": "Read-only peek into other AI agent chat sessions.",
+  "description": "Context feed and read-only visibility for local AI coding agents.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

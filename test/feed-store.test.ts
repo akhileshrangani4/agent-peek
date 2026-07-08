@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -111,5 +111,29 @@ describe("FeedStore", () => {
     expect(store.candidates()).toHaveLength(2);
     other.close();
     store.close();
+  });
+
+  it("survives concurrent inserts and reads from multiple store instances", async () => {
+    const store = makeStore();
+    store.close();
+
+    const stores = Array.from({ length: 6 }, () => new FeedStore({ projectId: "abc123", home }));
+    const ops = stores.map((s, i) =>
+      i % 2 === 0
+        ? () => Promise.resolve(s.insert(post({ title: `concurrent-${i}` })))
+        : () => Promise.resolve(s.candidates()),
+    );
+
+    await Promise.all(ops.map((op) => op()));
+
+    for (const s of stores) s.close();
+
+    const files = readdirSync(join(home, ".agent-peek", "feed"));
+    expect(files.some((f) => f.includes(".corrupt-"))).toBe(false);
+
+    const verify = new FeedStore({ projectId: "abc123", home });
+    const inserted = stores.length / 2;
+    expect(verify.candidates()).toHaveLength(inserted);
+    verify.close();
   });
 });

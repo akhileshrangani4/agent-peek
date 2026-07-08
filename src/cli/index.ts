@@ -444,6 +444,13 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       if (opts.text === undefined) {
         throw new PostRejectedError("--text is required. Provide the post body (<= 150 tokens).");
       }
+      // A bare `--text` flag (no value) or a repeated `--text` flag is
+      // parsed by the CLI as boolean `true` or an array, not a string.
+      // Reject it here instead of letting String() coerce it into the
+      // literal text "true" (or "true,<other value>").
+      if (typeof opts.text !== "string") {
+        throw new PostRejectedError("--text requires a single string value. Provide the post body (<= 150 tokens).");
+      }
       const engine = await createEngine({ withExternal: true });
       const post = await postToFeed({
         dir,
@@ -1518,7 +1525,19 @@ function formatPath(path: string): string {
 function relativeTime(iso: string): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return iso;
-  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  const diffMs = then - Date.now();
+  if (diffMs > 0) {
+    const seconds = Math.floor(diffMs / 1000);
+    if (seconds < 60) return `in ${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `in ${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `in ${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `in ${days}d`;
+    return iso.slice(0, 10);
+  }
+  const seconds = Math.max(0, Math.floor(-diffMs / 1000));
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
