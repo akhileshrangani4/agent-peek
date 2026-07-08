@@ -440,6 +440,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .action(async (type, title, opts) => {
       const { postToFeed } = await import("../feed/index.js");
       const dir = resolve(String(opts.dir ?? process.cwd()));
+      if (opts.text === undefined) {
+        throw new PostRejectedError("--text is required. Provide the post body (<= 150 tokens).");
+      }
       const engine = await createEngine({ withExternal: true });
       const post = await postToFeed({
         dir,
@@ -448,13 +451,13 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         input: {
           type: String(type) as PostType,
           title: String(title),
-          text: String(opts.text ?? ""),
+          text: String(opts.text),
           paths: splitList(opts.paths),
           topics: splitList(opts.topics),
           evidence: parseEvidence(opts.evidence),
           replyTo: opts.replyTo ? String(opts.replyTo) : undefined,
           supersedes: opts.supersedes ? String(opts.supersedes) : undefined,
-          mentions: opts.mention ? [String(opts.mention)] : [],
+          mentions: splitList(opts.mention),
           ttlMs: opts.ttl ? parseDurationMs(opts.ttl, "--ttl") : undefined,
         },
       });

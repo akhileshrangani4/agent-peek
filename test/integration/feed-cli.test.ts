@@ -1,10 +1,11 @@
 // test/integration/feed-cli.test.ts
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { spawn, execFileSync } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = resolve(__dirname, "../../bin/peek.js");
@@ -27,8 +28,17 @@ async function makeProject(home: string): Promise<string> {
 }
 
 describe("peek post / feed / expand", () => {
+  const tempRoots: string[] = [];
+
+  afterAll(() => {
+    for (const root of tempRoots) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("posts a finding and reads it back as JSON", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
     const dir = await makeProject(home);
     const posted = await runCli([
       "post", "finding", "Auth lives in middleware",
@@ -46,8 +56,20 @@ describe("peek post / feed / expand", () => {
     expect(result.nextCursor).toBeTruthy();
   });
 
+  it("rejects a post without --text with exit code 5", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
+    const dir = await makeProject(home);
+    const r = await runCli([
+      "post", "status", "hello", "--as", "tester", "--dir", dir,
+    ], { HOME: home });
+    expect(r.code).toBe(5);
+    expect(r.stderr).toMatch(/error: post_rejected/);
+  });
+
   it("rejects a pathless finding with exit code 5", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
     const dir = await makeProject(home);
     const r = await runCli([
       "post", "finding", "t", "--text", "x", "--as", "tester", "--dir", dir,
@@ -58,6 +80,7 @@ describe("peek post / feed / expand", () => {
 
   it("expand returns the full post; unknown id exits 2", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
     const dir = await makeProject(home);
     const posted = await runCli([
       "post", "status", "hello", "--text", "x", "--as", "tester", "--dir", dir, "--json",
@@ -73,8 +96,25 @@ describe("peek post / feed / expand", () => {
     expect(missing.stderr).toMatch(/error: post_not_found/);
   });
 
+  it("handles repeated --mention flags correctly", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
+    const dir = await makeProject(home);
+    const posted = await runCli([
+      "post", "status", "hello", "--text", "notify multiple",
+      "--mention", "agent-a", "--mention", "agent-b",
+      "--as", "tester", "--dir", dir, "--json",
+    ], { HOME: home });
+    expect(posted.code).toBe(0);
+    const post = JSON.parse(posted.stdout);
+    expect(post.links.mentions).toHaveLength(2);
+    expect(post.links.mentions).toContain("agent-a");
+    expect(post.links.mentions).toContain("agent-b");
+  });
+
   it("feed --stats reports counters", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
     const dir = await makeProject(home);
     await runCli(["post", "status", "hello", "--text", "x", "--as", "tester", "--dir", dir], { HOME: home });
     const stats = await runCli(["feed", dir, "--stats", "--json"], { HOME: home });
