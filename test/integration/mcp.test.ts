@@ -10,6 +10,17 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = resolve(__dirname, "../../bin/agent-peek-mcp.js");
 
+async function connectClient(home: string): Promise<Client> {
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [BIN],
+    env: { ...process.env, HOME: home } as Record<string, string>,
+  });
+  const client = new Client({ name: "test", version: "0.0.1" }, { capabilities: {} });
+  await client.connect(transport);
+  return client;
+}
+
 describe("MCP integration", () => {
   it("lists tools and calls list_sessions", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-mcp-"));
@@ -30,7 +41,7 @@ describe("MCP integration", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual(
-      ["coordination_digest", "list_sessions", "peek_session", "tag_session"]);
+      ["coordination_digest", "expand_post", "list_sessions", "peek_session", "post_to_feed", "read_feed", "tag_session"]);
 
     const res = await client.callTool({ name: "list_sessions", arguments: {} });
     const text = (res.content as any)?.[0]?.text ?? "[]";
@@ -105,6 +116,57 @@ describe("MCP integration", () => {
       name: "peek_session",
       arguments: { selector: "y-claude", mode: "invalid-mode" },
     })).rejects.toThrow(/invalid mode/);
+
+    await client.close();
+  }, 15_000);
+
+  it("post_to_feed then read_feed round-trips", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-mcp-feed-"));
+    const projectDir = await mkdtemp(join(tmpdir(), "ap-mcp-proj-"));
+    const client = await connectClient(home);
+
+    const posted = await client.callTool({
+      name: "post_to_feed",
+      arguments: {
+        type: "finding", title: "t", text: "b", paths: ["src/a.ts"], as: "tester", dir: projectDir,
+      },
+    });
+    expect(posted.isError).toBeFalsy();
+
+    const feed = await client.callTool({
+      name: "read_feed",
+      arguments: { dir: projectDir, include_derived: false },
+    });
+    const parsed = JSON.parse((feed.content as any)[0].text);
+    expect(parsed.items).toHaveLength(1);
+
+    await client.close();
+  }, 15_000);
+
+  it("expand_post surfaces post_not_found as a tool error", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-mcp-feed-"));
+    const projectDir = await mkdtemp(join(tmpdir(), "ap-mcp-proj-"));
+    const client = await connectClient(home);
+
+    const res = await client.callTool({
+      name: "expand_post",
+      arguments: { post_id: "missing", dir: projectDir },
+    });
+    expect(res.isError).toBe(true);
+
+    await client.close();
+  }, 15_000);
+
+  it("lists the three feed tools and the feed resource", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-mcp-feed-"));
+    const client = await connectClient(home);
+
+    const tools = await client.listTools();
+    const names = tools.tools.map((t) => t.name);
+    for (const name of ["post_to_feed", "read_feed", "expand_post"]) expect(names).toContain(name);
+
+    const resources = await client.listResources();
+    expect(resources.resources.map((r) => r.uri)).toContain("agent-peek://feed");
 
     await client.close();
   }, 15_000);

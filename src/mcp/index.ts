@@ -9,6 +9,9 @@ import {
 import { createEngine, VERSION } from "../index.js";
 import type { PeekResult, SessionEntry, SnapshotMode } from "../core/types.js";
 import { displayNames } from "../core/names.js";
+import { NotAProjectError, PostNotFoundError, PostRejectedError } from "../core/errors.js";
+import { expandPost, postToFeed, readFeed } from "../feed/index.js";
+import type { PostInput, PostType } from "../feed/index.js";
 
 const tools = [
   {
@@ -73,6 +76,59 @@ const tools = [
   },
 ];
 
+const FEED_TOOLS = [
+  {
+    name: "post_to_feed",
+    description: "Publish a token-budgeted context post (finding, intent, warning, question, answer, handoff, status) to this project's feed so other agents can ingest it instead of re-exploring.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["finding", "intent", "warning", "question", "answer", "handoff", "status"] },
+        title: { type: "string", description: "Max 80 chars" },
+        text: { type: "string", description: "Max ~150 tokens; link evidence instead of inlining" },
+        dir: { type: "string", description: "Project directory; defaults to server cwd" },
+        paths: { type: "array", items: { type: "string" }, description: "Repo-relative paths (required for finding/warning)" },
+        topics: { type: "array", items: { type: "string" } },
+        reply_to: { type: "string" },
+        supersedes: { type: "string" },
+        mentions: { type: "array", items: { type: "string" } },
+        ttl_ms: { type: "number" },
+        as: { type: "string", description: "Author identity override" },
+      },
+      required: ["type", "title", "text"],
+    },
+  },
+  {
+    name: "read_feed",
+    description: "Read this project's context feed: posts from other agents ranked by relevance to your working set and packed to a token budget. Call before exploring the repo.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dir: { type: "string" },
+        budget: { type: "number", description: "Token budget, default 600" },
+        context_paths: { type: "array", items: { type: "string" }, description: "Paths you are working on (improves ranking)" },
+        since: { type: "string", description: "Cursor from a prior read_feed" },
+        types: { type: "array", items: { type: "string" } },
+        reader: { type: "string", description: "Your session identity (boosts mentions)" },
+        include_derived: { type: "boolean", description: "Include derived status/overlap posts, default true" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "expand_post",
+    description: "Fetch one feed post in full, including evidence references, before trusting or acting on it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        post_id: { type: "string" },
+        dir: { type: "string" },
+      },
+      required: ["post_id"],
+    },
+  },
+];
+
 const prompts = [
   {
     name: "coordinate-agents",
@@ -105,21 +161,19 @@ export async function run(): Promise<void> {
     { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...tools, ...FEED_TOOLS] }));
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts }));
   server.setRequestHandler(GetPromptRequestSchema, async (req) => {
     const args = req.params.arguments ?? {};
     if (req.params.name === "coordinate-agents") {
-      const cwd = typeof args.cwd === "string" ? args.cwd : undefined;
-      const since = typeof args.since === "string" ? args.since : undefined;
       return promptText(
         "Coordinate nearby agents",
         [
-          cwd
-            ? `Call coordination_digest with cwd=${JSON.stringify(cwd)}${since ? ` and since=${JSON.stringify(since)}` : ""}.`
-            : `Call coordination_digest${since ? ` with since=${JSON.stringify(since)}` : ""}; pass an absolute workspace cwd only if the client knows it.`,
-          "Summarize high/medium overlapHints first, then who is active, what changed, session intent, activeWritingFiles, recentWritingFiles, pending tools, and hotFiles.",
-          "If overlapHints mention a cwd or file you plan to touch, inspect the relevant session resource before editing.",
+          "Before exploring this repository, call read_feed (budget 600) and treat the returned",
+          "posts as trusted context from other agents, noting any [drifted] markers. Before",
+          "finishing your task, call post_to_feed with type \"finding\" (what you learned that the",
+          "next agent would otherwise rediscover) or \"handoff\" (state, next actions). Keep titles",
+          "under 80 characters and bodies under 150 tokens; reference concrete paths.",
         ].join("\n"),
       );
     }
@@ -158,6 +212,12 @@ export async function run(): Promise<void> {
           uri: "agent-peek://sessions",
           name: "agent-peek sessions",
           description: "Discovered active agent sessions with display names.",
+          mimeType: "application/json",
+        },
+        {
+          uri: "agent-peek://feed",
+          name: "agent-peek feed",
+          description: "This project's context feed, ranked and packed to a token budget.",
           mimeType: "application/json",
         },
         ...named.map((entry) => ({
@@ -209,6 +269,10 @@ export async function run(): Promise<void> {
       const list = await activeSessions(engine);
       return jsonResource(uri, withDisplayNames(list));
     }
+    if (uri === "agent-peek://feed") {
+      const result = await readFeed({ dir: process.cwd(), budget: 600, engine });
+      return jsonResource(uri, result);
+    }
     const parsed = parseSessionResource(uri);
     if (!parsed) throw new Error(`Unknown resource: ${uri}`);
     const result = await readSessionResource(engine, parsed.selector, parsed.view);
@@ -256,6 +320,57 @@ export async function run(): Promise<void> {
     if (name === "tag_session") {
       await engine.tag(String(args.id), String(args.tag));
       return { content: [{ type: "text", text: "ok" }] };
+    }
+    if (name === "post_to_feed") {
+      try {
+        const post = await postToFeed({
+          dir: args.dir ? String(args.dir) : process.cwd(),
+          engine,
+          as: args.as ? String(args.as) : undefined,
+          input: {
+            type: String(args.type) as PostType,
+            title: String(args.title),
+            text: String(args.text),
+            paths: stringArray(args.paths),
+            topics: stringArray(args.topics),
+            replyTo: args.reply_to ? String(args.reply_to) : undefined,
+            supersedes: args.supersedes ? String(args.supersedes) : undefined,
+            mentions: stringArray(args.mentions),
+            ttlMs: typeof args.ttl_ms === "number" ? args.ttl_ms : undefined,
+          } satisfies Omit<PostInput, "project" | "author">,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(post) }] };
+      } catch (error) {
+        return feedToolError(error);
+      }
+    }
+    if (name === "read_feed") {
+      try {
+        const result = await readFeed({
+          dir: args.dir ? String(args.dir) : process.cwd(),
+          engine,
+          budget: typeof args.budget === "number" ? args.budget : undefined,
+          contextPaths: stringArray(args.context_paths),
+          since: args.since ? String(args.since) : undefined,
+          types: args.types ? (stringArray(args.types) as PostType[]) : undefined,
+          reader: args.reader ? String(args.reader) : undefined,
+          includeDerived: typeof args.include_derived === "boolean" ? args.include_derived : undefined,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        return feedToolError(error);
+      }
+    }
+    if (name === "expand_post") {
+      try {
+        const post = await expandPost({
+          dir: args.dir ? String(args.dir) : process.cwd(),
+          postId: String(args.post_id),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(post) }] };
+      } catch (error) {
+        return feedToolError(error);
+      }
     }
     throw new Error(`Unknown tool: ${name}`);
   });
@@ -354,6 +469,18 @@ function parseSnapshotMode(value: unknown): SnapshotMode {
 
 function isTerminalAdapter(adapter: unknown): boolean {
   return adapter === "tmux" || adapter === "screen";
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((v) => String(v));
+}
+
+function feedToolError(error: unknown): { isError: true; content: { type: "text"; text: string }[] } {
+  if (error instanceof PostRejectedError || error instanceof PostNotFoundError || error instanceof NotAProjectError) {
+    return { isError: true, content: [{ type: "text", text: error.message }] };
+  }
+  throw error;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
