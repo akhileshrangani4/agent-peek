@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
+import type { DatabaseSync } from "node:sqlite";
 import type { FeedPost, PostType } from "./schema.js";
 
-const require = createRequire(import.meta.url);
-const { DatabaseSync } = require("node:sqlite");
+const nodeRequire = createRequire(import.meta.url);
+const { DatabaseSync: DatabaseSyncCtor } = nodeRequire("node:sqlite") as { DatabaseSync: typeof DatabaseSync };
 
 export function feedDbPath(home: string | undefined, projectId: string): string {
   return join(home ?? homedir(), ".agent-peek", "feed", `${projectId}.db`);
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS ingestions (
 `;
 
 export class FeedStore {
-  private db!: InstanceType<typeof DatabaseSync>;
+  private db!: DatabaseSync;
   readonly path: string;
   recovered = false;
 
@@ -52,7 +53,7 @@ export class FeedStore {
 
   private open(): void {
     try {
-      this.db = new DatabaseSync(this.path);
+      this.db = new DatabaseSyncCtor(this.path);
       this.db.exec("PRAGMA journal_mode = WAL;");
       this.db.exec(SCHEMA);
     } catch {
@@ -60,7 +61,7 @@ export class FeedStore {
         renameSync(this.path, `${this.path}.corrupt-${Date.now()}`);
         this.recovered = true;
       }
-      this.db = new DatabaseSync(this.path);
+      this.db = new DatabaseSyncCtor(this.path);
       this.db.exec("PRAGMA journal_mode = WAL;");
       this.db.exec(SCHEMA);
     }
@@ -81,8 +82,8 @@ export class FeedStore {
   }
 
   get(id: string): FeedPost | undefined {
-    const row = this.db.prepare("SELECT doc, validity, superseded_by FROM posts WHERE id = ?").get(id) as
-      | { doc: string; validity: string; superseded_by: string | null }
+    const row = this.db.prepare("SELECT doc, validity FROM posts WHERE id = ?").get(id) as
+      | { doc: string; validity: string }
       | undefined;
     if (!row) return undefined;
     return this.reviveRow(row.doc, row.validity);
