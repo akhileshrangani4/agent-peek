@@ -7,7 +7,13 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FeedPost, PostType } from "./schema.js";
 
 const nodeRequire = createRequire(import.meta.url);
-const { DatabaseSync: DatabaseSyncCtor } = nodeRequire("node:sqlite") as { DatabaseSync: typeof DatabaseSync };
+// Lazy-load node:sqlite: requiring it emits Node's ExperimentalWarning on
+// stderr, which must not happen for CLI commands that never touch the feed.
+let cachedCtor: typeof DatabaseSync | undefined;
+function databaseSyncCtor(): typeof DatabaseSync {
+  cachedCtor ??= (nodeRequire("node:sqlite") as { DatabaseSync: typeof DatabaseSync }).DatabaseSync;
+  return cachedCtor;
+}
 
 export function feedDbPath(home: string | undefined, projectId: string): string {
   return join(home ?? homedir(), ".agent-peek", "feed", `${projectId}.db`);
@@ -53,7 +59,7 @@ export class FeedStore {
 
   private open(): void {
     try {
-      this.db = new DatabaseSyncCtor(this.path);
+      this.db = new (databaseSyncCtor())(this.path);
       this.db.exec("PRAGMA journal_mode = WAL;");
       this.db.exec(SCHEMA);
     } catch {
@@ -61,7 +67,7 @@ export class FeedStore {
         renameSync(this.path, `${this.path}.corrupt-${Date.now()}`);
         this.recovered = true;
       }
-      this.db = new DatabaseSyncCtor(this.path);
+      this.db = new (databaseSyncCtor())(this.path);
       this.db.exec("PRAGMA journal_mode = WAL;");
       this.db.exec(SCHEMA);
     }
