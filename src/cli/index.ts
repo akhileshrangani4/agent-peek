@@ -788,19 +788,19 @@ function readFilesFrom(path: string): string[] {
 
 function parseDurationMs(value: unknown, flag: string): number {
   const text = String(value ?? "").trim();
-  const match = text.match(/^(\d+)(ms|s|m|h)?$/i);
+  const match = text.match(/^(\d+)(ms|s|m|h|d)?$/i);
   if (!match) {
     fail({
       code: 5,
       error: "invalid_duration",
       message: `Invalid ${flag}: ${text}`,
-      hint: "Use a duration like 30s, 2m, or 1h.",
+      hint: "Use a duration like 30s, 2m, 1h, or 7d.",
       next: ["peek claim src/core/engine.ts --ttl 2m"],
     });
   }
   const amount = Number(match[1]);
   const unit = (match[2] ?? "s").toLowerCase();
-  const factor = unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : unit === "s" ? 1000 : 1;
+  const factor = unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : unit === "s" ? 1000 : 1;
   const ms = amount * factor;
   if (!Number.isSafeInteger(ms) || ms <= 0) {
     fail({

@@ -67,6 +67,20 @@ describe("peek post / feed / expand", () => {
     expect(r.stderr).toMatch(/error: post_rejected/);
   });
 
+  it("accepts day-unit TTLs on peek post", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
+    tempRoots.push(home);
+    const dir = await makeProject(home);
+    const r = await runCli([
+      "post", "status", "ttl in days", "--text", "x",
+      "--as", "tester", "--dir", dir, "--ttl", "2d", "--json",
+    ], { HOME: home });
+    expect(r.code).toBe(0);
+    const post = JSON.parse(r.stdout);
+    const lifetimeMs = Date.parse(post.lifecycle.expiresAt) - Date.parse(post.lifecycle.createdAt);
+    expect(lifetimeMs).toBe(2 * 24 * 60 * 60 * 1000);
+  });
+
   it("rejects a bare --text flag with no value with exit code 5", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-feed-cli-"));
     tempRoots.push(home);
