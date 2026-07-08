@@ -17,6 +17,7 @@ export {
   SessionNotFoundError, AmbiguousSelectorError, AdapterError,
   AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
   TranscriptUnreadableError, TranscriptCorruptError, SummaryUnavailableError,
+  PostRejectedError, PostNotFoundError, NotAProjectError,
 } from "./core/errors.js";
 
 export { Registry } from "./core/registry.js";
@@ -28,6 +29,16 @@ export {
   encodeCoordinationCursor, decodeCoordinationCursor,
   buildCoordinationDigest, buildCoordinationSession,
 } from "./core/coordination.js";
+
+export {
+  postToFeed, readFeed, expandPost, feedStats,
+  validatePost, estimateTokens, DEFAULT_TTL_MS,
+  FeedStore, feedDbPath, projectIdentity, resolveAuthor,
+} from "./feed/index.js";
+export type {
+  FeedPost, PostInput, PostType, PostAuthor, PostEvidence, PostOrigin, PostValidity,
+  PackedItem, PackedFeed, RankContext, FeedReadResult,
+} from "./feed/index.js";
 
 export { AdapterLoader, discoverExternal } from "./adapters/loader.js";
 export type { Adapter, AdapterReadResult, AdapterModule } from "./adapters/types.js";
