@@ -64,11 +64,16 @@ export async function readFeed(opts: {
   const now = new Date();
   const store = new FeedStore({ projectId: identity.id, home: opts.home });
   try {
-    let stored = store.candidates({ types: opts.types, now });
-    if (cursor.watermark) stored = stored.filter((p) => p.lifecycle.createdAt > cursor.watermark!);
-    for (const post of stored) checkDrift(store, post, opts.dir);
+    // Drift-check every candidate (not just ones newer than the cursor) so
+    // incremental readers still learn when an already-seen post's referenced
+    // files change. The watermark filter below only affects what is RETURNED.
+    const all = store.candidates({ types: opts.types, now });
+    for (const post of all) checkDrift(store, post, opts.dir);
     // Re-read validity after drift writes so packed output reflects it.
-    stored = stored.map((p) => store.get(p.id) ?? p);
+    const refreshed = all.map((p) => store.get(p.id) ?? p);
+    const stored = cursor.watermark
+      ? refreshed.filter((p) => p.lifecycle.createdAt > cursor.watermark!)
+      : refreshed;
 
     const derivedErrors: string[] = [];
     let derived: FeedPost[] = [];

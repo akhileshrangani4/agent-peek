@@ -67,6 +67,21 @@ describe("postToFeed / readFeed round trip", () => {
     expect(feed.items[0]!.post.lifecycle.validity).toBe("drifted");
   });
 
+  it("drift-checks already-seen posts on an incremental read even though the payload stays watermark-filtered", async () => {
+    const { dir, home } = tmpProject();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    const target = join(dir, "src", "session.ts");
+    writeFileSync(target, "old");
+    const post = await postToFeed({ dir, home, input, as: "x" });
+    const first = await readFeed({ dir, home, includeDerived: false });
+    const future = new Date(Date.now() + 5_000);
+    utimesSync(target, future, future);
+    const second = await readFeed({ dir, home, includeDerived: false, since: first.nextCursor });
+    expect(second.items).toHaveLength(0);
+    const expanded = await expandPost({ dir, home, postId: post.id });
+    expect(expanded.lifecycle.validity).toBe("drifted");
+  });
+
   it("expandPost returns the full post and throws for unknown ids", async () => {
     const { dir, home } = tmpProject();
     const post = await postToFeed({ dir, home, input, as: "x" });
