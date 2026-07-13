@@ -1,0 +1,48 @@
+---
+title: Coordination
+description: Advisory coord/check/claim signals for the shared things worktrees don't isolate.
+---
+
+Git worktrees already give each agent its own working directory, so file
+conflicts inside a single git-tracked checkout usually aren't the problem.
+What worktrees don't cover: a shared dev server, a database migration two
+agents both plan to run, a shared external resource, or a file that two agents
+in two different worktrees still both intend to touch. For that, `peek`
+has cooperative, advisory signals.
+
+```bash
+peek coord
+peek coord . --writing
+peek check src/core/engine.ts
+peek claim src/core/engine.ts --ttl 2m --as codex-main
+peek release <claim-id> --claim-id --json
+```
+
+## Useful details
+
+- `peek coord . --writing` shows active writers and file claims, hiding idle noise.
+- `peek list --files` gives the same file-context view as part of a regular session list.
+- `peek check <file>` exits `0` when clear and `1` on conflict.
+- `peek check --files-from changed-files.txt` bulk-checks a planned edit.
+- `peek check <file> --as <owner>` ignores your own claims in claim-then-check loops.
+- `peek claim <file> --ttl 2m` broadcasts temporary write intent (2m is the default TTL if you omit `--ttl`).
+- `peek release <claim-id> --claim-id --files-from done-files.txt` partially releases a claim.
+- `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` is the polling-friendly JSON path.
+
+:::warning
+Claims are cooperative local signals, not authentication or access control.
+Use them to help well-behaved agents avoid overlap on the things worktrees
+don't isolate.
+:::
+
+## The check-then-claim pattern
+
+```bash
+peek check src/core/engine.ts        # exit 1 if another active agent is writing it
+peek claim src/core/engine.ts --ttl 10m   # default TTL is 2m — often too short for long edits
+# ... make your edits ...
+peek release src/core/engine.ts      # drop the claim when done
+```
+
+Set an explicit `--ttl` on `claim`: the 2m default expires mid-work on longer
+edits.

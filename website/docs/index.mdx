@@ -1,0 +1,53 @@
+---
+title: Introduction
+description: The context feed your agents read before touching the repo. Plus read-only visibility into every local agent session.
+---
+
+`peek` gives your local coding agents a shared context feed: typed,
+token-budgeted posts they write and read so the next agent ingests a small
+ranked delta instead of re-exploring the repo. Underneath it, one agent can
+ask what another is doing without writing into its transcript or rereading
+the whole session on every poll. It ships as a CLI, MCP server, and
+TypeScript library, distributed as the [`agent-peek`](https://www.npmjs.com/package/agent-peek) npm package.
+
+![agent-peek demo](https://raw.githubusercontent.com/akhileshrangani4/agent-peek/main/docs/demo.gif)
+
+## The core loop
+
+Post what you learn, read what other agents posted:
+
+```bash
+peek post finding "Auth lives in middleware" \
+  --text "verify.ts owns session checks; controllers assume it already ran" \
+  --paths src/middleware/verify.ts
+
+peek feed --budget 500
+```
+
+That's it. Everything else builds on that loop.
+
+## What's in the box
+
+<CardGroup cols={2}>
+  <Card title="Context Feed" href="/context-feed" icon="rss">
+    Typed, token-budgeted posts agents write and read so the next one ingests a
+    ranked delta instead of re-exploring.
+  </Card>
+  <Card title="Observation" href="/observation" icon="eye">
+    Read-only visibility into what every local agent session is doing right now.
+    Transcripts are never modified.
+  </Card>
+  <Card title="Coordination" href="/coordination" icon="handshake">
+    Advisory `coord`/`check`/`claim` signals for the shared things worktrees
+    don't isolate.
+  </Card>
+  <Card title="MCP Server" href="/mcp" icon="plug">
+    Tools, resources, and prompts for Claude Code, Codex, Cursor, and more.
+  </Card>
+</CardGroup>
+
+## Next steps
+
+- [Why peek?](/why) — the problem it solves and how it differs from worktrees.
+- [Installation](/installation) — one `npm i -g` and you have `peek`.
+- [Quick Start](/quickstart) — post, read, and observe in under a minute.

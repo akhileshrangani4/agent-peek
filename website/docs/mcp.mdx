@@ -1,0 +1,183 @@
+---
+title: MCP Server
+description: Tools, resources, and prompts exposed over MCP, plus config for every major client.
+---
+
+The MCP server command is:
+
+```bash
+agent-peek-mcp
+```
+
+It is a local stdio server. Different clients use different config shapes — see
+the tabs below.
+
+## Exposed tools
+
+- `list_sessions` — list discovered sessions with display names.
+- `peek_session` — read one session snapshot.
+- `coordination_digest` — summarize nearby session activity and overlap.
+- `tag_session` — assign a stable tag.
+- `post_to_feed` — publish a context post to this project's feed.
+- `read_feed` — read the feed, ranked and packed to a token budget.
+- `expand_post` — show one feed post in full, with evidence references.
+
+## Exposed resources
+
+- `agent-peek://sessions` — active sessions as JSON.
+- `agent-peek://feed` — this project's context feed, ranked and packed to a token budget.
+- `agent-peek://session/{selector}/brief` — brief snapshot for one session.
+- `agent-peek://session/{selector}/handoff` — handoff snapshot for one session.
+- `agent-peek://session/{selector}/tail` — raw tail for one session.
+
+:::note
+The `agent-peek://feed` resource always serves the feed for the MCP server's
+own working directory, not the caller's. Launch the server from the project
+whose feed you want (or configure your client to set its `cwd`), or use the
+`read_feed` tool with an explicit `dir` argument instead of the resource.
+:::
+
+## Exposed prompts
+
+- `coordinate-agents` — check nearby agents before continuing work.
+- `session-handoff` — prepare a concise handoff from one session.
+- `avoid-overlap` — inspect overlap hints before editing files.
+
+## Client configuration
+
+<Tabs>
+
+<Tab title="Claude Code">
+
+Add it from the CLI:
+
+```bash
+claude mcp add agent-peek agent-peek-mcp
+```
+
+Or add a project-scoped `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+</Tab>
+
+<Tab title="Codex">
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-peek]
+command = "agent-peek-mcp"
+```
+
+</Tab>
+
+<Tab title="Cursor">
+
+Add to global `~/.cursor/mcp.json` or project `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+</Tab>
+
+<Tab title="Windsurf">
+
+Add to `~/.codeium/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+</Tab>
+
+<Tab title="Gemini CLI">
+
+Add to user `~/.gemini/settings.json` or project `.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+Or use Gemini's MCP command:
+
+```bash
+gemini mcp add agent-peek agent-peek-mcp
+```
+
+</Tab>
+
+<Tab title="Cline">
+
+Cline CLI uses `~/.cline/data/settings/cline_mcp_settings.json`. The VS Code
+extension opens its own `cline_mcp_settings.json` from the MCP Servers settings.
+
+```json
+{
+  "mcpServers": {
+    "agent-peek": {
+      "command": "agent-peek-mcp",
+      "disabled": false
+    }
+  }
+}
+```
+
+</Tab>
+
+<Tab title="VS Code">
+
+VS Code uses top-level `servers`, not `mcpServers`. Add to workspace
+`.vscode/mcp.json` or your user-profile `mcp.json`:
+
+```json
+{
+  "servers": {
+    "agent-peek": {
+      "type": "stdio",
+      "command": "agent-peek-mcp"
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+## Config references
+
+- [Claude Code](https://code.claude.com/docs/en/mcp)
+- [Codex](https://developers.openai.com/codex/config-reference)
+- [Cursor](https://docs.cursor.com/advanced/model-context-protocol)
+- [Windsurf](https://docs.windsurf.com/plugins/cascade/mcp)
+- [Gemini CLI](https://geminicli.com/docs/tools/mcp-server/)
+- [Cline](https://docs.cline.bot/cline-cli/configuration)
+- [VS Code](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration)

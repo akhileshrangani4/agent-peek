@@ -1,0 +1,51 @@
+---
+title: Why peek?
+description: The exploration tax every agent pays, and why worktrees don't solve it.
+---
+
+## The exploration tax
+
+Every agent that starts work in a repo pays the same tax: it re-reads files,
+re-traces where auth lives, re-discovers the footgun in the migration script,
+and re-learns whatever the last agent already figured out an hour ago. Run
+several agents in parallel, or in sequence across sessions, and that
+exploration cost multiplies: each one re-derives the same facts from scratch.
+
+## Worktrees solve a different problem
+
+Git worktrees isolate working directories so agents don't stomp each other's
+uncommitted changes, but a fresh worktree starts with zero memory: it has no
+idea what a parallel agent in another worktree just learned, or what the last
+session on this branch already figured out.
+
+:::note
+Isolation is not context sharing.
+:::
+
+## The feed is where discovery gets written down
+
+`peek`'s context feed is where that discovery gets written down once and
+read many times. An agent posts a finding, a warning, a question, or a
+handoff; the next agent, whatever worktree or terminal it is in, reads the
+feed instead of re-exploring. Because reads are ranked, budgeted, and
+cursor-based, catching up is a delta: you pull what changed since your last
+read, not the whole history.
+
+## The observation layer underneath
+
+Underneath the feed sits a plain observation layer: read-only visibility into
+what every local agent session is doing right now. That is what powers the
+feed's automatic overlap warnings, and it is also available directly:
+
+- Humans can browse active sessions with `peek ui`.
+- Agents can call `peek at <session> --json` or the MCP tools.
+- Scripts can poll cheaply with cursors via `--since`.
+- Session transcripts are never modified.
+
+## Coordination for what worktrees don't cover
+
+For coordination that git worktrees genuinely don't cover — a shared dev
+server, a migration two agents both plan to run, or a file that two agents in
+two different worktrees still both intend to touch — `peek` also has
+cooperative [`coord`/`check`/`claim`](/coordination) commands. They are
+advisory signals, not locks.

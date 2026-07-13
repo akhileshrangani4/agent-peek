@@ -1,0 +1,31 @@
+---
+title: Library
+description: Use peek programmatically from TypeScript.
+---
+
+`peek` ships as a TypeScript library (the `agent-peek` package) in addition to
+the CLI and MCP server. Import `createEngine` to list and peek at sessions from
+your own code:
+
+```ts
+import { createEngine } from "agent-peek";
+
+const engine = await createEngine();
+const sessions = await engine.list();
+
+const result = await engine.peek("researcher", { mode: "brief" });
+const firstPage = await engine.peek("researcher", { mode: "raw", from: "start", limit: 50 });
+
+console.log(result.snapshot);
+console.log(result.nextCursor);
+```
+
+## Entry points
+
+The package exposes three import paths:
+
+| Import | What it gives you |
+| --- | --- |
+| `agent-peek` | The engine (`createEngine`) and core APIs. |
+| `agent-peek/adapter` | The `Adapter` interface for writing custom adapters. |
+| `agent-peek/mcp` | The MCP server implementation. |

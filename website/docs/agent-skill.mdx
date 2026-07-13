@@ -1,0 +1,37 @@
+---
+title: Agent Skill
+description: An installable skill that teaches another agent the peek workflow and MCP configs.
+---
+
+This repo includes an installable skill at `skills/agent-peek`. Use it when you
+want another agent to learn the `peek` workflow and the MCP configs.
+
+Install it with the `npx skills` CLI:
+
+```bash
+npx skills add akhileshrangani4/agent-peek
+```
+
+The installer is interactive and will guide scope/agent choices. For a
+non-interactive global install:
+
+```bash
+npx skills add akhileshrangani4/agent-peek --skill agent-peek -g -y
+```
+
+To target specific agents non-interactively:
+
+```bash
+npx skills add akhileshrangani4/agent-peek --skill agent-peek -a codex -a claude-code -g -y
+```
+
+Flags: `-g` installs globally for your user, and `-y` skips confirmation
+prompts. Omit `-g` if you only want the skill installed into the current
+project.
+
+## What the skill teaches
+
+- install or verify `agent-peek`
+- run `peek doctor`, `peek list`, and bounded `peek at` commands
+- configure MCP for Claude Code, Codex, Cursor, Windsurf, Gemini CLI, Cline, and VS Code
+- report what another session is doing without modifying that session

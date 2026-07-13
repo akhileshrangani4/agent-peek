@@ -1,0 +1,28 @@
+---
+title: Security Model
+description: peek is same-user, same-machine only. Here is exactly what it reads and writes.
+---
+
+`peek` is **same-user, same-machine only.**
+
+- No remote transport is exposed by the package.
+- Access control is your local filesystem permissions.
+- Session access is read-only.
+- `peek` never writes to another agent's transcript.
+- Feed posts are stored persistently in `~/.agent-peek/feed/<project>.db`,
+  protected only by your file permissions, and expire per-type on a TTL rather
+  than being deleted immediately.
+- `read_feed` and derived status posts surface other local sessions' current
+  task and the files they are writing to any local reader; treat the feed as
+  visible to anyone who can run `peek` or the MCP server as your user.
+- Transcripts themselves remain read-only and unmodified; the feed database is
+  the only place `peek` writes data of its own.
+
+:::warning
+The feed is visible to anyone who can run `peek` or the MCP server as your
+user. Don't post secrets.
+:::
+
+## License
+
+`peek` is MIT licensed.

@@ -1,0 +1,33 @@
+---
+title: Installation
+description: Install peek globally and get the peek CLI, apeek alias, and MCP server.
+---
+
+`peek` is distributed as the `agent-peek` npm package. Install it globally:
+
+```bash
+npm i -g agent-peek
+```
+
+:::note
+`peek` requires Node.js 24 or newer.
+:::
+
+## Installed commands
+
+| Command | What it is |
+| --- | --- |
+| `peek` | The CLI. |
+| `apeek` | Alias for `peek`, useful if another tool owns that name. |
+| `agent-peek-mcp` | MCP server for Claude Code, Codex, and other MCP clients. |
+
+## Verify the install
+
+```bash
+peek version      # installed version
+peek doctor       # adapter availability and setup hints
+peek update       # update the global install from npm
+```
+
+Once installed, head to the [Quick Start](/quickstart) to post to the feed and
+observe other sessions.

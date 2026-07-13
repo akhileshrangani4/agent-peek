@@ -1,0 +1,167 @@
+---
+title: Observation
+description: Read-only visibility into what every local agent session is doing right now.
+---
+
+This is the read-only layer the feed's derived posts, like automatic overlap
+warnings, are built on. It's also available directly, for humans in a terminal
+and for agents that want to check on a session without touching the feed.
+
+## List discovered sessions
+
+```bash
+peek list
+```
+
+Common flags:
+
+```bash
+peek list                                 # show discovered sessions
+peek list --adapter claude-code           # scan/list one adapter
+peek list --all                           # include ended sessions
+peek list --terminals                     # include tmux/screen terminal captures
+peek list --ids                           # show raw session ids
+peek list --files                         # show active/recent file context
+peek list --json                          # machine-readable list
+peek list adapters                        # show installed adapters
+```
+
+Default output is compact and human-first:
+
+```text
+NAME               ADAPTER  STATUS  UPDATED  SOURCE  CWD
+sessionseek-codex  codex    active  0s ago   file    ~/Documents/sessionseek/sessionseek
+```
+
+The `NAME` column is the selector to use with `peek at`. Raw ids stay available
+with `peek list --ids`, and JSON output includes both `id` and `displayName`.
+
+## Peek at a session
+
+Select by display name, id, tag, or cwd:
+
+```bash
+peek at researcher-codex --mode structured
+```
+
+`peek at` supports five scriptable output modes:
+
+| Mode | Use it for | API key |
+| --- | --- | --- |
+| `raw` | Reading transcript messages directly. Best for debugging or inspecting exactly what happened. | No |
+| `structured` | Stable fields for agents: current task, activity, last messages, pending tools, recent tools. | No |
+| `brief` | A compact local summary built from structured fields. Good default for humans and scripts that do not need raw logs. | No |
+| `handoff` | Local structured handoff: decisions, open questions, next actions, touched files, and tools. | No |
+| `summary` | Optional sentence-style summary. De-emphasized for agent loops; prefer `brief` unless you explicitly need prose. Can use Anthropic when configured. | No |
+
+```bash
+peek at researcher-codex --mode brief
+peek at researcher-codex --mode handoff
+```
+
+### Raw pagination
+
+```bash
+peek at researcher --first 25
+peek at researcher --last 100
+peek at researcher --last 100 --offset 100
+peek at researcher --around 250 --limit 40
+peek at researcher --last 50 --reverse
+```
+
+By default, raw mode hides tool-only messages and tool-call status lines to keep
+the output readable. Add `--tools` or `--verbose` when you need that detail.
+
+### Summaries
+
+`summary` is available for prose summaries, but it is not the recommended
+agent-facing default. Prefer `brief` for low-latency local inspection.
+Summaries are local by default. To use hosted LLM summaries (requires
+`ANTHROPIC_API_KEY`), set:
+
+```bash
+AGENT_PEEK_SUMMARY_PROVIDER=anthropic
+```
+
+### Tag a session
+
+Give a session a stable name so you don't have to retype the generated one:
+
+```bash
+peek tag researcher-codex as researcher
+peek at researcher --mode brief
+```
+
+### Cursor polling
+
+Fetch only new messages after a prior peek:
+
+```bash
+peek at researcher --mode raw --json
+peek at researcher --mode raw --since <nextCursor> --json
+```
+
+### Error shape
+
+CLI failures are printed to stderr in a stable shape:
+
+```text
+error: session_not_found
+message: No session matched selector: worker
+hint: Use `peek list` to get the current displayName values.
+next:
+  - peek list
+  - peek list --ids
+exitCode: 2
+```
+
+## Terminal UI
+
+`peek ui` is for humans browsing in a real terminal. It shows a session list and
+a detail pane for the selected session.
+
+```bash
+peek ui
+peek ui --adapter codex
+peek ui --all
+peek ui --terminals
+```
+
+It starts in `structured` mode. Press `m` or Tab to cycle through:
+
+- `structured` — current task, activity, last messages, pending tools, recent tools
+- `brief` — compact local summary, no API key
+- `timeline` — chronological role/text timeline for quick scanning
+- `raw` — recent transcript messages
+- `summary` — optional sentence-style summary
+
+There is no separate command-line flag for timeline yet; open `peek ui`, then
+press `m`/Tab until the header shows `mode=timeline`.
+
+The detail pane shows useful metadata: raw id, adapter, source type, status,
+tag, cwd, transcript path, and last update time. It intentionally does not show
+cursors; cursors are for JSON/API callers that need incremental polling.
+
+Keyboard controls:
+
+- up/down or `j`/`k` — select a session
+- Enter or Space — refresh the selected session detail
+- `m` or Tab — switch detail mode
+- `r` — rescan sessions
+- `q` or Escape — exit
+
+For pipes, scripts, and agent harnesses, use `peek list`, `peek at`, and
+`peek at --json` instead of `peek ui`.
+
+## Other useful commands
+
+```bash
+peek help                                 # focused command overview
+peek version                              # installed version
+peek update                               # update global install from npm
+peek update --check                       # check latest version without installing
+peek doctor                               # adapter availability and setup hints
+peek register <adapter:id> at <path> [--as <name>]
+peek forget <id>
+peek untag researcher
+```

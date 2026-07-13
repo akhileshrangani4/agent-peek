@@ -1,0 +1,36 @@
+---
+title: Adapters
+description: The session sources peek reads from, and how to add your own.
+---
+
+Adapters are how `peek` discovers and reads sessions from different
+agent tools. Each one knows where a given tool stores its transcripts.
+
+## Built-in
+
+| Adapter | Reads from |
+| --- | --- |
+| `claude-code` | `~/.claude/projects/*/<uuid>.jsonl` |
+| `codex` | `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl` |
+| `copilot-cli` | `~/.copilot/session-state/*` |
+| `gemini` | `~/.gemini/tmp/<project>/chats/session-*.json` |
+| `goose` | `~/.local/share/goose/sessions/sessions.db` |
+| `opencode` | `~/.local/share/opencode/storage/{session,message,part}` |
+| `screen` | GNU screen scrollback via `hardcopy -h` |
+| `tmux` | tmux pane output |
+
+:::note
+Terminal adapters (`screen`, `tmux`) are opt-in for default CLI/MCP listing
+because they capture terminal scrollback, not structured agent transcript
+files. Use `peek list --terminals` or `peek list --adapter tmux`.
+:::
+
+## External adapters
+
+Set `AGENT_PEEK_ADAPTER_PATH` to a colon-separated list of adapter modules.
+Each module's default export must implement the `Adapter` interface from
+`agent-peek/adapter`.
+
+```bash
+export AGENT_PEEK_ADAPTER_PATH="/path/to/my-adapter.js:/path/to/another.js"
+```
