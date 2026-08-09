@@ -44,4 +44,8 @@ export default defineConfig({
       creator: "@akhileshrangani",
     },
   },
+
+  analytics: {
+    vercel: true,
+  },
 });
