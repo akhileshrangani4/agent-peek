@@ -8,6 +8,7 @@
     "doctor": "blume doctor"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "blume": "^1.0.3"
   }
 }
