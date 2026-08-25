@@ -66,25 +66,25 @@
     "url": "git+https://github.com/akhileshrangani4/agent-peek.git"
   },
   "devDependencies": {
-    "@remotion/cli": "^4.0.468",
-    "@types/node": "^22.0.0",
+    "@remotion/cli": "^4.0.517",
+    "@types/node": "^24.13.3",
     "@types/proper-lockfile": "^4.1.4",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitest/coverage-v8": "^1.6.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitest/coverage-v8": "^4.1.11",
     "oxlint": "^1.80.0",
-    "react-dom": "^19.2.6",
-    "remotion": "^4.0.468",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "react-dom": "^19.2.8",
+    "remotion": "^4.0.517",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "cac": "^6.7.14",
-    "ink": "^6.8.0",
+    "@anthropic-ai/sdk": "^0.120.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "cac": "^7.0.0",
+    "ink": "^7.1.1",
     "proper-lockfile": "^4.1.2",
-    "react": "^19.2.5"
+    "react": "^19.2.8"
   }
 }
