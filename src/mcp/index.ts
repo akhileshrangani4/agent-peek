@@ -9,7 +9,10 @@ import {
 import { createEngine, VERSION } from "../index.js";
 import type { PeekResult, SessionEntry, SnapshotMode } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { NotAProjectError, PostNotFoundError, PostRejectedError } from "../core/errors.js";
+import {
+  AmbiguousSelectorError, InvalidCursorError, NotAProjectError,
+  PostNotFoundError, PostRejectedError, SessionNotFoundError,
+} from "../core/errors.js";
 import { expandPost, postToFeed, readFeed } from "../feed/index.js";
 import type { PostInput, PostType } from "../feed/index.js";
 
@@ -281,44 +284,60 @@ export async function run(): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
     if (name === "peek_session") {
-      const r = await engine.peek(String(args.selector), {
-        mode: parseSnapshotMode(args.mode),
-        since: args.since ? String(args.since) : undefined,
-        limit: rawLimit(args),
-        offset: typeof args.offset === "number" ? args.offset : undefined,
-        around: typeof args.around === "number" ? args.around : undefined,
-        from: typeof args.first === "number" ? "start" : "end",
-        order: args.reverse === true ? "newest-first" : "oldest-first",
-      });
-      return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      try {
+        const r = await engine.peek(String(args.selector), {
+          mode: parseSnapshotMode(args.mode),
+          since: args.since ? String(args.since) : undefined,
+          limit: rawLimit(args),
+          offset: typeof args.offset === "number" ? args.offset : undefined,
+          around: typeof args.around === "number" ? args.around : undefined,
+          from: typeof args.first === "number" ? "start" : "end",
+          order: args.reverse === true ? "newest-first" : "oldest-first",
+        });
+        return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      } catch (error) {
+        return feedToolError(error);
+      }
     }
     if (name === "list_sessions") {
-      const status = parseStatus(args.status);
-      let list = await engine.list({
-        adapter: args.adapter ? String(args.adapter) : undefined,
-        status,
-        includeTerminal: args.includeTerminal === true || isTerminalAdapter(args.adapter),
-      });
-      if (!status && args.includeEnded !== true) {
-        list = list.filter((entry) => entry.status !== "ended");
+      try {
+        const status = parseStatus(args.status);
+        let list = await engine.list({
+          adapter: args.adapter ? String(args.adapter) : undefined,
+          status,
+          includeTerminal: args.includeTerminal === true || isTerminalAdapter(args.adapter),
+        });
+        if (!status && args.includeEnded !== true) {
+          list = list.filter((entry) => entry.status !== "ended");
+        }
+        return { content: [{ type: "text", text: JSON.stringify(withDisplayNames(list)) }] };
+      } catch (error) {
+        return feedToolError(error);
       }
-      return { content: [{ type: "text", text: JSON.stringify(withDisplayNames(list)) }] };
     }
     if (name === "coordination_digest") {
-      const digest = await engine.coordinate({
-        cwd: args.cwd ? String(args.cwd) : undefined,
-        adapter: args.adapter ? String(args.adapter) : undefined,
-        status: parseStatus(args.status),
-        writingOnly: args.writingOnly === true,
-        since: args.since ? String(args.since) : undefined,
-        includeEnded: args.includeEnded === true,
-        includeTerminal: args.includeTerminal === true || isTerminalAdapter(args.adapter),
-      });
-      return { content: [{ type: "text", text: JSON.stringify(digest) }] };
+      try {
+        const digest = await engine.coordinate({
+          cwd: args.cwd ? String(args.cwd) : undefined,
+          adapter: args.adapter ? String(args.adapter) : undefined,
+          status: parseStatus(args.status),
+          writingOnly: args.writingOnly === true,
+          since: args.since ? String(args.since) : undefined,
+          includeEnded: args.includeEnded === true,
+          includeTerminal: args.includeTerminal === true || isTerminalAdapter(args.adapter),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(digest) }] };
+      } catch (error) {
+        return feedToolError(error);
+      }
     }
     if (name === "tag_session") {
-      await engine.tag(String(args.id), String(args.tag));
-      return { content: [{ type: "text", text: "ok" }] };
+      try {
+        await engine.tag(String(args.id), String(args.tag));
+        return { content: [{ type: "text", text: "ok" }] };
+      } catch (error) {
+        return feedToolError(error);
+      }
     }
     if (name === "post_to_feed") {
       try {
@@ -476,7 +495,9 @@ function stringArray(value: unknown): string[] | undefined {
 }
 
 function feedToolError(error: unknown): { isError: true; content: { type: "text"; text: string }[] } {
-  if (error instanceof PostRejectedError || error instanceof PostNotFoundError || error instanceof NotAProjectError) {
+  if (error instanceof PostRejectedError || error instanceof PostNotFoundError || error instanceof NotAProjectError
+      || error instanceof InvalidCursorError || error instanceof SessionNotFoundError
+      || error instanceof AmbiguousSelectorError) {
     return { isError: true, content: [{ type: "text", text: error.message }] };
   }
   throw error;

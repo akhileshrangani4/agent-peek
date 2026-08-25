@@ -76,7 +76,9 @@ function parseSessionLine(line: string): SessionEntry | undefined {
     ? activitySeconds * 1000
     : Date.now();
   const ageMs = Date.now() - lastSeenMs;
-  const status = attachedRaw === "1" || ageMs < 5 * 60 * 1000 ? "active"
+  // session_attached is a client count, not a flag; >0 means attached.
+  const attached = Number(attachedRaw) > 0;
+  const status = attached || ageMs < 5 * 60 * 1000 ? "active"
                : ageMs < 24 * 3600 * 1000 ? "idle"
                : "ended";
   return {

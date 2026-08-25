@@ -7,6 +7,7 @@ import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
+import { statusFromMtime } from "../common.js";
 import { parseJsonlSlice, parseRecord } from "./parse.js";
 
 const ADAPTER_NAME = "claude-code";
@@ -42,10 +43,7 @@ const adapter: Adapter = {
           if (metadata.sessionId) sessionId = metadata.sessionId;
           if (metadata.cwd) cwd = metadata.cwd;
         } catch { /* skip */ }
-        const ageMs = Date.now() - st.mtimeMs;
-        const status = ageMs < 5 * 60 * 1000 ? "active"
-                     : ageMs < 24 * 3600 * 1000 ? "idle"
-                     : "ended";
+        const status = statusFromMtime(st.mtimeMs);
         const inferredName = cwd ? `${basename(cwd)}-claude` : `${projectNameFromDir(p)}-claude`;
         out.push({
           id: `${ADAPTER_NAME}:${sessionId}`,

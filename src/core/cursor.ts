@@ -7,12 +7,7 @@ export function encodeCursor(data: CursorData): Cursor {
 }
 
 export function decodeCursor(cursor: Cursor, expectedAdapter?: string): CursorData {
-  let json: string;
-  try {
-    json = Buffer.from(cursor, "base64url").toString("utf8");
-  } catch {
-    throw new InvalidCursorError("not base64url");
-  }
+  const json = Buffer.from(cursor, "base64url").toString("utf8");
   let data: CursorData;
   try {
     data = JSON.parse(json);
@@ -20,7 +15,8 @@ export function decodeCursor(cursor: Cursor, expectedAdapter?: string): CursorDa
     throw new InvalidCursorError("not JSON");
   }
   if (typeof data !== "object" || data === null || typeof data.adapter !== "string"
-      || typeof data.byteOffset !== "number" || typeof data.msgIndex !== "number") {
+      || !Number.isInteger(data.byteOffset) || data.byteOffset < 0
+      || !Number.isInteger(data.msgIndex) || data.msgIndex < 0) {
     throw new InvalidCursorError("bad shape");
   }
   if (expectedAdapter && data.adapter !== expectedAdapter) {

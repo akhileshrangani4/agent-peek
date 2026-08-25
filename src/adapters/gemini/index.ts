@@ -7,6 +7,7 @@ import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
+import { statusFromMtime } from "../common.js";
 import { parseSession, type RawGeminiSession } from "./parse.js";
 
 const ADAPTER_NAME = "gemini";
@@ -30,10 +31,7 @@ const adapter: Adapter = {
         if (typeof raw.sessionId === "string" && raw.sessionId.trim()) sessionId = raw.sessionId;
       } catch { /* session may be mid-write; keep path-derived id */ }
       const projectDir = dirname(dirname(fpath));
-      const ageMs = Date.now() - st.mtimeMs;
-      const status = ageMs < 5 * 60 * 1000 ? "active"
-                   : ageMs < 24 * 3600 * 1000 ? "idle"
-                   : "ended";
+      const status = statusFromMtime(st.mtimeMs);
       out.push({
         id: `${ADAPTER_NAME}:${sessionId}`,
         adapter: ADAPTER_NAME,

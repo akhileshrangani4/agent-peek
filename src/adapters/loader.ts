@@ -1,4 +1,5 @@
 // src/adapters/loader.ts
+import { pathToFileURL } from "node:url";
 import type { Adapter } from "./types.js";
 import { AdapterNotFoundError } from "../core/errors.js";
 
@@ -39,10 +40,10 @@ export class AdapterLoader {
 export async function discoverExternal(loader: AdapterLoader): Promise<void> {
   const env = process.env.AGENT_PEEK_ADAPTER_PATH;
   if (!env) return;
-  const paths = env.split(":").filter(Boolean);
+  const paths = env.split(process.platform === "win32" ? ";" : ":").filter(Boolean);
   for (const p of paths) {
     try {
-      const mod = await import(p);
+      const mod = await import(pathToFileURL(p).href);
       const adapter: Adapter | undefined = mod?.default;
       if (adapter && typeof adapter.name === "string"
           && typeof adapter.scan === "function"

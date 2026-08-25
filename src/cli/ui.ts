@@ -200,11 +200,13 @@ function DetailPane(
   const snapshot = result.snapshot;
   const meta = sessionMeta(session);
   if (mode === "timeline" && snapshot.mode === "raw") {
+    const shown = snapshot.messages.slice(-12);
+    const hidden = snapshot.messages.length - shown.length;
     return panel(
       title,
       ...meta,
-      ...snapshot.messages.slice(-12).map((message, index) => line(
-        `${snapshot.window.start + index + 1}`,
+      ...shown.map((message, index) => line(
+        `${snapshot.window.start + hidden + index + 1}`,
         `${message.role}: ${compact(message.text || toolSummary(message), 130)}`,
       )),
     );

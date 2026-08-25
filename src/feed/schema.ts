@@ -112,7 +112,20 @@ export function validatePost(input: PostInput, now: Date = new Date()): FeedPost
   if (evidence.length > EVIDENCE_MAX) {
     throw new PostRejectedError(`${evidence.length} evidence entries; max is ${EVIDENCE_MAX}.`);
   }
+  if (typeof input.author?.session !== "string" || input.author.session.trim().length === 0) {
+    throw new PostRejectedError("author.session is required.");
+  }
   const ttlMs = input.ttlMs ?? DEFAULT_TTL_MS[input.type];
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new PostRejectedError(`ttlMs must be a positive number of milliseconds; got ${input.ttlMs}.`);
+  }
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new PostRejectedError(`ttlMs must be a positive, finite number; got ${input.ttlMs}.`);
+  }
+  const session = typeof input.author?.session === "string" ? input.author.session.trim() : "";
+  if (!session) {
+    throw new PostRejectedError("author.session is required.");
+  }
   return {
     v: 1,
     id: newPostId(now),

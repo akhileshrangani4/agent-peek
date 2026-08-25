@@ -66,35 +66,53 @@ export class FeedStore {
 
   private open(): void {
     try {
-      this.db = new (databaseSyncCtor())(this.path);
-      this.db.exec("PRAGMA journal_mode = WAL;");
-      this.db.exec("PRAGMA busy_timeout = 5000;");
-      this.db.exec(SCHEMA);
+      this.openDb();
     } catch (err) {
       if (!isCorruptionError(err)) throw err;
       if (existsSync(this.path)) {
         renameSync(this.path, `${this.path}.corrupt-${Date.now()}`);
         this.recovered = true;
       }
-      this.db = new (databaseSyncCtor())(this.path);
-      this.db.exec("PRAGMA journal_mode = WAL;");
-      this.db.exec("PRAGMA busy_timeout = 5000;");
-      this.db.exec(SCHEMA);
+      // Stale WAL/SHM sidecars must go too: SQLite can replay orphaned WAL
+      // frames onto the freshly created database.
+      for (const suffix of ["-wal", "-shm"]) {
+        const sidecar = `${this.path}${suffix}`;
+        if (existsSync(sidecar)) {
+          try { renameSync(sidecar, `${sidecar}.corrupt-${Date.now()}`); } catch { /* ignore */ }
+        }
+      }
+      this.openDb();
     }
   }
 
+  private openDb(): void {
+    this.db = new (databaseSyncCtor())(this.path);
+    this.db.exec("PRAGMA journal_mode = WAL;");
+    this.db.exec("PRAGMA busy_timeout = 5000;");
+    this.db.exec(SCHEMA);
+  }
+
   insert(post: FeedPost): void {
-    const stmt = this.db.prepare(
-      "INSERT INTO posts (id, type, origin, author_session, created_at, expires_at, superseded_by, reply_to, validity, doc) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
-    );
-    stmt.run(
-      post.id, post.type, post.origin, post.author.session,
-      post.lifecycle.createdAt, post.lifecycle.expiresAt,
-      post.links.replyTo ?? null, post.lifecycle.validity, JSON.stringify(post),
-    );
-    const pathStmt = this.db.prepare("INSERT INTO post_paths (post_id, path) VALUES (?, ?)");
-    for (const path of post.scope.paths) pathStmt.run(post.id, path);
-    if (post.links.supersedes) this.markSuperseded(post.links.supersedes, post.id);
+    // Multi-statement write: keep it atomic so a crash mid-insert can't leave
+    // a post with partial scope paths or an unsuperseded predecessor.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const stmt = this.db.prepare(
+        "INSERT INTO posts (id, type, origin, author_session, created_at, expires_at, superseded_by, reply_to, validity, doc) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+      );
+      stmt.run(
+        post.id, post.type, post.origin, post.author.session,
+        post.lifecycle.createdAt, post.lifecycle.expiresAt,
+        post.links.replyTo ?? null, post.lifecycle.validity, JSON.stringify(post),
+      );
+      const pathStmt = this.db.prepare("INSERT INTO post_paths (post_id, path) VALUES (?, ?)");
+      for (const path of post.scope.paths) pathStmt.run(post.id, path);
+      if (post.links.supersedes) this.markSuperseded(post.links.supersedes, post.id);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw err;
+    }
   }
 
   get(id: string): FeedPost | undefined {

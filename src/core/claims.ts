@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -82,12 +81,12 @@ export class ClaimsStore {
 
   private async read(): Promise<ClaimsFile> {
     await mkdir(this.dir, { recursive: true });
-    if (!existsSync(this.path)) return { version: 1, claims: {} };
     let raw: string;
     try {
       raw = await readFile(this.path, "utf8");
-    } catch {
-      return { version: 1, claims: {} };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, claims: {} };
+      throw e;
     }
     try {
       const parsed = JSON.parse(raw);
@@ -102,9 +101,6 @@ export class ClaimsStore {
 
   private async write(mutator: (file: ClaimsFile) => void): Promise<void> {
     await mkdir(this.dir, { recursive: true });
-    if (!existsSync(this.path)) {
-      await writeFile(this.path, JSON.stringify({ version: 1, claims: {} }), "utf8");
-    }
     let release: () => Promise<void>;
     try {
       release = await lockfile.lock(this.path, {
@@ -112,8 +108,8 @@ export class ClaimsStore {
         stale: 10_000,
         realpath: false,
       });
-    } catch {
-      throw new RegistryLockTimeoutError();
+    } catch (e) {
+      throw new RegistryLockTimeoutError(e);
     }
     try {
       const file = await this.read();
@@ -127,7 +123,8 @@ export class ClaimsStore {
         throw err;
       }
     } finally {
-      await release();
+      // never let a release failure mask the original error
+      await release().catch(() => { /* ignore */ });
     }
   }
 }

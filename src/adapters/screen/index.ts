@@ -19,8 +19,13 @@ const adapter: Adapter = {
     let output: string;
     try {
       output = await screen(["-ls"]);
-    } catch {
-      return [];
+    } catch (e) {
+      // GNU screen exits non-zero from `screen -ls` even when sessions exist
+      // (exit 1 with a session list; exit 1 with "No Sockets found" when none).
+      // Only bail when there is no usable listing at all.
+      const stdout = (e as { stdout?: string })?.stdout;
+      if (!stdout || !/\((Attached|Detached|Multi|Dead|Unknown)/i.test(stdout)) return [];
+      output = stdout;
     }
     const now = new Date().toISOString();
     return output.split(/\r?\n/)

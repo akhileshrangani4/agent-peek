@@ -2,11 +2,12 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
+import { statusFromMtime } from "../common.js";
 import { parseJsonlSlice, parseRecord } from "./parse.js";
 
 const ADAPTER_NAME = "codex";
@@ -38,10 +39,7 @@ const adapter: Adapter = {
           } catch { /* skip */ }
         }
       } catch { /* skip */ }
-      const ageMs = Date.now() - st.mtimeMs;
-      const status = ageMs < 5 * 60 * 1000 ? "active"
-                   : ageMs < 24 * 3600 * 1000 ? "idle"
-                   : "ended";
+      const status = statusFromMtime(st.mtimeMs);
       out.push({
         id: `${ADAPTER_NAME}:${sessionId}`,
         adapter: ADAPTER_NAME,
@@ -109,7 +107,7 @@ async function collectRolloutFiles(root: string): Promise<string[]> {
 
 function deriveIdFromPath(fpath: string): string {
   // rollout-<ISO>-<uuid>.jsonl  -> <uuid> if we can extract it; else basename
-  const base = fpath.split("/").pop() ?? fpath;
+  const base = basename(fpath);
   const stripped = base.replace(/\.jsonl$/, "");
   // last 5 dash-separated tokens form the uuid
   const parts = stripped.split("-");

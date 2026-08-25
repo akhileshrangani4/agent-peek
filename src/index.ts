@@ -68,9 +68,7 @@ export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine>
   const loader = new AdapterLoader();
   if (opts.withBuiltins !== false) {
     loader.register(claudeCode);
-    if (codex && (codex as any).name) {
-      try { loader.register(codex as any); } catch { /* may be stub */ }
-    }
+    loader.register(codex);
     loader.register(copilotCli);
     loader.register(gemini);
     loader.register(goose);

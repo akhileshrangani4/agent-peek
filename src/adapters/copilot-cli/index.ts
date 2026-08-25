@@ -1,7 +1,7 @@
 // src/adapters/copilot-cli/index.ts
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { readFile, readdir, stat } from "node:fs/promises";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { Cursor, RawMessage, SessionEntry } from "../../core/types.js";

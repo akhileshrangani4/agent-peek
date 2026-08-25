@@ -42,8 +42,8 @@ export class InvalidCursorError extends Error {
 
 export class RegistryLockTimeoutError extends Error {
   readonly name = "RegistryLockTimeoutError";
-  constructor() {
-    super("Could not acquire lock on registry within timeout.");
+  constructor(cause?: unknown) {
+    super("Could not acquire lock on registry within timeout.", { cause });
   }
 }
 

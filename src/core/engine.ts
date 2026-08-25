@@ -72,8 +72,7 @@ export class Engine {
       if (r.status === "fulfilled") {
         await registry.upsertMany(r.value);
       } else {
-        // eslint-disable-next-line no-console
-        console.warn(`[agent-peek] adapter scan failed: ${(r.reason as Error).message}`);
+        console.warn(`[agent-peek] adapter scan failed: ${String((r.reason as Error)?.message ?? r.reason)}`);
       }
     }
     let list = await registry.list();
@@ -184,7 +183,9 @@ export class Engine {
     const overlapSessions = sessions;
     const beforeSemanticFilterCount = sessions.length;
     if (opts.since && !opts.writingOnly) {
-      sessions = sessions.filter((session) => (session.changedMessageCount ?? 0) > 0 || Boolean(session.error));
+      sessions = sessions.filter((session) => session.adapter === "claim"
+        || (session.changedMessageCount ?? 0) > 0
+        || Boolean(session.error));
     }
     const hiddenUnchangedSessionCount = beforeSemanticFilterCount - sessions.length;
     const visibleNames = displayNames(sessions);
@@ -254,7 +255,8 @@ export class Engine {
     if (cwdMatches.length > 1) {
       throw new AmbiguousSelectorError(selector, cwdMatches.map((e) => e.id));
     }
-    const cwdPrefix = list.filter((e) => e.cwd && e.cwd.startsWith(selector));
+    const prefix = selector.endsWith("/") ? selector : `${selector}/`;
+    const cwdPrefix = list.filter((e) => e.cwd && (e.cwd === selector || e.cwd.startsWith(prefix)));
     if (cwdPrefix.length === 1) return cwdPrefix[0]!;
     if (cwdPrefix.length > 1) {
       throw new AmbiguousSelectorError(selector, cwdPrefix.map((e) => e.id));

@@ -1,6 +1,5 @@
 // src/core/registry.ts
 import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import lockfile from "proper-lockfile";
@@ -92,31 +91,32 @@ export class Registry {
 
   private async read(): Promise<RegistryFile> {
     await mkdir(this.dir, { recursive: true });
-    if (!existsSync(this.path)) return { version: 1, sessions: {} };
     let raw: string;
     try {
       raw = await readFile(this.path, "utf8");
-    } catch {
-      return { version: 1, sessions: {} };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, sessions: {} };
+      // A transient read failure (EACCES, EBUSY...) must not be treated as an
+      // empty registry: a subsequent write would clobber the real data.
+      throw e;
     }
     try {
       const parsed = JSON.parse(raw);
       if (parsed?.version === 1 && typeof parsed.sessions === "object") return parsed;
       throw new Error("bad shape");
-    } catch {
-      const backup = join(this.dir, `registry.corrupt-${Date.now()}.json`);
-      try { await rename(this.path, backup); } catch { /* ignore */ }
-      // eslint-disable-next-line no-console
-      console.warn(`[agent-peek] registry corrupt, backed up to ${backup}`);
-      return { version: 1, sessions: {} };
+    } catch (e) {
+      if (e instanceof SyntaxError || e instanceof Error && e.message === "bad shape") {
+        const backup = join(this.dir, `registry.corrupt-${Date.now()}.json`);
+        try { await rename(this.path, backup); } catch { /* ignore */ }
+        console.warn(`[agent-peek] registry corrupt, backed up to ${backup}`);
+        return { version: 1, sessions: {} };
+      }
+      throw e;
     }
   }
 
   private async write(mutator: (f: RegistryFile) => void): Promise<void> {
     await mkdir(this.dir, { recursive: true });
-    if (!existsSync(this.path)) {
-      await writeFile(this.path, JSON.stringify({ version: 1, sessions: {} }), "utf8");
-    }
     let release: () => Promise<void>;
     try {
       release = await lockfile.lock(this.path, {
@@ -125,7 +125,7 @@ export class Registry {
         realpath: false,
       });
     } catch (e) {
-      throw new RegistryLockTimeoutError();
+      throw new RegistryLockTimeoutError(e);
     }
     try {
       const f = await this.read();
@@ -139,7 +139,8 @@ export class Registry {
         throw err;
       }
     } finally {
-      await release();
+      // Never let a release failure mask the original error.
+      await release().catch(() => { /* ignore */ });
     }
   }
 

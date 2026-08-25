@@ -226,7 +226,20 @@ interface ToSummaryOpts {
   ttlMs?: number;
 }
 
+const SUMMARY_CACHE_MAX_ENTRIES = 200;
 const summaryCache = new Map<string, { value: string; expires: number }>();
+
+function cacheSummary(cacheId: string, value: string, ttl: number): void {
+  // Refresh-on-write gives LRU-ish eviction and keeps long-lived MCP servers
+  // from accumulating one entry per poll forever.
+  if (summaryCache.has(cacheId)) summaryCache.delete(cacheId);
+  while (summaryCache.size >= SUMMARY_CACHE_MAX_ENTRIES) {
+    const oldest = summaryCache.keys().next().value;
+    if (oldest === undefined) break;
+    summaryCache.delete(oldest);
+  }
+  summaryCache.set(cacheId, { value, expires: Date.now() + ttl });
+}
 
 export async function toSummary(
   sessionId: string,
@@ -255,20 +268,20 @@ export async function toSummary(
     : "local";
   if (provider !== "anthropic") {
     const summary = renderLocalSummary(structured, messages);
-    if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });
+    if (cacheId) cacheSummary(cacheId, summary, ttl);
     return { mode: "summary", sessionId, summary, deltaMessageCount: opts.deltaMessageCount };
   }
 
   const key = process.env.ANTHROPIC_API_KEY;
   if (!opts.client && !key) {
     const summary = renderLocalSummary(structured, messages);
-    if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });
+    if (cacheId) cacheSummary(cacheId, summary, ttl);
     return { mode: "summary", sessionId, summary, deltaMessageCount: opts.deltaMessageCount };
   }
 
   try {
     const summary = await summarizeWithAnthropic(messages, opts, key);
-    if (cacheId) summaryCache.set(cacheId, { value: summary, expires: Date.now() + ttl });
+    if (cacheId) cacheSummary(cacheId, summary, ttl);
     return { mode: "summary", sessionId, summary, deltaMessageCount: opts.deltaMessageCount };
   } catch (e) {
     const local = renderLocalSummary(structured, messages);

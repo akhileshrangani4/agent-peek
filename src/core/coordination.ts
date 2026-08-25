@@ -648,17 +648,6 @@ function looksLikeFilePath(path: string): boolean {
   return /^(Dockerfile|Makefile|Rakefile|Gemfile|Procfile|LICENSE|NOTICE|CHANGELOG|README|AGENTS|CLAUDE)$/i.test(name);
 }
 
-function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
-  const groups = new Map<string, T[]>();
-  for (const item of items) {
-    const key = keyFn(item);
-    const group = groups.get(key) ?? [];
-    group.push(item);
-    groups.set(key, group);
-  }
-  return groups;
-}
-
 function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
