@@ -43,7 +43,10 @@
     "demo:png": "remotion still remotion/index.ts AgentPeekDemo docs/demo.png --frame=600 --overwrite",
     "demo:render": "npm run demo:mp4 && npm run demo:gif && npm run demo:png",
     "test": "vitest run",
+    "pretest": "npm run build",
     "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "lint": "oxlint src test",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
@@ -69,6 +72,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^1.6.1",
+    "oxlint": "^1.80.0",
     "react-dom": "^19.2.6",
     "remotion": "^4.0.468",
     "tsup": "^8.0.0",

@@ -1,13 +1,12 @@
 // src/adapters/codex/index.ts
-import { readdir, readFile, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
-import { statusFromMtime } from "../common.js";
+import { readFileWindow, statusFromMtime } from "../common.js";
 import { parseJsonlSlice, parseRecord } from "./parse.js";
 
 const ADAPTER_NAME = "codex";
@@ -18,7 +17,6 @@ const adapter: Adapter = {
   async scan(): Promise<SessionEntry[]> {
     // Codex CLI rollouts: ~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl
     const root = join(process.env.HOME ?? homedir(), ".codex", "sessions");
-    if (!existsSync(root)) return [];
     const out: SessionEntry[] = [];
     const files = await collectRolloutFiles(root);
     for (const fpath of files) {
@@ -54,27 +52,28 @@ const adapter: Adapter = {
   },
 
   async read(entry: SessionEntry, cursor?: Cursor): Promise<AdapterReadResult> {
-    let buf: Buffer;
-    try {
-      buf = await readFile(entry.transcriptPath);
-    } catch (e) {
-      throw new TranscriptUnreadableError(ADAPTER_NAME, `cannot read ${entry.transcriptPath}`, e);
-    }
     let from = 0;
     let priorIndex = 0;
     if (cursor) {
       const c = decodeCursor(cursor, ADAPTER_NAME);
-      from = Math.min(c.byteOffset, buf.length);
+      from = c.byteOffset;
       priorIndex = c.msgIndex;
     }
-    const { records, nextOffset } = parseJsonlSlice(buf, from);
+    let win: { buf: Buffer; effFrom: number; size: number };
+    try {
+      win = await readFileWindow(entry.transcriptPath, from);
+    } catch (e) {
+      throw new TranscriptUnreadableError(ADAPTER_NAME, `cannot read ${entry.transcriptPath}`, e);
+    }
+    const { records, nextOffset } = parseJsonlSlice(win.buf, 0);
     const messages: RawMessage[] = records.map(parseRecord);
+    const absNextOffset = win.effFrom + nextOffset;
     const nextCursor = encodeCursor({
       adapter: ADAPTER_NAME,
-      byteOffset: nextOffset,
+      byteOffset: absNextOffset,
       msgIndex: priorIndex + messages.length,
     });
-    return { messages, nextCursor, eof: nextOffset === buf.length };
+    return { messages, nextCursor, eof: absNextOffset >= win.size };
   },
 };
 
@@ -121,10 +120,19 @@ function deriveIdFromPath(fpath: string): string {
 }
 
 async function readFirstLine(path: string): Promise<string | null> {
-  const buf = await readFile(path);
-  const nl = buf.indexOf(0x0a);
-  if (nl === -1) return buf.length ? buf.toString("utf8") : null;
-  return buf.subarray(0, nl).toString("utf8");
+  // Rollouts can be tens of MB; scan() only needs the metadata header line.
+  const fh = await open(path, "r");
+  try {
+    const buf = Buffer.alloc(64 * 1024);
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+    if (!bytesRead) return null;
+    const chunk = buf.subarray(0, bytesRead);
+    const nl = chunk.indexOf(0x0a);
+    if (nl === -1) return chunk.toString("utf8");
+    return chunk.subarray(0, nl).toString("utf8");
+  } finally {
+    await fh.close();
+  }
 }
 
 export default adapter;

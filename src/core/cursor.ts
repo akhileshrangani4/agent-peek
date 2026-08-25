@@ -19,6 +19,9 @@ export function decodeCursor(cursor: Cursor, expectedAdapter?: string): CursorDa
       || !Number.isInteger(data.msgIndex) || data.msgIndex < 0) {
     throw new InvalidCursorError("bad shape");
   }
+  if (data.tail !== undefined && typeof data.tail !== "string") {
+    throw new InvalidCursorError("bad shape");
+  }
   if (expectedAdapter && data.adapter !== expectedAdapter) {
     throw new CursorMismatchError(data.adapter, expectedAdapter);
   }

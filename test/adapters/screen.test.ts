@@ -50,6 +50,29 @@ describe("screen adapter", () => {
     });
   });
 
+  it("keeps emitting after scrollback eviction flattens line count", async () => {
+    await withFakeScreen(async (env) => {
+      process.env.SCREEN_FAKE_CAPTURE = "l1\nl2\nl3\n";
+      const r1 = await screen.read(entry(env.name));
+
+      // History cap reached: oldest line evicted as a new one arrives.
+      process.env.SCREEN_FAKE_CAPTURE = "l2\nl3\nl4\n";
+      const r2 = await screen.read(entry(env.name), r1.nextCursor);
+      expect(r2.messages.length).toBe(1);
+      expect(r2.messages[0]!.text).toBe("l4");
+
+      // No change at all: empty delta.
+      const r3 = await screen.read(entry(env.name), r2.nextCursor);
+      expect(r3.messages.length).toBe(0);
+
+      // In-place redraw overwrites the anchor: bounded replay, not data loss.
+      process.env.SCREEN_FAKE_CAPTURE = "zz\nl3\nspinner...";
+      const r4 = await screen.read(entry(env.name), r2.nextCursor);
+      expect(r4.messages.length).toBe(1);
+      expect(r4.messages[0]!.text).toContain("spinner...");
+    });
+  });
+
   it("passes adapter conformance suite", async () => {
     await withFakeScreen(async (env) => {
       process.env.SCREEN_FAKE_CAPTURE = "a\nb\n";

@@ -1,5 +1,5 @@
 // src/adapters/common.ts
-import { readdir, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { RawMessage, ToolCall } from "../core/types.js";
 
@@ -8,6 +8,72 @@ export function statusFromMtime(ms: number): "active" | "idle" | "ended" {
   return ageMs < 5 * 60 * 1000 ? "active"
        : ageMs < 24 * 3600 * 1000 ? "idle"
        : "ended";
+}
+
+// Terminal adapters (tmux/screen) track progress by absolute line count, but a
+// pane at its history-limit evicts old lines as new ones arrive — the count
+// stays flat forever while content shifts up, which would silently drop all
+// new output. The cursor therefore carries the previous capture's last line
+// (`tail`) so eviction can be detected and the delta resumed after it.
+export const TERMINAL_REPLAY_CAP = 50;
+
+export interface TerminalCaptureState {
+  msgIndex: number;
+  byteOffset: number;
+  tail?: string;
+}
+
+export function terminalDeltaFromLine(lines: string[], prior: TerminalCaptureState): number {
+  // Pane shrank (clear/reset): replay everything.
+  if (prior.msgIndex > lines.length) return 0;
+  // Grew below the cap: plain append.
+  if (lines.length > prior.msgIndex) return prior.msgIndex;
+  const last = lines.length ? lines[lines.length - 1] : undefined;
+  // Identical capture: nothing new. Byte equality alone is not enough —
+  // evicted content can be exactly the size of the new content — so the
+  // tail line must match too (or be absent, for legacy cursors).
+  if (Buffer.byteLength(lines.join("\n"), "utf8") === prior.byteOffset
+      && (!prior.tail || last === prior.tail)) {
+    return lines.length;
+  }
+  // Flat count but changing content: eviction at history-limit (or an
+  // in-place redraw). Resume after the previous tail where possible.
+  const idx = prior.tail ? lines.lastIndexOf(prior.tail) : -1;
+  if (idx >= 0) return idx + 1;
+  // Anchor overwritten: bounded replay so output is delayed, never lost.
+  return Math.max(0, lines.length - TERMINAL_REPLAY_CAP);
+}
+
+export function terminalCursorTail(lines: string[]): string | undefined {
+  return lines.length ? lines[lines.length - 1]!.slice(-200) : undefined;
+}
+
+/**
+ * Read only the bytes of `path` from `fromByte` to EOF. Cursors store an
+ * absolute byte offset, so transcripts being tailed no longer pay a full-file
+ * read on every poll. `effFrom` is clamped to the file's current size so
+ * callers can rebase window-relative offsets back to absolute positions.
+ */
+export async function readFileWindow(
+  path: string,
+  fromByte: number,
+): Promise<{ buf: Buffer; effFrom: number; size: number }> {
+  const fh = await open(path, "r");
+  try {
+    const size = (await fh.stat()).size;
+    const effFrom = Math.max(0, Math.min(fromByte, size));
+    const len = size - effFrom;
+    const buf = Buffer.alloc(len);
+    let readTotal = 0;
+    while (readTotal < len) {
+      const { bytesRead } = await fh.read(buf, readTotal, len - readTotal, effFrom + readTotal);
+      if (bytesRead === 0) break;
+      readTotal += bytesRead;
+    }
+    return { buf: buf.subarray(0, readTotal), effFrom, size };
+  } finally {
+    await fh.close();
+  }
 }
 
 export async function walkFiles(root: string): Promise<string[]> {

@@ -1,13 +1,12 @@
 // src/adapters/claude-code/index.ts
-import { open, readdir, readFile, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
-import { statusFromMtime } from "../common.js";
+import { readFileWindow, statusFromMtime } from "../common.js";
 import { parseJsonlSlice, parseRecord } from "./parse.js";
 
 const ADAPTER_NAME = "claude-code";
@@ -17,7 +16,6 @@ const adapter: Adapter = {
 
   async scan(): Promise<SessionEntry[]> {
     const root = join(process.env.HOME ?? homedir(), ".claude", "projects");
-    if (!existsSync(root)) return [];
     const out: SessionEntry[] = [];
     let projects: string[];
     try {
@@ -61,27 +59,28 @@ const adapter: Adapter = {
   },
 
   async read(entry: SessionEntry, cursor?: Cursor): Promise<AdapterReadResult> {
-    let buf: Buffer;
-    try {
-      buf = await readFile(entry.transcriptPath);
-    } catch (e) {
-      throw new TranscriptUnreadableError(ADAPTER_NAME, `cannot read ${entry.transcriptPath}`, e);
-    }
     let from = 0;
     let priorIndex = 0;
     if (cursor) {
       const c = decodeCursor(cursor, ADAPTER_NAME);
-      from = Math.min(c.byteOffset, buf.length);
+      from = c.byteOffset;
       priorIndex = c.msgIndex;
     }
-    const { records, nextOffset } = parseJsonlSlice(buf, from);
+    let win: { buf: Buffer; effFrom: number; size: number };
+    try {
+      win = await readFileWindow(entry.transcriptPath, from);
+    } catch (e) {
+      throw new TranscriptUnreadableError(ADAPTER_NAME, `cannot read ${entry.transcriptPath}`, e);
+    }
+    const { records, nextOffset } = parseJsonlSlice(win.buf, 0);
     const messages: RawMessage[] = records.map(parseRecord);
+    const absNextOffset = win.effFrom + nextOffset;
     const nextCursor = encodeCursor({
       adapter: ADAPTER_NAME,
-      byteOffset: nextOffset,
+      byteOffset: absNextOffset,
       msgIndex: priorIndex + messages.length,
     });
-    return { messages, nextCursor, eof: nextOffset === buf.length };
+    return { messages, nextCursor, eof: absNextOffset >= win.size };
   },
 };
 

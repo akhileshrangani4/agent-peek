@@ -2,14 +2,14 @@ import type { Registry } from "./registry.js";
 import type { ClaimsStore } from "./claims.js";
 import type { AdapterLoader } from "../adapters/loader.js";
 import type {
-  CoordinationDigest, CoordinationCursor, CoordinationSession,
+  CoordinationDigest, CoordinationCursor,
   RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor,
 } from "./types.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError, CursorMismatchError,
 } from "./errors.js";
 import { toBrief, toHandoff, toRaw, toStructured, toSummary } from "./snapshot.js";
-import { decodeCursor, cursorAdapter } from "./cursor.js";
+import { cursorAdapter } from "./cursor.js";
 import { displayNames } from "./names.js";
 import {
   buildCoordinationDigest, buildCoordinationSession, compactCoordinationSessionForCursor, cwdMatches,

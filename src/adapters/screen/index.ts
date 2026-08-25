@@ -8,6 +8,7 @@ import type { Adapter, AdapterReadResult } from "../types.js";
 import type { Cursor, RawMessage, SessionEntry } from "../../core/types.js";
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
+import { terminalCursorTail, terminalDeltaFromLine } from "../common.js";
 
 const execFileAsync = promisify(execFile);
 const ADAPTER_NAME = "screen";
@@ -44,10 +45,10 @@ const adapter: Adapter = {
 
   async read(entry: SessionEntry, cursor?: Cursor): Promise<AdapterReadResult> {
     const sessionName = sessionNameFromEntry(entry);
-    let priorLine = 0;
+    let prior = { msgIndex: 0, byteOffset: -1, tail: undefined as string | undefined };
     if (cursor) {
       const c = decodeCursor(cursor, ADAPTER_NAME);
-      priorLine = c.msgIndex;
+      prior = { msgIndex: c.msgIndex, byteOffset: c.byteOffset, tail: c.tail };
     }
 
     let output: string;
@@ -59,7 +60,7 @@ const adapter: Adapter = {
 
     const lines = output.length ? output.replace(/\r\n/g, "\n").split("\n") : [];
     if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-    const fromLine = priorLine > lines.length ? 0 : priorLine;
+    const fromLine = terminalDeltaFromLine(lines, prior);
     const delta = lines.slice(fromLine).join("\n");
     const messages: RawMessage[] = delta
       ? [{
@@ -72,6 +73,7 @@ const adapter: Adapter = {
       adapter: ADAPTER_NAME,
       byteOffset: Buffer.byteLength(output, "utf8"),
       msgIndex: lines.length,
+      tail: terminalCursorTail(lines),
     });
     return { messages, nextCursor, eof: true };
   },

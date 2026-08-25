@@ -5,7 +5,7 @@ import { AdapterLoader } from "../../src/adapters/loader.js";
 import { makeTmpHome } from "../helpers/tmp-home.js";
 import { SessionNotFoundError, AmbiguousSelectorError } from "../../src/core/errors.js";
 import type { Adapter } from "../../src/adapters/types.js";
-import type { SessionEntry, RawMessage } from "../../src/core/types.js";
+import type { RawMessage } from "../../src/core/types.js";
 import { encodeCursor } from "../../src/core/cursor.js";
 import { decodeCoordinationCursor } from "../../src/core/coordination.js";
 

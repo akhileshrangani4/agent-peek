@@ -45,6 +45,9 @@ export interface CursorData {
   adapter: string;
   byteOffset: number;
   msgIndex: number;
+  // Terminal adapters: last line of the previous capture. Used to detect
+  // scrollback eviction when the pane's history-limit keeps line count flat.
+  tail?: string;
 }
 export type Cursor = string; // opaque base64
 

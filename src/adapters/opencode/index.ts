@@ -2,11 +2,10 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { Cursor, RawMessage, SessionEntry, ToolCall } from "../../core/types.js";
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
-import { TranscriptUnreadableError } from "../../core/errors.js";
 import { extractText, statusFromMtime, toolCallFromPart, walkFiles } from "../common.js";
 
 const ADAPTER_NAME = "opencode";
