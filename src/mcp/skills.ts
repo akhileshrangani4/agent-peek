@@ -91,6 +91,7 @@ export interface UsageToolArgs {
   until?: string;
   limit?: number;
   includeBuiltins?: boolean;
+  /** Test-only. Never forwarded from an MCP argument: no tool on this surface takes a path. */
   home?: string;
 }
 
@@ -139,10 +140,23 @@ export async function usageTool(args: UsageToolArgs) {
   }
 }
 
+export const SEGMENT_IDS: SegmentId[] = ["archivable", "unknown-usage", "read-only", "in-use"];
+
 export interface SkillsToolArgs {
   segment?: string;
   limit?: number;
+  /** Test-only. Never forwarded from an MCP argument: no tool on this surface takes a path. */
   home?: string;
+}
+
+/** An unknown segment is a caller error, not an empty result that reads as "none". */
+export function parseSegment(raw: unknown): SegmentId | undefined {
+  if (raw === undefined) return undefined;
+  const value = String(raw);
+  if (!SEGMENT_IDS.includes(value as SegmentId)) {
+    throw new Error(`Unknown segment: ${value}. Valid: ${SEGMENT_IDS.join(", ")}`);
+  }
+  return value as SegmentId;
 }
 
 /**
@@ -171,7 +185,7 @@ export async function skillsTool(args: SkillsToolArgs) {
     const joined = joinUsage(store, inventory, agents);
     const report = buildSkillsReport({ ...joined, skills: inventory.skills, costBasis: inventory.costBasis });
     const limit = clampLimit(args.limit);
-    return { index, ...summarize(report, limit, args.segment as SegmentId | undefined) };
+    return { index, ...summarize(report, limit, parseSegment(args.segment)) };
   } finally {
     store.close?.();
   }

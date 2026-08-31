@@ -3,6 +3,7 @@
 // The MCP surface (ticket 08). Every test runs against a mkdtemp home: nothing here
 // reads or writes a real skill root, and nothing builds an index outside the fixture.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,7 +11,7 @@ import { UsageStore } from "../src/usage/store.js";
 import type { Invocation, Watermark } from "../src/usage/schema.js";
 import {
   usageTool, skillsTool, skillDetailTool, archivePlanTool, agentsTool,
-  indexState, clampLimit, parseGroupBy, summarize, DEFAULT_LIMIT, MAX_LIMIT,
+  indexState, clampLimit, parseGroupBy, parseSegment, summarize, DEFAULT_LIMIT, MAX_LIMIT,
 } from "../src/mcp/skills.js";
 import type { SkillsReport } from "../src/skills/report.js";
 
@@ -255,5 +256,23 @@ describe("list_agents", () => {
     const some = await agentsTool({ home });
     const all = await agentsTool({ home, all: true });
     expect(all.agents.length).toBeGreaterThan(some.agents.length);
+  });
+});
+
+describe("the surface takes no path", () => {
+  it("rejects an unknown segment rather than returning an empty result", () => {
+    expect(() => parseSegment("nonsense")).toThrowError(/Unknown segment/);
+    expect(parseSegment("archivable")).toBe("archivable");
+    expect(parseSegment(undefined)).toBeUndefined();
+  });
+
+  it("ignores a home argument supplied by an MCP caller", async () => {
+    // `home` exists for tests. The handler destructures arguments field by field, so a
+    // client cannot point peek at an arbitrary directory tree; this asserts the handler's
+    // argument list, which is the thing that enforces it.
+    const src = await readFile(new URL("../src/mcp/index.ts", import.meta.url), "utf8");
+    const handler = src.slice(src.indexOf('if (name === "usage_report")'), src.indexOf('if (name === "skill_detail")'));
+    expect(handler).not.toMatch(/home/);
+    expect(handler).toMatch(/args\.groupBy/);
   });
 });

@@ -483,11 +483,32 @@ export async function run(): Promise<void> {
         return feedToolError(error);
       }
     }
+    // Arguments are destructured field by field, never forwarded as an object: `home` is
+    // a test-only parameter on these functions, and passing the caller's arguments
+    // straight through would let an MCP client point peek at an arbitrary directory tree.
+    // No tool on this surface takes a path.
     if (name === "usage_report") {
-      return json(await usageTool(args as Parameters<typeof usageTool>[0]));
+      return json(await usageTool({
+        groupBy: args.groupBy === undefined ? undefined : String(args.groupBy),
+        skill: args.skill === undefined ? undefined : String(args.skill),
+        agent: args.agent === undefined ? undefined : String(args.agent),
+        adapter: args.adapter === undefined ? undefined : String(args.adapter),
+        tool: args.tool === undefined ? undefined : String(args.tool),
+        allTools: args.allTools === true,
+        sourceKind: args.sourceKind === undefined ? undefined : String(args.sourceKind),
+        sidechain: typeof args.sidechain === "boolean" ? args.sidechain : undefined,
+        attributionAgent: args.attributionAgent === undefined ? undefined : String(args.attributionAgent),
+        since: args.since === undefined ? undefined : String(args.since),
+        until: args.until === undefined ? undefined : String(args.until),
+        includeBuiltins: args.includeBuiltins === true,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      }));
     }
     if (name === "skills_report") {
-      return json(await skillsTool(args as Parameters<typeof skillsTool>[0]));
+      return json(await skillsTool({
+        segment: args.segment === undefined ? undefined : String(args.segment),
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      }));
     }
     if (name === "skill_detail") {
       try {
