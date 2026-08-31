@@ -1,0 +1,141 @@
+---
+title: Skill usage
+description: Which skills you actually use, across every agent on this machine — and where that answer cannot be trusted.
+---
+
+`peek usage` and `peek skills` answer one question: **which skills do I actually use,
+across every agent on this machine, and which are costing me context for nothing?**
+
+Read this page before acting on either. The commands are simple; the ways their answers
+can mislead are not, and the whole point of the design is to make those visible rather
+than to hide them behind a confident number.
+
+## Four things to know before you delete anything
+
+### 1. A zero can mean "not used" or "not seen"
+
+peek can attribute a skill invocation to a skill only on agents whose transcripts it can
+read *and* whose invocations name the skill. Where it cannot, a count of zero is not
+evidence of disuse, and peek renders it as **`unknown`**, never as `0`.
+
+| state | meaning | what would fix it |
+|---|---|---|
+| `attributed` | every invocation kind names a skill | — |
+| `partial` | one kind attributable, another not | an extractor for the blind kind |
+| `opaque` | transcripts readable, nothing names a skill | an extractor |
+| `unreadable` | no transcript adapter at all | an adapter |
+
+Today claude-code is `attributed`; codex is `partial` (its slash commands are read, its
+tool calls are indistinguishable from any other `exec`); goose is `opaque`; cursor,
+continue and factory are `unreadable`.
+
+A skill is offered for archiving only when **every** installation is attributable. Zero
+observed where peek can see, plus unknown where it cannot, sums to **unknown** — not to
+zero. Rows that cannot be rendered honestly are excluded from bulk actions entirely
+rather than shown with a caveat.
+
+### 2. The observed window is per agent, and Claude Code deletes transcripts
+
+Claude Code removes session transcripts after 30 days (`cleanupPeriodDays`). Codex does
+not delete at all. So on one machine peek may hold **33 days** of Claude Code history
+beside **334 days** of Codex history, and a single combined figure would badly overstate
+coverage for the agent whose history is capped.
+
+`peek usage` prints one line per adapter for this reason. A skill showing 3 uses means
+*3 in the window peek can see*, not 3 ever. This is why the index exists: it is durable,
+so history accumulates from the day you first run it even as the transcripts behind it
+expire.
+
+### 3. Cost is an estimate and an upper bound
+
+Token cost is estimated from each skill's `SKILL.md` frontmatter — name plus description
+— charged once per agent that lists it. It is an **upper bound**: some hosts list a name
+without its description. `peek skills` always prints its basis; treat the number as a
+lever for comparison, not a measurement.
+
+### 4. A skill that only a human can invoke costs nothing to the model
+
+A skill whose frontmatter sets `disable-model-invocation` is never listed to the model on
+agents that honour it, so it adds **zero** tokens there — but it is still invocable by
+you as a slash command. Such a skill can never appear in tool-call data at all, so a
+usage tool that only reads tool calls reports every one of them as unused.
+
+## peek usage
+
+```bash
+peek usage                                  # skills, most used first
+peek usage --since 7d                       # a duration or an ISO date
+peek usage tool --all-tools                 # every tool, not just skills
+peek usage attributionAgent --sidechain     # which subagent types reach for skills
+peek usage day --skill wayfinder            # one skill over time
+peek usage --json                           # full report envelope
+```
+
+The default counts **skill invocations by either path**: the `Skill` tool *and* slash
+commands. Those are different acts — "the agent chose this" versus "I reached for this"
+— and `peek usage sourceKind` separates them.
+
+Grouping dimensions: `skill`, `tool`, `agent`, `adapter`, `day`, `cwd`, `sourceKind`,
+`sidechain`, `attributionAgent`. Every filter is also a grouping, so you can always ask
+"which values are there" rather than having to already know one.
+
+`--json` returns an envelope, never a bare array: rows plus the window, the per-adapter
+spans, source counts, which agents peek cannot see, and whether `--limit` truncated the
+result. A consumer that cannot see coverage will present partial counts as complete.
+
+## peek skills
+
+```bash
+peek skills                       # segmented inventory
+peek skills --interactive         # browse and mark for archiving
+peek skills --skill <name>        # every installation of one skill
+peek skills archive <name> --agent <slug>    # describes; does not act
+peek skills archive <name> --all-agents --yes  # acts
+```
+
+The report is segmented by **what you can act on**:
+
+- **Safe to archive** — no recorded use, every installation attributable, at least one
+  mutable root.
+- **Usage unknown** — excluded, with the agents that cannot be seen named.
+- **Read-only** — plugin skills. peek reports their cost and never touches them; disable
+  a plugin with `/plugin` in Claude Code to stop paying for its whole set.
+- **In use** — recorded invocations.
+- **Invoked but not installed** — usage naming no skill in any scanned root. Three
+  different things live here: skills in a project-local root peek has not surveyed,
+  skills that ship inside the agent itself and exist in no user root, and skills you have
+  genuinely uninstalled. Only the last is a candidate for anything.
+
+### Archiving is per installation
+
+One skill symlinked into five agents is one skill with five installations. Unlinking it
+from one agent is a different act from retiring it everywhere, and `peek skills --skill
+<name>` shows exactly which is which before you choose. Archiving a symlink is an unlink
+and is trivially reversible; archiving a real directory moves it to
+`~/.agent-peek/archive/` and `peek skills restore` puts it back.
+
+**Everything is a dry run without `--yes`.** The plan names every installation it would
+touch, and every one it would skip and why.
+
+## What peek will never do
+
+- Write to any agent's configuration file or skill root it does not manage.
+- Mutate a plugin skill. They are reported for cost and left alone.
+- Offer a row it cannot render honestly.
+
+## Reading a number you did not expect
+
+Every wrong number found while building this was a wrong *measurement*, not wrong code,
+and each was caught only because someone re-derived it a second way. If a count
+surprises you:
+
+- **Count invocations, not mentions.** A transcript records `<command-name>` whenever
+  anyone *writes about* a command, so grepping counts discussion. Define a count
+  structurally — by record type and shape — not by pattern occurrence.
+- **Check which record shapes you looked at.** Absence found by searching the shapes you
+  expected is much weaker evidence than it feels. Codex writes every user turn twice, in
+  two different shapes; reading both doubles every count.
+- **Distrust a check that cannot fail loudly.** A verification with a malformed argument
+  can report a clean pass it never made.
+- **Distrust a check that races what it measures.** A probe reading output before it is
+  rendered reports a failure that is not there.
