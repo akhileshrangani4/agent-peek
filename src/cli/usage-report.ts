@@ -196,6 +196,26 @@ function View({ report, groupBy, width, limit, verbose, series, seriesDays, seri
 }
 
 /**
+ * One value per calendar day between the first and last day present, zero where no
+ * invocation was recorded. Without this a sparkline shows the days that HAVE data
+ * side by side, which reads as continuous activity across a period with gaps in it.
+ */
+function dailySeries(rows: { day?: string; count: number }[]): number[] {
+  const first = rows[0]?.day, last = rows.at(-1)?.day;
+  if (!first || !last) return rows.map((r) => r.count);
+  const byDay = new Map(rows.map((r) => [r.day, r.count]));
+  const out: number[] = [];
+  for (const d = new Date(`${first}T00:00:00Z`); ; d.setUTCDate(d.getUTCDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    out.push(byDay.get(key) ?? 0);
+    if (key >= last) break;
+    // A malformed day would otherwise loop until the heap gives out.
+    if (out.length > 4000) break;
+  }
+  return out;
+}
+
+/**
  * The corpus as one shape. Two traps, both of which shipped once.
  *
  * Rows arrive ordered by count, so the sparkline and its label must come from a
@@ -213,15 +233,26 @@ function DayShape({ report }: { report: UsageReport }): React.JSX.Element {
   const span = report.window;
   const from = span?.earliest?.slice(0, 10) ?? byDate[0]?.day ?? "";
   const to = span?.latest?.slice(0, 10) ?? byDate.at(-1)?.day ?? "";
-  return h(Box, { flexDirection: "column", marginTop: 1 },
-    h(Box, null,
-      h(Text, null, "     "),
-      h(Text, { color: "cyan" }, sparkline(byDate.map((r) => r.count))),
-      h(Text, { dimColor: true }, `  ${from} → ${to}`)),
-    report.truncated
-      ? h(Text, { dimColor: true },
-        `     shape covers the ${byDate.length} days shown · --limit to widen`)
-      : null);
+  // A truncated report holds the highest-COUNT days, not a date range: at `--limit 3`
+  // those were 2026-08-24, 2026-08-31 and 2026-08-05, and drawing them as three adjacent
+  // cells asserts they are consecutive. There is no shape to draw from a non-contiguous
+  // subset, so say what is missing instead of drawing something that reads as a trend.
+  if (report.truncated) {
+    return h(Box, { marginTop: 1 },
+      h(Text, { dimColor: true },
+        `     ${from} → ${to} · raise --limit past ${byDate.length} to draw the shape`));
+  }
+  // Days with no invocations have no row, so drawing one cell per row puts 2026-08-03
+  // beside 2026-08-11 and asserts they are adjacent. A shape over time has to include
+  // the days when nothing happened: gaps are filled with zero, and the label is the
+  // range actually drawn rather than the index window, so the two cannot disagree.
+  const counts = dailySeries(byDate);
+  return h(Box, { marginTop: 1 },
+    h(Text, null, "     "),
+    h(Text, { color: "cyan" }, sparkline(counts)),
+    h(Text, { dimColor: true },
+      `  ${byDate[0]?.day ?? from} → ${byDate.at(-1)?.day ?? to}`
+      + `  ${counts.length} days`));
 }
 
 function relative(iso: string): string {
