@@ -537,6 +537,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek skills archives")
     .option("--json", "Output JSON")
     .option("--projects <dirs>", "Comma-separated project directories to scan for project-local roots")
+    .option("--limit <n>", "Rows per segment (default: 20 archivable, 8 elsewhere)")
     .option("--agent <slug>", "Limit an archive to one agent's installation")
     .option("--all-agents", "Retire the skill from every mutable root it is installed in")
     .option("--yes", "Execute. Without it, archive and restore only describe what they would do.")
@@ -1399,6 +1400,7 @@ async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
     return;
   }
 
+  const rowLimit = opts.limit === undefined ? undefined : parseRequiredPositive(opts.limit, "--limit");
   console.log(`${report.totalSkills} skills, ~${report.totalTokens.toLocaleString()} tokens charged`);
   console.log(`cost basis: ${report.costBasis}`);
   for (const segment of report.segments) {
@@ -1407,7 +1409,7 @@ async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
     console.log(`${segment.title.toUpperCase()} — ${segment.rows.length} skills, ~${segment.tokens.toLocaleString()} tokens`);
     console.log(`  ${segment.note}`);
     console.log("");
-    const limit = segment.id === "archivable" ? 20 : 8;
+    const limit = rowLimit ?? (segment.id === "archivable" ? 20 : 8);
     const rows = segment.rows.slice(0, limit).map((row) => [
       row.name.slice(0, 36),
       row.agents.join(",").slice(0, 28) || "-",

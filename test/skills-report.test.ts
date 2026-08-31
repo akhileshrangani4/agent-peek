@@ -195,3 +195,78 @@ describe("expandSkill", () => {
     expect(rows.map((r) => r.action)).toEqual(["move", "refuse"]);
   });
 });
+
+describe("an agent peek cannot confirm does not withhold a verdict", () => {
+  const skill = (): Skill => ({
+    key: "k", name: "n", description: "d", modelInvocable: true, estimatedTokens: 10,
+    chargedTokens: 10, flags: [],
+    installations: [
+      { agent: "claude-code", rootPath: "/c", rootKind: "user", mutable: true, path: "/c/n", symlink: false, chargedTokens: 10 },
+      { agent: "roo", rootPath: "/r", rootKind: "user", mutable: true, path: "/r/n", symlink: true, chargedTokens: 0 },
+    ],
+  });
+
+  it("never offers a skill whose only mutable installations are unconfirmed", () => {
+    // Discounting an unconfirmed agent's unobservability is right; offering a destructive
+    // action against one is not. Unlinking from a directory the installer made for a
+    // product that may not exist shrinks no confirmed agent's context.
+    const onlyUnconfirmed: Skill = {
+      key: "u", name: "u", description: "d", modelInvocable: true, estimatedTokens: 5,
+      chargedTokens: 5, flags: [],
+      installations: [
+        { agent: "roo", rootPath: "/r", rootKind: "user", mutable: true, path: "/r/u", symlink: true, chargedTokens: 5 },
+        { agent: "zed", rootPath: "/s", rootKind: "shared", mutable: false, path: "/s/u", symlink: false, chargedTokens: 0 },
+      ],
+    };
+    const report = buildSkillsReport(input({
+      skills: [onlyUnconfirmed], unconfirmedAgents: new Set(["roo"]),
+    }));
+    expect(report.segments.find((s) => s.id === "archivable")!.rows).toHaveLength(0);
+    const readOnly = report.segments.find((s) => s.id === "read-only")!.rows[0]!;
+    expect(readOnly.reason).toMatch(/cannot confirm are installed/);
+  });
+
+  it("holds two invariants over every archivable row", () => {
+    const report = buildSkillsReport(input({
+      skills: [skill()],
+      coverage: new Map([["claude-code", { agent: "claude-code", state: "attributed", attributes: ["tool_call"], blind: [] }]]),
+      unconfirmedAgents: new Set(["roo"]),
+    }));
+    for (const row of report.segments.find((s) => s.id === "archivable")!.rows) {
+      // The segment promises attributable usage: a row reading `unknown` there is the
+      // false-zero problem inverted.
+      expect(row.usesLabel).toBe("0");
+      // And something must actually be actionable.
+      expect(row.agents.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("archives when the only unattributable installation is an unconfirmed agent", () => {
+    const report = buildSkillsReport(input({
+      skills: [skill()],
+      coverage: new Map([["claude-code", { agent: "claude-code", state: "attributed", attributes: ["tool_call"], blind: [] }]]),
+      unconfirmedAgents: new Set(["roo"]),
+    }));
+    const row = report.segments.find((s) => s.id === "archivable")!.rows[0]!;
+    expect(row).toBeDefined();
+    // The discount is disclosed, not silent: the user can tell why this row is here.
+    expect(row.reason).toMatch(/cannot confirm are installed/);
+  });
+
+  it("still withholds when a confirmed agent cannot be attributed", () => {
+    const report = buildSkillsReport(input({
+      skills: [skill()],
+      coverage: new Map([["claude-code", { agent: "claude-code", state: "attributed", attributes: ["tool_call"], blind: [] }]]),
+      unconfirmedAgents: new Set(),
+    }));
+    expect(report.segments.find((s) => s.id === "unknown-usage")!.rows).toHaveLength(1);
+  });
+
+  it("labels the unconfirmed installation at the confirm step", () => {
+    // Dry-run plus a line naming "unlink from roo" is the only thing standing between the
+    // relaxed verdict and a wrong deletion, if the agent is in fact installed.
+    const rows = expandSkill(input({ skills: [skill()], unconfirmedAgents: new Set(["roo"]) }), skill());
+    expect(rows.find((r) => r.agent === "roo")!.unconfirmedAgent).toBe(true);
+    expect(rows.find((r) => r.agent === "claude-code")!.unconfirmedAgent).toBeUndefined();
+  });
+});
