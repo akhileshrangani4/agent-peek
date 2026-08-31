@@ -201,3 +201,29 @@ export function Rows(
   return h(Box, { flexDirection: "column", marginTop },
     ...runs.map((run, i) => h(Box, { key: i, flexDirection: "column", marginTop: i === 0 ? 0 : 1 }, ...run)));
 }
+
+const SPARK_CELLS = "▁▂▃▄▅▆▇█";
+
+/**
+ * A sparkline over per-bucket counts.
+ *
+ * This is the one graphic that beats well-aligned numbers, which is the bar it has to
+ * clear: a skill invoked seven times steadily and one invoked seven times in a single
+ * afternoon are the same number in a column and a different keep-or-delete decision.
+ *
+ * A window shorter than the data's own span renders empty for almost every row and
+ * reads as broken rather than as "no recent use", so callers must size the window
+ * against the observed span rather than picking a round number.
+ */
+export function sparkline(counts: readonly number[]): string {
+  if (counts.length === 0) return "";
+  const max = Math.max(...counts, 1);
+  return counts
+    .map((v) => SPARK_CELLS[Math.min(SPARK_CELLS.length - 1, Math.round((v / max) * (SPARK_CELLS.length - 1)))])
+    .join("");
+}
+
+/** Placeholder of the same width, so a row with no data keeps the column grid. */
+export function sparklineBlank(cells: number): string {
+  return "─".repeat(cells);
+}

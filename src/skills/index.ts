@@ -25,7 +25,7 @@ export type {
 } from "./archive.js";
 export { buildSkillsReport, expandSkill, selectableForArchive } from "./report.js";
 export type { SkillsReport, Segment, SegmentId, SkillRow, InstallationRow, ReportInput } from "./report.js";
-export { joinUsage } from "./assemble.js";
+export { joinUsage, usageSeries } from "./assemble.js";
 export { gitRootFor, projectRootsFromCwds, PROJECT_SCAN_LIMIT } from "./projects.js";
 export type { ProjectDiscovery } from "./projects.js";
 export { discoverProjects } from "./discover.js";

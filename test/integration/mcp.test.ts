@@ -1,11 +1,12 @@
 // test/integration/mcp.test.ts
-import { describe, it, expect } from "vitest";
+import { describe, it, expect , beforeAll} from "vitest";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { assertDistFresh } from "../helpers/fresh-dist.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = resolve(__dirname, "../../bin/agent-peek-mcp.js");
@@ -20,6 +21,8 @@ async function connectClient(home: string): Promise<Client> {
   await client.connect(transport);
   return client;
 }
+
+beforeAll(() => assertDistFresh());
 
 describe("MCP integration", () => {
   it("lists tools and calls list_sessions", async () => {

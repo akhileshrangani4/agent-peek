@@ -10,7 +10,7 @@ import { coverageFor, explainCoverage } from "./coverage.js";
 import type { InstallationCoverage } from "./coverage.js";
 import type { InvocationKind } from "../agents/index.js";
 import { coverage, queryUsage } from "./query.js";
-import type { UsageQuery, UsageRow } from "./query.js";
+import type { GroupBy, UsageQuery, UsageRow } from "./query.js";
 import type { UsageStore } from "./store.js";
 
 /** An agent peek cannot see usage for, and the reason it cannot. */
@@ -177,4 +177,46 @@ export async function buildUsageReport(
     }),
     empty: cov.liveSources + cov.tombstonedSources === 0,
   };
+}
+
+/**
+ * Per-bucket counts for one grouping dimension, for the sparkline column.
+ *
+ * Keyed by the dimension's own value, which is what `peek usage` rows display — unlike
+ * the skills report, whose rows carry a resolved bare name and so need a name map.
+ *
+ * The window is sized by the caller against the observed span rather than a round
+ * number: a window shorter than the data renders empty for almost every row and reads
+ * as broken rather than as "no recent use".
+ */
+export function usageSeriesFor(
+  store: UsageStore,
+  query: UsageQuery,
+  dimension: GroupBy,
+  opts: { days?: number; cells?: number; now?: number } = {},
+): { series: Map<string, number[]>; days: number; cells: number } {
+  const days = opts.days ?? 30;
+  const cells = opts.cells ?? 15;
+  const now = opts.now ?? Date.now();
+  const start = now - days * 86_400_000;
+
+  const bucketOf = new Map<string, number>();
+  for (let i = 0; i < days; i++) {
+    bucketOf.set(
+      new Date(start + i * 86_400_000).toISOString().slice(0, 10),
+      Math.min(cells - 1, Math.floor(i / (days / cells))),
+    );
+  }
+
+  const series = new Map<string, number[]>();
+  const rows = queryUsage(store, { ...query, groupBy: [dimension, "day"], limit: undefined });
+  for (const row of rows) {
+    const key = String((row as unknown as Record<string, unknown>)[dimension] ?? "");
+    const bucket = row.day ? bucketOf.get(row.day) : undefined;
+    if (!key || bucket === undefined) continue;
+    let counts = series.get(key);
+    if (!counts) { counts = Array<number>(cells).fill(0); series.set(key, counts); }
+    counts[bucket] = (counts[bucket] ?? 0) + row.count;
+  }
+  return { series, days, cells };
 }

@@ -1,11 +1,12 @@
 // test/integration/feed-cli.test.ts
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll , beforeAll} from "vitest";
 import { spawn, execFileSync } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { rmSync } from "node:fs";
+import { assertDistFresh } from "../helpers/fresh-dist.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = resolve(__dirname, "../../bin/peek.js");
@@ -26,6 +27,8 @@ async function makeProject(home: string): Promise<string> {
   execFileSync("git", ["init", "-q"], { cwd: dir });
   return dir;
 }
+
+beforeAll(() => assertDistFresh());
 
 describe("peek post / feed / expand", () => {
   const tempRoots: string[] = [];
