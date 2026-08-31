@@ -16,7 +16,7 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { displayWidth, fit, shortenPath, wrap, wrapList } from "./paths.js";
+import { displayWidth, fit, shortenPath, wrapList } from "./paths.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
@@ -29,6 +29,7 @@ import {
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
 import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
+import { renderAgents } from "./agents-report.js";
 import type { Inventory } from "../skills/types.js";
 import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
@@ -436,6 +437,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--skills <path>", "Skill root for `add` (repeatable via comma-separated list)")
     .option("--adapter <name>", "Transcript adapter this agent uses, when peek has one")
     .option("--name <display>", "Display name for `add`")
+    .option("--color", "Force colour even when piped")
+    .option("--width <n>", "Render at this width instead of the terminal width")
     .option("--all", "Include agents with no skill root on this machine")
     .option("--json", "Output machine-readable JSON")
     .action(async (action, slug, opts) => {
@@ -782,7 +785,7 @@ async function adaptersWithSessions(): Promise<Set<string>> {
   }
 }
 
-async function printAgentsCommand(opts: { all: boolean; json: boolean }): Promise<void> {
+async function printAgentsCommand(opts: { all: boolean; json: boolean; color?: boolean; width?: number }): Promise<void> {
   const agents = await listAgents();
   const seen = await adaptersWithSessions();
   const present = agents.filter((a) => isPresent(a, seen));
@@ -791,46 +794,15 @@ async function printAgentsCommand(opts: { all: boolean; json: boolean }): Promis
     console.log(JSON.stringify({ source: AGENT_TABLE_SOURCE, agents: shown }, null, 2));
     return;
   }
-  printAgents(shown);
-  printAgentsSummary(agents);
-}
-
-function printAgents(agents: ResolvedAgent[]): void {
-  if (agents.length === 0) {
-    console.log("no agents found. Run `peek agents --all` to see every agent peek knows.");
-    return;
-  }
-  const table = agents.map((agent) => {
-    const present = agent.roots.filter((r) => r.present);
-    return [
-      fit(agent.slug, 15),
-      // The four states are the point of the agent model, so they stay whole words:
-      // legible in monochrome, in a pipe, and to a reader who does not know the palette.
-      agent.presence,
-      agent.tier ?? "user",
-      agent.adapter ?? "-",
-      // "tool_call,slash_command" is 23 characters of mostly-repeated text.
-      usageLabel(agent),
-      agent.manageable ? "yes" : "no",
-      // A path list per row is detail, not orientation: the count answers "does peek see
-      // anything here", and --json carries the paths.
-      String((present.length ? present : agent.roots).length),
-    ];
+  await renderAgents(agents, {
+    groups: opts.all ? ["present", "unconfirmed", "absent", "no-convention"] : undefined,
+    color: opts.color,
+    width: opts.width,
+    source: AGENT_TABLE_SOURCE,
   });
-  const headers = ["AGENT", "PRESENCE", "SOURCE", "ADAPTER", "USAGE", "MANAGE", "ROOTS"];
-  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => displayWidth(r[i]!))));
-  const fmt = (r: string[]) => r.map((v, i) => v + " ".repeat(Math.max(0, cols[i]! - displayWidth(v)))).join("  ").trimEnd();
-  console.log(fmt(headers));
-  for (const row of table) console.log(fmt(row));
 }
 
-/** What peek can see of this agent's usage, in one short token rather than a kind list. */
-function usageLabel(agent: ResolvedAgent): string {
-  if (!agent.observable) return "none";
-  const tool = agent.observes.includes("tool_call");
-  const slash = agent.observes.includes("slash_command");
-  return tool && slash ? "tool+slash" : slash ? "slash" : "tool";
-}
+
 
 async function skillsMutationCommand(
   action: "archive" | "restore" | "archives",
@@ -916,35 +888,6 @@ function printArchivePlan(plan: ArchivePlan): void {
   console.log("nothing has changed. Re-run with --yes to execute.");
 }
 
-function printAgentsSummary(all: ResolvedAgent[]): void {
-  const verified = all.filter((a) => a.tier === "verified").length;
-  // Aligned type rather than a graphic: four counts are a fact about grouping, not a
-  // quantity worth plotting, and a right-aligned grid reads faster than a sentence.
-  const counts: [string, number][] = [
-    ["present", all.filter((a) => a.presence === "present").length],
-    ["unconfirmed", all.filter((a) => a.presence === "unconfirmed").length],
-    ["absent", all.filter((a) => a.presence === "absent").length],
-    ["no convention", all.filter((a) => a.presence === "no-convention").length],
-  ];
-  const width = Math.max(...counts.map(([, n]) => String(n).length));
-  console.log("");
-  for (const [label, n] of counts) {
-    if (n === 0) continue;
-    const pct = Math.round((n / all.length) * 100);
-    console.log(`  ${label.padEnd(15)}${String(n).padStart(width)}   ${String(pct).padStart(3)}%`);
-  }
-  console.log("");
-  for (const line of wrap(
-    `${all.length} agents known to peek: ${verified} verified locally, `
-    + `${all.length - verified} sourced from ${AGENT_TABLE_SOURCE.package}@${AGENT_TABLE_SOURCE.version}.`,
-    76, "  ",
-  )) console.log(line);
-  for (const line of wrap(
-    "unconfirmed means a skill root exists but nothing else does: the installer creates "
-    + "those directories, so peek will not claim the agent is installed.",
-    76, "  ",
-  )) console.log(line);
-}
 
 async function printManifestDivergence(): Promise<void> {
   const divergence = await manifestDivergence(sharedLibraryRoot());
