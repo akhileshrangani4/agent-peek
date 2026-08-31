@@ -29,12 +29,12 @@ import {
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
 import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
+import { renderUsageReport } from "./usage-report.js";
 import { renderAgents } from "./agents-report.js";
 import type { Inventory } from "../skills/types.js";
 import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/index.js";
-import type { UsageReport } from "../usage/report.js";
 import type { PostType } from "../feed/schema.js";
 import { resolveAuthor } from "../feed/identity.js";
 
@@ -1195,7 +1195,11 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
       console.log(JSON.stringify(report, null, 2));
       return;
     }
-    printUsage(report, groupBy, skillsOnly ? undefined : explicitTool, skillsOnly, Boolean(opts.verbose));
+    await renderUsageReport(report, groupBy, {
+      ...(opts.width ? { width: Number(opts.width) } : {}),
+      ...(opts.color ? { color: true } : {}),
+      verbose: Boolean(opts.verbose),
+    });
   } finally {
     store.close();
   }
@@ -1264,108 +1268,10 @@ function parseLimit(value: unknown): number {
   return n;
 }
 
-function printUsage(
-  report: UsageReport, groupBy: GroupBy[], tool: string | undefined, skillsOnly: boolean,
-  verbose = false,
-): void {
-  if (report.empty) {
-    console.log("No invocations indexed yet.");
-    console.log("Run `peek usage` again once a session has been recorded, or check `peek doctor`.");
-    return;
-  }
 
-  console.log(usageHeader(report, tool, skillsOnly));
-  for (const line of adapterWindows(report)) console.log(line);
-  for (const line of coverageWarnings(report, verbose)) console.log(line);
-  console.log("");
 
-  if (report.rows.length === 0) {
-    console.log("No invocations match those filters.");
-    return;
-  }
 
-  const headers = [...groupBy.map((d) => d.toUpperCase()), "COUNT", "LAST"];
-  const rows = report.rows.map((row) => [
-    ...groupBy.map((d) => formatDimension(row, d)),
-    String(row.count),
-    relativeTime(row.lastSeen),
-  ]);
-  const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
-  console.log(fmt(headers));
-  for (const row of rows) console.log(fmt(row));
 
-  if (report.truncated) {
-    console.log("");
-    console.log(`Showing ${report.groupsReturned}; more exist. Use --limit to widen.`);
-  }
-}
-
-/**
- * The window is not a caveat to state once. Every number below it is conditional on it,
- * so it prints on every run. Treat removing it as a breaking change.
- */
-function usageHeader(report: UsageReport, tool: string | undefined, skillsOnly: boolean): string {
-  const scope = skillsOnly ? "skills" : tool ? `${tool} calls` : "all tools";
-  const span = report.window.days > 0
-    ? `${report.window.days}d observed (${report.window.earliest?.slice(0, 10)} to ${report.window.latest?.slice(0, 10)})`
-    : "no window";
-  const sources = report.sources.tombstoned > 0
-    ? `${report.sources.total} sources (${report.sources.tombstoned} since deleted)`
-    : `${report.sources.live} sources`;
-  return `${scope}: ${span}, ${sources}, ${report.totalInvocations} invocations indexed`;
-}
-
-/**
- * Retention is per-agent: Claude Code deletes transcripts at 30 days, Codex keeps them.
- * One global span would tell a user peek has seen a year of their usage when the agent
- * holding most of their skills is capped at a month.
- */
-function adapterWindows(report: UsageReport): string[] {
-  if (report.windows.length < 2) return [];
-  return report.windows.map((w) =>
-    `  ${w.adapter}: ${w.days}d (${w.earliest.slice(0, 10)} to ${w.latest.slice(0, 10)}), ${w.invocations} invocations`);
-}
-
-function coverageWarnings(report: UsageReport, verbose: boolean): string[] {
-  const out: string[] = [];
-  // Thirty-one lines of "usage unknown for X" above every report buries the report.
-  // The count cannot honestly be shrunk — those agents are present and genuinely
-  // unobservable — so it is summarised rather than filtered, and stays reachable: a
-  // user who cannot see usage for eleven agents needs to be able to find out which.
-  if (report.blindSpots.length > 0) {
-    if (verbose || report.blindSpots.length <= 3) {
-      for (const spot of report.blindSpots) {
-        const why = spot.reason === "no-adapter"
-          ? "no transcript adapter"
-          : `${spot.adapter} adapter extracts no invocations`;
-        out.push(`  usage unknown for ${spot.displayName}: ${why}`);
-      }
-    } else {
-      const names = report.blindSpots.map((s) => s.displayName);
-      const head = names.slice(0, 3).join(", ");
-      out.push(`  usage unknown for ${names.length} agents (${head}, ...) — --verbose or --json to list them`);
-    }
-  }
-  for (const p of report.partiallyObserved) {
-    out.push(`  ${p.agent}: ${p.missing.join(", ")} invocations not observable`);
-  }
-  return out;
-}
-
-function formatDimension(row: UsageRow, dim: GroupBy): string {
-  switch (dim) {
-    case "sidechain": return row.sidechain ? "subagent" : "main-loop";
-    case "attributionAgent": return row.attributionAgent ?? "(main loop)";
-    case "sourceKind": return row.sourceKind ?? "-";
-    case "day": return row.day ?? "-";
-    case "tool": return row.tool ?? "-";
-    default: {
-      const value = (row as unknown as Record<string, unknown>)[dim];
-      return value === null || value === undefined ? "(none)" : String(value);
-    }
-  }
-}
 
 /**
  * The `--json` envelope. Additive over the inventory: every existing key is preserved,
