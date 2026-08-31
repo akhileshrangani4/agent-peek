@@ -2,7 +2,7 @@
 // Archive and restore. Every test builds its own fixture tree under mkdtemp; nothing
 // here reads, writes, moves, or unlinks anything under a real skill root.
 import { describe, it, expect } from "vitest";
-import { mkdtemp, mkdir, writeFile, symlink, readlink, lstat, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, symlink, readlink, lstat, readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -155,6 +155,31 @@ describe("executeArchive", () => {
     const plan = planArchive(inventory, "local-only");
     const forced = { ...plan, actions: plan.actions.map((a) => ({ ...a, kind: "unlink" as const })) };
     await expect(executeArchive(forced, { stateDir })).rejects.toThrowError(/must be moved, not unlinked/);
+  });
+
+  it("records the actions it completed when a later one refuses, so they stay restorable", async () => {
+    // Execution re-checks the filesystem, so a mid-plan refusal is expected. What must
+    // never happen is earlier unlinks landing with no record and no way back.
+    const { home, stateDir, inventory } = await fixture();
+    const plan = planArchive(inventory, "shared-skill", { allAgents: true });
+    expect(plan.actions).toHaveLength(3);
+    // Something replaces the last target with a real directory after planning.
+    const last = plan.actions[2]!;
+    await unlink(last.path);
+    await writeSkill(last.path, "shared-skill");
+
+    await expect(executeArchive(plan, { stateDir })).rejects.toThrowError(/must be moved, not unlinked/);
+
+    const log = await readArchiveLog({ stateDir });
+    expect(log).toHaveLength(1);
+    expect(log[0]!.partial).toBe(true);
+    expect(log[0]!.actions).toHaveLength(2);
+    expect(await exists(plan.actions[0]!.path)).toBe(false);
+
+    // And the partial record restores the two links that were removed.
+    await executeRestore(log[0]!, { stateDir });
+    expect(await readlink(plan.actions[0]!.path)).toBe(join(home, ".agents", "skills", "shared-skill"));
+    expect(await readlink(plan.actions[1]!.path)).toBe(join(home, ".agents", "skills", "shared-skill"));
   });
 
   it("records what it did so a restore can replay it", async () => {

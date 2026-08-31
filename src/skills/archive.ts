@@ -55,6 +55,10 @@ export interface ArchiveRecord {
   skillName: string;
   archivedAt: string;
   actions: ArchiveAction[];
+  /** True when the plan stopped part way: `actions` holds only what actually happened. */
+  partial?: true;
+  /** Why the plan stopped, for a partial record. */
+  failure?: string;
 }
 
 export interface ArchiveOptions {
@@ -198,6 +202,37 @@ export async function executeArchive(
   const id = `${Date.now().toString(36)}-${plan.skillName.replace(/[^\w.-]/g, "_")}`;
   const dir = join(archiveDir(opts), id);
   const done: ArchiveAction[] = [];
+  try {
+    await runActions(plan, dir, done);
+  } catch (e) {
+    // A refusal mid-plan is expected: execution re-checks the filesystem rather than
+    // trusting a plan computed earlier. What must never happen is the earlier actions
+    // being applied with no record, leaving the user unlinked and unable to restore.
+    if (done.length > 0) {
+      await appendRecord({
+        id,
+        skillKey: plan.skillKey,
+        skillName: plan.skillName,
+        archivedAt: new Date().toISOString(),
+        actions: done,
+        partial: true,
+        failure: (e as Error).message,
+      }, opts);
+    }
+    throw e;
+  }
+  const record: ArchiveRecord = {
+    id,
+    skillKey: plan.skillKey,
+    skillName: plan.skillName,
+    archivedAt: new Date().toISOString(),
+    actions: done,
+  };
+  await appendRecord(record, opts);
+  return record;
+}
+
+async function runActions(plan: ArchivePlan, dir: string, done: ArchiveAction[]): Promise<void> {
   for (const action of plan.actions) {
     const link = await lstat(action.path).catch(() => undefined);
     if (!link) {
@@ -226,15 +261,6 @@ export async function executeArchive(
     await rename(action.path, destination);
     done.push({ ...action, destination });
   }
-  const record: ArchiveRecord = {
-    id,
-    skillKey: plan.skillKey,
-    skillName: plan.skillName,
-    archivedAt: new Date().toISOString(),
-    actions: done,
-  };
-  await appendRecord(record, opts);
-  return record;
 }
 
 async function readlinkSafe(path: string): Promise<string | undefined> {
