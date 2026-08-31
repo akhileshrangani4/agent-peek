@@ -62,11 +62,25 @@ export async function inventoryRoots(
       }
     }
   }
+  // A path already scanned as an agent root or a shared tree is not also a project root.
+  // Without this, a recorded cwd of $HOME turns `$HOME/.agents/skills` into a "project"
+  // root and attributes the whole shared tree once per agent — ~390 skills x 8 agents,
+  // which is the shared library root that ticket 02 Q3 deliberately removed from the
+  // model, reintroduced under a different name.
+  const claimed = new Set(roots.map((r) => r.path));
+  for (const shared of sharedLibraryRoots(opts)) claimed.add(shared);
   for (const project of opts.projects ?? []) {
     for (const agent of agents) {
+      // Only agents actually installed here. Otherwise a sourced convention claims a
+      // directory that means something else to this repo: openclaw reads `<repo>/skills`,
+      // so peek's own `skills/` package directory was being inventoried as a project
+      // install for an agent this machine does not have.
+      if (agent.presence !== "present") continue;
       if (!agent.projectDir) continue;
       const path = join(project, agent.projectDir);
+      if (claimed.has(path)) continue;
       if (!(await isDir(path))) continue;
+      claimed.add(path);
       roots.push({
         path,
         agent: agent.slug,

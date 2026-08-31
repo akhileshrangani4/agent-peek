@@ -285,7 +285,8 @@ describe("unmatched names are not one fact", () => {
       inv({ skill: "someplugin:missing" }),
     ]);
     const result = await skillsTool({ home });
-    const byName = Object.fromEntries((result.unmatched ?? []).map((u) => [u.name, u]));
+    if (!("unmatched" in result)) throw new Error("expected a segmented report");
+    const byName = Object.fromEntries(result.unmatched.map((u) => [u.name, u]));
     expect(byName["gone-entirely"]!.reason).toBe("not-on-disk");
     // peek cannot tell an agent-bundled skill from one uninstalled since, and says so
     // rather than picking.

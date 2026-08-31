@@ -6,23 +6,44 @@
 // crawling the filesystem: a crawl is slow and reaches into directories peek has no
 // reason to touch. 143 recorded cwds collapse to far fewer repositories, because 133 of
 // them are worktree or subdirectory paths that would otherwise each present as a project.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 
 /** Most recent repositories to survey. Stated in output when it bites, like `truncated`. */
 export const PROJECT_SCAN_LIMIT = 50;
 
 /**
- * Nearest ancestor holding `.git`, or undefined. A worktree's `.git` is a file rather
- * than a directory, which is why this tests existence and not directory-ness.
+ * The repository a path belongs to, resolving a linked worktree to its *main* checkout.
+ *
+ * A worktree's `.git` is a file holding `gitdir: <main>/.git/worktrees/<name>`, so
+ * stopping at the first `.git` finds the worktree and presents every worktree of one
+ * repo as a separate project — which is exactly the duplication the git-root collapse
+ * exists to prevent. Five worktrees of one repo counted its skill root five times.
  */
 export function gitRootFor(path: string): string | undefined {
   let current = resolve(path);
   for (;;) {
-    if (existsSync(`${current}${sep}.git`)) return current;
+    const dotGit = `${current}${sep}.git`;
+    if (existsSync(dotGit)) return mainCheckoutOf(dotGit) ?? current;
     const parent = dirname(current);
     if (parent === current) return undefined;
     current = parent;
+  }
+}
+
+/** Main checkout behind a linked worktree's `.git` file, or undefined for a normal repo. */
+function mainCheckoutOf(dotGit: string): string | undefined {
+  try {
+    if (statSync(dotGit).isDirectory()) return undefined;
+    const match = readFileSync(dotGit, "utf8").match(/^gitdir:\s*(.+)$/m);
+    if (!match) return undefined;
+    // `<main>/.git/worktrees/<name>` — everything before `/.git/` is the main checkout.
+    const marker = `${sep}.git${sep}worktrees${sep}`;
+    const gitDir = match[1]!.trim();
+    const at = gitDir.indexOf(marker);
+    return at === -1 ? undefined : gitDir.slice(0, at);
+  } catch {
+    return undefined;
   }
 }
 
