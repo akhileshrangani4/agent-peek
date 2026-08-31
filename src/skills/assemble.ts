@@ -74,6 +74,7 @@ export function joinUsage(
     ambiguousKeys,
     coverage,
     unmatched: [...unmatched].map(([name, uses]) => classifyUnmatched(name, uses, installedPlugins)),
+    unconfirmedAgents: new Set(agents.filter((a) => a.presence === "unconfirmed").map((a) => a.slug)),
   };
 }
 

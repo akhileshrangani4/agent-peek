@@ -111,9 +111,13 @@ export interface ResolvedAgent extends Omit<Agent, "roots"> {
   /** True when one of the agent's own directories exists on this machine. */
   installed: boolean;
   /**
-   * - `present`: a declared root resolved on this machine.
+   * - `present`: evidence the product itself is here — a directory of its own holding
+   *   something besides a skills root.
+   * - `unconfirmed`: a skill root exists, but nothing else does. The skills installer
+   *   creates those directories itself, so their existence is evidence about the
+   *   installer, not about the agent. peek says so rather than resolving the ambiguity.
    * - `absent`: peek knows the convention, nothing is here.
    * - `no-convention`: peek knows the agent exists but has no root path for it.
    */
-  presence: "present" | "absent" | "no-convention";
+  presence: "present" | "unconfirmed" | "absent" | "no-convention";
 }

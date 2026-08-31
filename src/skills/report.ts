@@ -47,6 +47,12 @@ export interface InstallationRow {
   coverage: InstallationCoverage["state"];
   usesLabel: string;
   tokens: number;
+  /**
+   * True when peek cannot confirm this agent is installed. Shown at the confirm step: if
+   * the agent *is* installed and the user relies on the skill there, this line is the
+   * only thing standing between the relaxed verdict and a wrong deletion.
+   */
+  unconfirmedAgent?: boolean;
 }
 
 export interface Segment {
@@ -103,6 +109,12 @@ export interface ReportInput {
   ambiguousKeys: Set<string>;
   /** agent slug -> coverage. A slug absent here is treated as unreadable. */
   coverage: Map<string, InstallationCoverage>;
+  /**
+   * Agents whose installation exists but whose product peek cannot confirm is installed.
+   * Their unobservability is evidence about peek, not about the user's behaviour, so it
+   * does not withhold a verdict — see `classify`.
+   */
+  unconfirmedAgents?: Set<string>;
   unmatched: UnmatchedName[];
   costBasis: string;
 }
@@ -151,10 +163,24 @@ function classify(input: ReportInput, skill: Skill): { id: SegmentId; reason: st
     return { id: "read-only", reason: "plugin installation, reported but never mutated" };
   }
   const blind = installs.filter((i) => coverageOf(input, i.agent!).state !== "attributed");
-  if (blind.length > 0) {
+  // "Every installation must be attributable" exists to stop peek recommending deletion
+  // of a skill whose usage it cannot see. That rationale depends on the agent existing:
+  // if peek cannot confirm the product is installed, its silence is evidence about peek,
+  // not about the user, and withholding on that basis is being conservative about
+  // nothing. The discount is disclosed in the row and again at the confirm step.
+  const unconfirmed = input.unconfirmedAgents ?? new Set<string>();
+  const blocking = blind.filter((i) => !unconfirmed.has(i.agent!));
+  if (blocking.length > 0) {
     return {
       id: "unknown-usage",
-      reason: `usage not attributable on ${blind.map((i) => i.agent).join(", ")}`,
+      reason: `usage not attributable on ${blocking.map((i) => i.agent).join(", ")}`,
+    };
+  }
+  if (blind.length > 0) {
+    return {
+      id: "archivable",
+      reason: `no recorded use; unattributable only on ${blind.map((i) => i.agent).join(", ")}, `
+        + "which peek cannot confirm are installed",
     };
   }
   return { id: "archivable", reason: "no recorded use, every installation attributable" };
@@ -247,6 +273,7 @@ export function expandSkill(input: ReportInput, skill: Skill): InstallationRow[]
       coverage: cov.state,
       usesLabel: input.ambiguousKeys.has(skill.key) ? "ambiguous" : renderCount(n, cov),
       tokens: inst.chargedTokens,
+      ...(input.unconfirmedAgents?.has(inst.agent!) ? { unconfirmedAgent: true } : {}),
     };
   });
 }

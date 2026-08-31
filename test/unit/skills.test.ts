@@ -16,6 +16,15 @@ import { buildNameIndex, resolveName, invocationName } from "../../src/skills/re
 import type { Inventory, Skill, SkillInstallation } from "../../src/skills/types.js";
 import type { FoundSkill } from "../../src/skills/scan.js";
 
+/**
+ * An agent directory holding nothing but `skills/` reads as installer-created, so a
+ * fixture that wants an *installed* agent must look like one.
+ */
+async function installedMarker(home: string, agent = ".claude"): Promise<void> {
+  await mkdir(join(home, agent), { recursive: true });
+  await writeFile(join(home, agent, "settings.json"), "{}", "utf8");
+}
+
 function skillMd(name: string, description?: string, extra = ""): string {
   const desc = description === undefined ? "" : `description: ${description}\n`;
   return `---\nname: ${name}\n${desc}${extra}---\n\n# ${name}\n\nBody text that is never charged for.\n`;
@@ -152,6 +161,8 @@ describe("buildInventory against a fixture HOME", () => {
     // A slash-only skill, also shared.
     await writeSkill(join(shared, "slash-only"), "slash-only", "human only", "disable-model-invocation: true\n");
 
+    await installedMarker(home, ".claude");
+    await installedMarker(home, ".codex");
     for (const root of [join(home, ".claude", "skills"), join(home, ".codex", "skills")]) {
       await mkdir(root, { recursive: true });
       await symlink(join(shared, "shared-skill"), join(root, "shared-skill"));
@@ -321,6 +332,7 @@ describe("plugin version dedupe", () => {
 
   it("charges a multi-version plugin skill once per agent, end to end", async () => {
     const home = await mkdtemp(join(tmpdir(), "peek-skills-versions-"));
+    await installedMarker(home, ".claude");
     const cache = join(home, ".claude", "plugins", "cache", "acme", "toolkit");
     await writeSkill(join(cache, "1.0.0", "skills", "tool"), "tool", "a plugin skill");
     await writeSkill(join(cache, "1.1.0", "skills", "tool"), "tool", "a plugin skill");
@@ -341,6 +353,7 @@ describe("project-local roots", () => {
     const home = await mkdtemp(join(tmpdir(), "peek-skills-proj-home-"));
     const project = await mkdtemp(join(tmpdir(), "peek-skills-proj-"));
     await mkdir(join(home, ".claude", "skills"), { recursive: true });
+    await installedMarker(home, ".claude");
     await writeSkill(join(project, ".claude", "skills", "repo-skill"), "repo-skill", "lives in the repo");
 
     const inv = await buildInventory({

@@ -11,6 +11,15 @@ import { gitRootFor, projectRootsFromCwds, PROJECT_SCAN_LIMIT } from "../../src/
 import { scanRoot } from "../../src/skills/scan.js";
 import { buildInventory } from "../../src/skills/inventory.js";
 
+/**
+ * An agent directory holding nothing but `skills/` reads as installer-created, so a
+ * fixture that wants an *installed* agent must look like one.
+ */
+async function installedMarker(home: string, agent = ".claude"): Promise<void> {
+  await mkdir(join(home, agent), { recursive: true });
+  await writeFile(join(home, agent, "settings.json"), "{}", "utf8");
+}
+
 async function writeSkill(dir: string, name: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: fixture\n---\n\nbody\n`, "utf8");
@@ -130,6 +139,7 @@ describe("project installations in the inventory", () => {
   it("is reported, never mutable, and kept out of the machine-wide cost", async () => {
     const home = await mkdtemp(join(tmpdir(), "peek-project-home-"));
     await mkdir(join(home, ".claude", "skills"), { recursive: true });
+    await installedMarker(home, ".claude");
     await writeSkill(join(home, ".claude", "skills", "global-skill"), "global-skill");
     const project = await repo();
     await writeSkill(join(project, ".claude", "skills", "repo-skill"), "repo-skill");
@@ -175,6 +185,7 @@ describe("the shared tree is never a project", () => {
     // whose projectDir is `.agents/skills` — the same tree attributed eight times.
     const home = await mkdtemp(join(tmpdir(), "peek-shared-proj-"));
     await mkdir(join(home, ".claude", "skills"), { recursive: true });
+    await installedMarker(home, ".claude");
     await writeSkill(join(home, ".agents", "skills", "shared-one"), "shared-one");
 
     const inv = await buildInventory({
@@ -197,6 +208,7 @@ describe("the shared tree is never a project", () => {
 
   it("does not scan one path twice when a project root repeats an agent root", async () => {
     const home = await mkdtemp(join(tmpdir(), "peek-dupe-root-"));
+    await installedMarker(home, ".claude");
     await writeSkill(join(home, ".claude", "skills", "only-once"), "only-once");
     const inv = await buildInventory({
       home,
@@ -218,6 +230,7 @@ describe("only installed agents claim a project root", () => {
     // inventory a source tree as an install for an agent that is not here.
     const home = await mkdtemp(join(tmpdir(), "peek-uninstalled-"));
     await mkdir(join(home, ".claude", "skills"), { recursive: true });
+    await installedMarker(home, ".claude");
     const project = await repo();
     await writeSkill(join(project, "skills", "shipped-package"), "shipped-package");
     await writeSkill(join(project, ".claude", "skills", "real-project-skill"), "real-project-skill");

@@ -195,3 +195,43 @@ describe("expandSkill", () => {
     expect(rows.map((r) => r.action)).toEqual(["move", "refuse"]);
   });
 });
+
+describe("an agent peek cannot confirm does not withhold a verdict", () => {
+  const skill = (): Skill => ({
+    key: "k", name: "n", description: "d", modelInvocable: true, estimatedTokens: 10,
+    chargedTokens: 10, flags: [],
+    installations: [
+      { agent: "claude-code", rootPath: "/c", rootKind: "user", mutable: true, path: "/c/n", symlink: false, chargedTokens: 10 },
+      { agent: "roo", rootPath: "/r", rootKind: "user", mutable: true, path: "/r/n", symlink: true, chargedTokens: 0 },
+    ],
+  });
+
+  it("archives when the only unattributable installation is an unconfirmed agent", () => {
+    const report = buildSkillsReport(input({
+      skills: [skill()],
+      coverage: new Map([["claude-code", { agent: "claude-code", state: "attributed", attributes: ["tool_call"], blind: [] }]]),
+      unconfirmedAgents: new Set(["roo"]),
+    }));
+    const row = report.segments.find((s) => s.id === "archivable")!.rows[0]!;
+    expect(row).toBeDefined();
+    // The discount is disclosed, not silent: the user can tell why this row is here.
+    expect(row.reason).toMatch(/cannot confirm are installed/);
+  });
+
+  it("still withholds when a confirmed agent cannot be attributed", () => {
+    const report = buildSkillsReport(input({
+      skills: [skill()],
+      coverage: new Map([["claude-code", { agent: "claude-code", state: "attributed", attributes: ["tool_call"], blind: [] }]]),
+      unconfirmedAgents: new Set(),
+    }));
+    expect(report.segments.find((s) => s.id === "unknown-usage")!.rows).toHaveLength(1);
+  });
+
+  it("labels the unconfirmed installation at the confirm step", () => {
+    // Dry-run plus a line naming "unlink from roo" is the only thing standing between the
+    // relaxed verdict and a wrong deletion, if the agent is in fact installed.
+    const rows = expandSkill(input({ skills: [skill()], unconfirmedAgents: new Set(["roo"]) }), skill());
+    expect(rows.find((r) => r.agent === "roo")!.unconfirmedAgent).toBe(true);
+    expect(rows.find((r) => r.agent === "claude-code")!.unconfirmedAgent).toBeUndefined();
+  });
+});

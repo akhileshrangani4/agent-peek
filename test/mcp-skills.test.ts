@@ -15,6 +15,15 @@ import {
 } from "../src/mcp/skills.js";
 import type { SkillsReport } from "../src/skills/report.js";
 
+/**
+ * An agent directory holding nothing but `skills/` reads as installer-created, so a
+ * fixture that wants an *installed* agent must look like one.
+ */
+function installedMarker(home: string, agent = ".claude"): void {
+  mkdirSync(join(home, agent), { recursive: true });
+  writeFileSync(join(home, agent, "settings.json"), "{}", "utf8");
+}
+
 const homes: string[] = [];
 function fixtureHome(): string {
   const home = mkdtempSync(join(tmpdir(), "peek-mcp-"));
@@ -40,6 +49,8 @@ function skillHome(): string {
     symlinkSync(join(shared, "shared-skill"), join(root, "shared-skill"));
   }
   writeSkill(join(home, ".claude", "skills", "local-only"), "local-only");
+  installedMarker(home, ".claude");
+  installedMarker(home, ".codex");
   return home;
 }
 

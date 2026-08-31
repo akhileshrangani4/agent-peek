@@ -13,6 +13,15 @@ import {
 } from "../../src/agents/registry.js";
 import type { Agent, ResolvedAgent } from "../../src/agents/types.js";
 
+/**
+ * An agent directory holding nothing but `skills/` reads as installer-created, so a
+ * fixture that wants an *installed* agent must look like one.
+ */
+async function installedMarker(home: string, agent = ".claude"): Promise<void> {
+  await mkdir(join(home, agent), { recursive: true });
+  await writeFile(join(home, agent, "settings.json"), "{}", "utf8");
+}
+
 async function fixtureHome(): Promise<string> {
   return mkdtemp(join(tmpdir(), "peek-agents-"));
 }
@@ -255,6 +264,7 @@ describe("listAgents and presence", () => {
     const home = await fixtureHome();
     const stateDir = join(home, ".agent-peek");
     await mkdir(join(home, ".codex", "skills"), { recursive: true });
+    await installedMarker(home, ".codex");
     await addAgent({
       slug: "amp",
       displayName: "Amp",
@@ -273,6 +283,7 @@ describe("listAgents and presence", () => {
   it("hides an agent with no root on disk unless it has readable sessions", async () => {
     const home = await fixtureHome();
     await mkdir(join(home, ".codex", "skills"), { recursive: true });
+    await installedMarker(home, ".codex");
     const agents = await listAgents({ home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek") });
 
     expect(isPresent(bySlug(agents, "codex"))).toBe(true);
@@ -301,6 +312,7 @@ describe("presence and install detection", () => {
     const home = await fixtureHome();
     await mkdir(join(home, ".agents", "skills"), { recursive: true });
     await mkdir(join(home, ".config", "zed"), { recursive: true });
+    await writeFile(join(home, ".config", "zed", "settings.json"), "{}", "utf8");
     const agents = await listAgents({
       home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
     });
@@ -350,5 +362,42 @@ describe("observes is declared on the adapter", () => {
       const adapter = mod.default;
       expect(adapterObserves(adapter.name)).toEqual(adapter.observes ?? []);
     }
+  });
+});
+
+describe("presence requires evidence of the product, not of the installer", () => {
+  it("reports an agent directory holding only skills/ as unconfirmed", async () => {
+    // The skills installer creates ~/.roo, ~/.trae, ~/.qoder and friends itself, so their
+    // existence is evidence about the installer, not about the agent.
+    const home = await fixtureHome();
+    await mkdir(join(home, ".roo", "skills"), { recursive: true });
+    const agents = await listAgents({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    const roo = bySlug(agents, "roo");
+    expect(roo.roots.some((r) => r.present)).toBe(true);
+    expect(roo.installed).toBe(false);
+    expect(roo.presence).toBe("unconfirmed");
+    // And it stays out of the default listing, which is what collapses the caveat header.
+    expect(isPresent(roo)).toBe(false);
+  });
+
+  it("reports the same agent as present once it has content of its own", async () => {
+    const home = await fixtureHome();
+    await mkdir(join(home, ".roo", "skills"), { recursive: true });
+    await writeFile(join(home, ".roo", "config.json"), "{}", "utf8");
+    const agents = await listAgents({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    expect(bySlug(agents, "roo").presence).toBe("present");
+  });
+
+  it("never treats a shared tree alone as evidence", async () => {
+    const home = await fixtureHome();
+    await mkdir(join(home, ".agents", "skills"), { recursive: true });
+    const agents = await listAgents({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    expect(bySlug(agents, "cline").presence).not.toBe("present");
   });
 });

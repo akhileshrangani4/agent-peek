@@ -13,6 +13,15 @@ import {
 } from "../../src/skills/archive.js";
 import type { Inventory } from "../../src/skills/types.js";
 
+/**
+ * An agent directory holding nothing but `skills/` reads as installer-created, so a
+ * fixture that wants an *installed* agent must look like one.
+ */
+async function installedMarker(home: string, agent = ".claude"): Promise<void> {
+  await mkdir(join(home, agent), { recursive: true });
+  await writeFile(join(home, agent, "settings.json"), "{}", "utf8");
+}
+
 async function writeSkill(dir: string, name: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: a fixture skill\n---\n\nbody\n`, "utf8");
@@ -40,6 +49,9 @@ async function fixture(): Promise<{ home: string; stateDir: string; inventory: I
     await symlink(join(shared, "shared-skill"), join(root, "shared-skill"));
   }
   await writeSkill(join(home, ".claude", "skills", "local-only"), "local-only");
+  await installedMarker(home, ".claude");
+  await installedMarker(home, ".codex");
+  await installedMarker(join(home, ".config"), "goose");
   const stateDir = join(home, ".agent-peek");
   const inventory = await buildInventory({ home, xdgConfigHome: join(home, ".config"), stateDir });
   return { home, stateDir, inventory };

@@ -1,8 +1,8 @@
 // src/agents/registry.ts
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { adapterAttributes, adapterObserves, builtinAgents, type HomeEnv } from "./builtin.js";
 import type { Agent, ResolvedAgent, ResolvedSkillRoot, SkillRoot } from "./types.js";
 
@@ -99,14 +99,26 @@ export async function resolveAgent(agent: Agent): Promise<ResolvedAgent> {
     roots.push({ ...root, present: await isDir(root.path) });
   }
   const observes = adapterObserves(agent.adapter);
+  // Evidence the product is installed, not merely that a directory exists. `~/.roo`,
+  // `~/.trae`, `~/.qoder`, `~/.zencoder` and `~/.openhands` each hold exactly one entry —
+  // `skills/` — because the skills installer created them; a real install has its own
+  // content beside that (claude 62 entries, codex 64, cursor 24). Requiring content
+  // beyond a skills directory is what separates the two without guessing.
+  const ownRoots = roots.filter((r) => r.kind !== "shared");
+  const candidates = agent.detectPaths?.length
+    ? agent.detectPaths
+    : ownRoots.map((r) => dirname(r.path));
   let installed = false;
-  for (const path of agent.detectPaths ?? []) {
-    if (await isDir(path)) { installed = true; break; }
+  let anyCandidateDir = false;
+  for (const path of candidates) {
+    if (!(await isDir(path))) continue;
+    anyCandidateDir = true;
+    if (await hasContentBesidesSkills(path)) { installed = true; break; }
   }
   // A root that resolves is evidence the agent is here — unless that root is the shared
   // tree, which exists for anyone who has ever used the installer and says nothing about
   // whether this particular agent is installed. Those agents need their own directory.
-  const ownRootPresent = roots.some((r) => r.present && r.kind !== "shared");
+  const ownRootPresent = ownRoots.some((r) => r.present);
   const attributes = adapterAttributes(agent.adapter);
   return {
     ...agent,
@@ -117,7 +129,8 @@ export async function resolveAgent(agent: Agent): Promise<ResolvedAgent> {
     attributable: attributes.length > 0,
     manageable: roots.some((r) => r.present && r.mutable),
     installed,
-    presence: ownRootPresent || installed ? "present"
+    presence: installed ? "present"
+      : ownRootPresent || anyCandidateDir ? "unconfirmed"
       : roots.length === 0 ? "no-convention"
       : "absent",
   };
@@ -152,4 +165,17 @@ export async function removeAgent(slug: string, opts: AgentRegistryOptions = {})
   if (next.length === user.length) return false;
   await writeUserAgents(next, opts);
   return true;
+}
+
+/** Skill-root directory names the installer creates on its own. */
+const INSTALLER_MADE = new Set(["skills", "agent-skills"]);
+
+/** True when a directory holds anything a skills installer would not have put there. */
+async function hasContentBesidesSkills(dir: string): Promise<boolean> {
+  try {
+    const entries = await readdir(dir);
+    return entries.some((e) => !e.startsWith(".") && !INSTALLER_MADE.has(e));
+  } catch {
+    return false;
+  }
 }

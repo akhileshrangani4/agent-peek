@@ -40,10 +40,10 @@ export async function inventoryRoots(
 ): Promise<ScanRoot[]> {
   const roots: ScanRoot[] = [];
   for (const agent of agents) {
-    // An agent peek cannot show is installed contributes no installations: its "root" is
-    // usually the shared tree, and attributing that content to it would invent
-    // installations for agents the user does not have.
-    if (agent.presence !== "present") continue;
+    // Roots are scanned for unconfirmed agents too: 117 skills exist *only* in those
+    // roots, so skipping them would delete real directories from the inventory and shrink
+    // every headline number — a fix that looks like it worked because it hid the evidence.
+    if (agent.presence !== "present" && agent.presence !== "unconfirmed") continue;
     for (const root of agent.roots) {
       if (!root.present) continue;
       roots.push({
