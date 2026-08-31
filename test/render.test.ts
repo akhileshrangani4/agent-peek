@@ -110,3 +110,36 @@ describe("sparkline", () => {
     expect(sparklineBlank(4)).toBe("────");
   });
 });
+
+describe("usage series (ticket 15)", () => {
+  it("keys buckets by the dimension's own value", async () => {
+    // peek usage rows display the invoked name verbatim, so the series keys on that
+    // rather than on a resolved bare name as the skills report does. Keying either one
+    // the other way draws an empty sparkline for every plugin-qualified skill.
+    const { usageSeriesFor } = await import("../src/usage/report.js");
+    const { UsageStore } = await import("../src/usage/store.js");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const home = mkdtempSync(join(tmpdir(), "peek-series-"));
+    const store = new UsageStore({ home });
+    const day = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    store.recordSource([{
+      sourcePath: "/t/a.jsonl", msgIndex: 1, callIndex: 0, sourceKind: "tool_call",
+      adapter: "claude-code", agent: "claude-code", sessionId: "s",
+      timestamp: day, tool: "Skill", skill: "plugin:name", cwd: null, status: null,
+      sidechain: false, attributionAgent: null, nativeCallId: null,
+    }], {
+      sourcePath: "/t/a.jsonl", adapter: "claude-code", sessionId: "s", cursor: null,
+      msgIndex: 1, size: 1, mtimeMs: 1, scannedAt: day, deleted: false,
+    });
+
+    const { series, cells } = usageSeriesFor(store, { skillsOnly: true }, "skill");
+    expect(series.has("plugin:name")).toBe(true);
+    expect(series.get("plugin:name")).toHaveLength(cells);
+    expect(series.get("plugin:name")!.reduce((a, b) => a + b, 0)).toBe(1);
+    store.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+});

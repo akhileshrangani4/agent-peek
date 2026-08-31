@@ -32,7 +32,7 @@ import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
 import { renderUsageReport } from "./usage-report.js";
 import { renderAgents } from "./agents-report.js";
 import type { Inventory } from "../skills/types.js";
-import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
+import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS, usageSeriesFor } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/index.js";
 import type { PostType } from "../feed/schema.js";
@@ -1175,7 +1175,7 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
     const keepRow = skillsOnly && !opts.includeBuiltins
       ? await cliBuiltinRowFilter(groupBy)
       : undefined;
-    const report = await buildUsageReport(store, {
+    const filter = {
       ...(skillsOnly ? { skillsOnly: true } : {}),
       ...(explicitTool ? { tool: explicitTool } : {}),
       ...(opts.skill ? { skill: String(opts.skill) } : {}),
@@ -1187,6 +1187,9 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
       ...(opts.sidechain ? { sidechain: true } : {}),
       ...(opts.mainLoop ? { sidechain: false } : {}),
       ...(opts.attributionAgent ? { attributionAgent: String(opts.attributionAgent) } : {}),
+    };
+    const report = await buildUsageReport(store, {
+      ...filter,
       groupBy,
       limit: parseLimit(opts.limit),
     }, keepRow ? { keepRow } : {});
@@ -1195,7 +1198,19 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
       console.log(JSON.stringify(report, null, 2));
       return;
     }
+    // Series for the sparkline column, computed against the same filters as the rows so
+    // the shape describes exactly what is listed.
+    let shape: { series: Map<string, number[]>; days: number; cells: number } | undefined;
+    if (groupBy.length === 1 && groupBy[0] !== "day") {
+      const seriesStore = new UsageStore({});
+      try {
+        shape = usageSeriesFor(seriesStore, filter, groupBy[0]!);
+      } finally {
+        seriesStore.close();
+      }
+    }
     await renderUsageReport(report, groupBy, {
+      ...(shape ? { series: shape.series, seriesDays: shape.days, seriesCells: shape.cells } : {}),
       ...(opts.width ? { width: Number(opts.width) } : {}),
       ...(opts.color ? { color: true } : {}),
       verbose: Boolean(opts.verbose),

@@ -5,7 +5,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { Row, Rows, Rule, num, renderStatic, terminalWidth } from "./render.js";
+import { Row, Rows, Rule, num, renderStatic, sparkline, sparklineBlank, terminalWidth } from "./render.js";
 import type { Role } from "./render.js";
 import type { UsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/query.js";
@@ -16,6 +16,10 @@ export interface UsageViewOptions {
   width?: number;
   color?: boolean;
   verbose?: boolean;
+  /** Per-bucket counts keyed by the first grouping dimension's value. */
+  series?: Map<string, number[]>;
+  seriesDays?: number;
+  seriesCells?: number;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many);
@@ -109,10 +113,18 @@ function Coverage({ report, width, verbose }: {
     h(Rows, null, ...lines));
 }
 
-function View({ report, groupBy, width, limit, verbose }: {
+function View({ report, groupBy, width, limit, verbose, series, seriesDays, seriesCells }: {
   report: UsageReport; groupBy: GroupBy[]; width: number; limit: number; verbose: boolean;
+  series: Map<string, number[]>; seriesDays: number; seriesCells: number;
 }): React.JSX.Element {
-  const dimW = Math.min(34, Math.max(16, width - 44));
+  // A sparkline only means something when a row is an entity observed over time. When
+  // the grouping IS time, every row is one bucket and a per-row shape would be a single
+  // bar — so `--by day` gets one wide sparkline of the whole corpus instead, which is
+  // the one view where the shape over time is itself the answer.
+  const byDay = groupBy.length === 1 && groupBy[0] === "day";
+  const showSpark = series.size > 0 && groupBy.length === 1 && !byDay && width >= 84;
+  const cells = showSpark ? seriesCells : 0;
+  const dimW = Math.min(34, Math.max(16, width - 44 - cells));
   // The heading counts the whole corpus, never the visible slice: a header describing a
   // limited row list as if it were everything is how a report overstates what it knows.
   const headRight = `${num(report.sources.total)} ${plural(report.sources.total, "source")}`;
@@ -132,6 +144,12 @@ function View({ report, groupBy, width, limit, verbose }: {
       h(Text, { bold: true }, num(report.totalInvocations)),
       h(Text, { dimColor: true }, ` ${plural(report.totalInvocations, "invocation")} indexed over ${num(report.window.days)} ${plural(report.window.days, "day")}`)),
 
+    byDay && report.rows.length > 1
+      ? h(Box, { flexDirection: "column" },
+        h(Rule, { title: "shape over time", role: "live", width }),
+        h(DayShape, { report }))
+      : null,
+
     report.rows.length === 0
       ? h(Box, { marginTop: 1 }, h(Text, { dimColor: true }, "     no invocations match those filters"))
       : h(Box, { flexDirection: "column" },
@@ -148,6 +166,15 @@ function View({ report, groupBy, width, limit, verbose }: {
               text: dimensionText(r, d),
               width: j === 0 ? dimW : 14,
             })),
+            ...(showSpark
+              ? [{
+                text: series.has(dimensionText(r, groupBy[0]!))
+                  ? sparkline(series.get(dimensionText(r, groupBy[0]!))!)
+                  : sparklineBlank(cells),
+                role: (series.has(dimensionText(r, groupBy[0]!)) ? "live" : "muted") as Role,
+                width: cells,
+              }]
+              : []),
             { text: num(r.count), role: "muted" as Role, width: 7, align: "right" as const },
             { text: relative(r.lastSeen), role: "muted" as Role, width: 9, align: "right" as const },
           ],
@@ -159,9 +186,26 @@ function View({ report, groupBy, width, limit, verbose }: {
             "     more rows · --limit to widen"))
           : null),
 
+    showSpark
+      ? h(Box, { marginTop: 1 }, h(Text, { dimColor: true }, `     last ${seriesDays} days`))
+      : null,
+
     h(Windows, { report, width }),
     h(Coverage, { report, width, verbose }),
   );
+}
+
+/**
+ * The corpus as one shape. Rows arrive ordered by count, so both the sparkline and its
+ * date range must come from a date-sorted copy — reading the ends of the count-ordered
+ * array reported a range that was neither the earliest nor the latest day.
+ */
+function DayShape({ report }: { report: UsageReport }): React.JSX.Element {
+  const byDate = report.rows.slice().sort((a, b) => (a.day ?? "").localeCompare(b.day ?? ""));
+  return h(Box, { marginTop: 1 },
+    h(Text, null, "     "),
+    h(Text, { color: "cyan" }, sparkline(byDate.map((r) => r.count))),
+    h(Text, { dimColor: true }, `  ${byDate[0]?.day ?? ""} → ${byDate.at(-1)?.day ?? ""}`));
 }
 
 function relative(iso: string): string {
@@ -187,6 +231,9 @@ export async function renderUsageReport(
       report, groupBy, width,
       limit: report.rows.length,
       verbose: Boolean(opts.verbose),
+      series: opts.series ?? new Map(),
+      seriesDays: opts.seriesDays ?? 30,
+      seriesCells: opts.seriesCells ?? 15,
     }),
     { forceColor: opts.color, width },
   );

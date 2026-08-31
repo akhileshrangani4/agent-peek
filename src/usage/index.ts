@@ -12,5 +12,5 @@ export {
   coverageFor, zeroMeansUnused, renderCount, eligibleForBulkUnused, explainCoverage,
 } from "./coverage.js";
 export type { CoverageState, InstallationCoverage } from "./coverage.js";
-export { buildUsageReport } from "./report.js";
+export { buildUsageReport, usageSeriesFor } from "./report.js";
 export type { UsageReport, BlindSpot, PartiallyObserved, AdapterWindow, UsageWindow } from "./report.js";
