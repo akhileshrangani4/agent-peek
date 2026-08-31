@@ -55,9 +55,27 @@ export interface Invocation {
   /** Tool call status, where known. */
   status: string | null;
 
-  /** True when this happened inside a spawned subagent rather than the main loop. */
+  /**
+   * True when this happened inside a spawned subagent rather than the main loop.
+   *
+   * NOTE: correct but **unpopulated today** — false on every row, along with
+   * `attributionAgent` below. Not dead schema, and not an extraction bug: the
+   * claude-code adapter's `scan()` only takes `.jsonl` files that are direct children
+   * of a project directory, and subagent transcripts are nested at
+   * `<project>/<session-uuid>/subagents/agent-*.jsonl`. 218 of 674 transcripts on the
+   * machine this was built against are invisible to peek for that reason, and every
+   * sidechain invocation lives in that 32%. Recursive discovery is ticket 12; it
+   * surfaces ~218 new sessions in `peek list` for every user, so it needs a decision
+   * rather than a drive-by.
+   *
+   * Do not remove these columns while they read null. Once a transcript expires the
+   * value is unrecoverable, so the column has to exist before the data arrives.
+   */
   sidechain: boolean;
-  /** Subagent type, read straight off the record. No join, no pointer. */
+  /**
+   * Subagent type, read straight off the record. No join, no pointer.
+   * Unpopulated for the same reason as `sidechain` above — see ticket 12.
+   */
   attributionAgent: string | null;
   /** The adapter's own tool-call id, where it emits one. */
   nativeCallId: string | null;

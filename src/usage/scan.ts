@@ -164,3 +164,36 @@ function safeMsgIndex(cursor: string, fallback: number): number {
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * Scan every adapter into one store, merging the per-adapter results.
+ *
+ * The seam ticket 03 needs: without it a caller has to reach through
+ * `createEngine().deps.loader` to obtain adapters one at a time. `bootstrap` is true
+ * when the index had never been scanned, which is what `peek usage` should use to
+ * decide whether to print the first-run message — the full parse of the corpus happens
+ * once, and every scan after it is incremental.
+ */
+export async function scanAll(
+  adapters: Adapter[],
+  store: UsageStore,
+  opts: ScanOptions = {},
+): Promise<ScanResult> {
+  const merged: ScanResult = {
+    bootstrap: store.isEmpty(),
+    sourcesScanned: 0,
+    sourcesSkipped: 0,
+    sourcesTombstoned: 0,
+    invocations: 0,
+    errors: [],
+  };
+  for (const adapter of adapters) {
+    const result = await scanAdapter(adapter, store, opts);
+    merged.sourcesScanned += result.sourcesScanned;
+    merged.sourcesSkipped += result.sourcesSkipped;
+    merged.sourcesTombstoned += result.sourcesTombstoned;
+    merged.invocations += result.invocations;
+    merged.errors.push(...result.errors);
+  }
+  return merged;
+}

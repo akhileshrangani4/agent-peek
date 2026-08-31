@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { UsageStore } from "../src/usage/store.js";
-import { scanAdapter } from "../src/usage/scan.js";
+import { scanAdapter, scanAll } from "../src/usage/scan.js";
 import claudeCode from "../src/adapters/claude-code/index.js";
 import type { Adapter } from "../src/adapters/types.js";
 import type { SessionEntry } from "../src/core/types.js";
@@ -262,6 +262,38 @@ describe("scanAdapter", () => {
     const store = new UsageStore({ home });
     await scanAdapter(fileAdapter(path), store);
     expect(store.allInvocations()[0]?.agent).toBeNull();
+    store.close();
+  });
+
+  it("scanAll merges results across adapters into one store", async () => {
+    const home = tmp("peek-scan-home-");
+    const dir = tmp("peek-scan-src-");
+    const a = join(dir, "a.jsonl");
+    const b = join(dir, "b.jsonl");
+    write(a, [record()]);
+    write(b, [record(), userCommand("review")]);
+
+    const store = new UsageStore({ home });
+    const result = await scanAll([fileAdapter(a), fileAdapter(b, "codex")], store);
+
+    expect(result.bootstrap).toBe(true);
+    expect(result.sourcesScanned).toBe(2);
+    // codex falls back to the default extractor: tool calls only, no slash command.
+    expect(result.invocations).toBe(2);
+    expect(store.observedAdapters()).toEqual(["claude-code", "codex"]);
+    store.close();
+  });
+
+  it("scanAll collects errors from every adapter rather than stopping at the first", async () => {
+    const home = tmp("peek-scan-home-");
+    const store = new UsageStore({ home });
+    const broken = (name: string): Adapter => ({
+      name,
+      scan: async () => { throw new Error(`${name} failed`); },
+      read: async () => { throw new Error("unused"); },
+    });
+    const result = await scanAll([broken("one"), broken("two")], store);
+    expect(result.errors.map((e) => e.message)).toEqual(["one failed", "two failed"]);
     store.close();
   });
 });

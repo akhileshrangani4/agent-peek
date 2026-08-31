@@ -12,7 +12,12 @@
 import type { UsageStore } from "./store.js";
 import type { SourceKind } from "./schema.js";
 
-export type GroupBy = "tool" | "skill" | "agent" | "adapter" | "day" | "cwd" | "source_kind";
+/**
+ * Dimension names are camelCase, matching the filter keys and the fields on UsageRow.
+ * `source_kind` is accepted as an alias for `sourceKind` so a caller writing the column
+ * name gets the dimension rather than a throw.
+ */
+export type GroupBy = "tool" | "skill" | "agent" | "adapter" | "day" | "cwd" | "sourceKind" | "source_kind";
 
 export interface UsageFilter {
   tool?: string;
@@ -55,8 +60,14 @@ const COLUMNS: Record<Exclude<GroupBy, "day">, string> = {
   agent: "agent",
   adapter: "adapter",
   cwd: "cwd",
+  sourceKind: "source_kind",
   source_kind: "source_kind",
 };
+
+/** Alias resolution, so both spellings name the same dimension and the same output key. */
+function canonicalGroup(g: GroupBy): Exclude<GroupBy, "source_kind"> {
+  return g === "source_kind" ? "sourceKind" : g;
+}
 
 const OFFSET_RE = /^[+-]\d{2}:\d{2}$/;
 
@@ -106,7 +117,7 @@ export function queryUsage(store: UsageStore, query: UsageQuery = {}): UsageRow[
   for (const g of groupBy) {
     const expr = g === "day" ? dayExpr(query.tzOffset) : COLUMNS[g];
     if (!expr) throw new Error(`invalid groupBy: ${g}`);
-    selects.push(`${expr} AS ${g === "source_kind" ? "source_kind" : g}`);
+    selects.push(`${expr} AS ${canonicalGroup(g) === "sourceKind" ? "source_kind" : g}`);
     groups.push(expr);
   }
   const where = whereClause(query);
@@ -129,11 +140,12 @@ export function queryUsage(store: UsageStore, query: UsageQuery = {}): UsageRow[
       lastSeen: row.last_seen as string,
     };
     for (const g of groupBy) {
-      const value = (row[g] ?? null) as string | null;
-      if (g === "source_kind") out.sourceKind = (value ?? undefined) as SourceKind | undefined;
-      else if (g === "day") out.day = value ?? undefined;
-      else if (g === "tool") out.tool = value ?? undefined;
-      else (out as unknown as Record<string, unknown>)[g] = value;
+      const key = canonicalGroup(g);
+      const value = (row[key === "sourceKind" ? "source_kind" : key] ?? null) as string | null;
+      if (key === "sourceKind") out.sourceKind = (value ?? undefined) as SourceKind | undefined;
+      else if (key === "day") out.day = value ?? undefined;
+      else if (key === "tool") out.tool = value ?? undefined;
+      else (out as unknown as Record<string, unknown>)[key] = value;
     }
     return out;
   });

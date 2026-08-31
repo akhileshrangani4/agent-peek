@@ -160,6 +160,20 @@ describe("queryUsage", () => {
     store.close();
   });
 
+  it("accepts both spellings of the sourceKind dimension", () => {
+    // Filter keys and UsageRow fields are camelCase; the column is snake_case. Both
+    // name the same dimension so a caller writing either does not get a throw.
+    const store = seeded([
+      inv({ sourceKind: "tool_call" }),
+      inv({ sourceKind: "slash_command", tool: "review" }),
+    ]);
+    const camel = queryUsage(store, { groupBy: ["sourceKind"] });
+    const snake = queryUsage(store, { groupBy: ["source_kind"] });
+    expect(camel).toEqual(snake);
+    expect(camel.map((r) => r.sourceKind).sort()).toEqual(["slash_command", "tool_call"]);
+    store.close();
+  });
+
   it("rejects an unknown grouping", () => {
     const store = seeded([inv()]);
     expect(() => queryUsage(store, { groupBy: ["nope" as never] })).toThrow(/invalid groupBy/);
