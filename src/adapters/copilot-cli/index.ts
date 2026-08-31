@@ -13,6 +13,8 @@ const ADAPTER_NAME = "copilot-cli";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  observes: [],
+
   async scan(): Promise<SessionEntry[]> {
     const root = copilotStateRoot();
     if (!existsSync(root)) return [];

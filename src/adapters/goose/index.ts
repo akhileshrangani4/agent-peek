@@ -15,6 +15,10 @@ const ADAPTER_NAME = "goose";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  // This adapter builds messages from role, text and timestamp only: no toolCalls,
+  // so no skill invocation is attributable here.
+  observes: [],
+
   async scan(): Promise<SessionEntry[]> {
     const out: SessionEntry[] = [];
     const db = gooseDbPath();

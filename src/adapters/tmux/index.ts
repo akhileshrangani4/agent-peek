@@ -13,6 +13,9 @@ const ADAPTER_NAME = "tmux";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  // A multiplexer hosting someone else's session: scrollback text, no structure.
+  observes: [],
+
   async scan(): Promise<SessionEntry[]> {
     let output: string;
     try {

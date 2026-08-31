@@ -16,7 +16,9 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot } from "../agents/index.js";
+import {
+  addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
+} from "../agents/index.js";
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import {
   buildInventory, planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
@@ -727,9 +729,14 @@ async function adaptersWithSessions(): Promise<Set<string>> {
 async function printAgentsCommand(opts: { all: boolean; json: boolean }): Promise<void> {
   const agents = await listAgents();
   const seen = await adaptersWithSessions();
-  const shown = opts.all ? agents : agents.filter((a) => isPresent(a, seen));
-  if (opts.json) { console.log(JSON.stringify(shown, null, 2)); return; }
+  const present = agents.filter((a) => isPresent(a, seen));
+  const shown = opts.all ? agents : present;
+  if (opts.json) {
+    console.log(JSON.stringify({ source: AGENT_TABLE_SOURCE, agents: shown }, null, 2));
+    return;
+  }
   printAgents(shown);
+  printAgentsSummary(agents, present);
 }
 
 function printAgents(agents: ResolvedAgent[]): void {
@@ -741,13 +748,15 @@ function printAgents(agents: ResolvedAgent[]): void {
     const present = agent.roots.filter((r) => r.present);
     return [
       agent.slug,
+      agent.presence,
+      agent.tier ?? "user",
       agent.adapter ?? "-",
       agent.observable ? agent.observes.join(",") : "none",
       agent.manageable ? "yes" : "no",
-      present.length === 0 ? "-" : present.map((r) => formatPath(r.path)).join(" "),
+      (present.length ? present : agent.roots).map((r) => formatPath(r.path)).join(" ") || "-",
     ];
   });
-  const headers = ["AGENT", "ADAPTER", "OBSERVES", "MANAGEABLE", "SKILL ROOTS"];
+  const headers = ["AGENT", "PRESENCE", "SOURCE", "ADAPTER", "OBSERVES", "MANAGEABLE", "SKILL ROOTS"];
   const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
   console.log(fmt(headers));
@@ -836,6 +845,16 @@ function printArchivePlan(plan: ArchivePlan): void {
   for (const warning of plan.warnings) console.log(`  warning: ${warning}`);
   console.log("");
   console.log("nothing has changed. Re-run with --yes to execute.");
+}
+
+function printAgentsSummary(all: ResolvedAgent[], present: ResolvedAgent[]): void {
+  const verified = all.filter((a) => a.tier === "verified").length;
+  console.log("");
+  console.log(
+    `${present.length} on this machine, ${all.length} known to peek `
+    + `(${verified} verified by peek, ${all.length - verified} sourced from `
+    + `${AGENT_TABLE_SOURCE.package}@${AGENT_TABLE_SOURCE.version}). Use --all to list them.`,
+  );
 }
 
 async function printManifestDivergence(): Promise<void> {

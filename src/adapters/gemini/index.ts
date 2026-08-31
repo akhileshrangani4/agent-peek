@@ -15,6 +15,8 @@ const ADAPTER_NAME = "gemini";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  observes: ["tool_call"],
+
   async scan(): Promise<SessionEntry[]> {
     // Gemini CLI stores sessions at ~/.gemini/tmp/<project>/chats/session-*.json.
     const root = join(process.env.HOME ?? homedir(), ".gemini", "tmp");

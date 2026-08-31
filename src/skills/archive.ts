@@ -129,7 +129,9 @@ export function planArchive(
       skipped.push({
         path: install.path,
         agent: install.agent,
-        reason: `${install.rootKind} root is read-only`,
+        reason: install.rootKind === "shared"
+          ? "shared library root: its content backs every other agent's links"
+          : `${install.rootKind} root is read-only`,
       });
       continue;
     }

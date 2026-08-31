@@ -14,6 +14,8 @@ const ADAPTER_NAME = "codex";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  observes: ["tool_call"],
+
   async scan(): Promise<SessionEntry[]> {
     // Codex CLI rollouts: ~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl
     const root = join(process.env.HOME ?? homedir(), ".codex", "sessions");

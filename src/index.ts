@@ -22,10 +22,12 @@ export {
 
 export {
   addAgent, adapterObserves, builtinAgents, isPresent, listAgents, mergeAgents,
-  readUserAgents, removeAgent, resolveAgent, sharedLibraryRoot,
+  readUserAgents, removeAgent, resolveAgent, sharedLibraryRoot, sharedLibraryRoots,
+  AGENT_TABLE_SOURCE,
 } from "./agents/index.js";
 export type {
-  Agent, InvocationKind, ResolvedAgent, ResolvedSkillRoot, SkillRoot, SkillRootKind,
+  Agent, AgentTier, GeneratedAgent, InvocationKind, ResolvedAgent, ResolvedSkillRoot,
+  SkillRoot, SkillRootKind,
 } from "./agents/index.js";
 
 export {

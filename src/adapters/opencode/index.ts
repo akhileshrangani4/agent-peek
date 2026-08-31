@@ -13,6 +13,8 @@ const ADAPTER_NAME = "opencode";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  observes: ["tool_call"],
+
   async scan(): Promise<SessionEntry[]> {
     const sessionRoot = join(opencodeStorageRoot(), "session");
     if (!existsSync(sessionRoot)) return [];

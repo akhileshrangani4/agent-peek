@@ -1,7 +1,7 @@
 // src/skills/inventory.ts
 import { stat } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { listAgents, sharedLibraryRoot, type AgentRegistryOptions } from "../agents/index.js";
+import { listAgents, sharedLibraryRoots, type AgentRegistryOptions } from "../agents/index.js";
 import type { ResolvedAgent } from "../agents/types.js";
 import { estimateListingTokens, parseFrontmatter } from "./parse.js";
 import { AGENT_ROOT_DEPTH, PLUGIN_ROOT_DEPTH, scanRoot, type FoundSkill, type ScanRoot } from "./scan.js";
@@ -38,6 +38,10 @@ export async function inventoryRoots(
 ): Promise<ScanRoot[]> {
   const roots: ScanRoot[] = [];
   for (const agent of agents) {
+    // An agent peek cannot show is installed contributes no installations: its "root" is
+    // usually the shared tree, and attributing that content to it would invent
+    // installations for agents the user does not have.
+    if (agent.presence !== "present") continue;
     for (const root of agent.roots) {
       if (!root.present) continue;
       roots.push({
@@ -50,9 +54,10 @@ export async function inventoryRoots(
     }
   }
   if (opts.includeShared !== false) {
-    const shared = sharedLibraryRoot(opts);
-    if (await isDir(shared)) {
-      roots.push({ path: shared, kind: "user", mutable: true, maxDepth: AGENT_ROOT_DEPTH });
+    for (const shared of sharedLibraryRoots(opts)) {
+      if (await isDir(shared) && !roots.some((r) => r.path === shared)) {
+        roots.push({ path: shared, kind: "shared", mutable: false, maxDepth: AGENT_ROOT_DEPTH });
+      }
     }
   }
   for (const project of opts.projects ?? []) {
