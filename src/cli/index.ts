@@ -27,6 +27,7 @@ import {
   manifestDivergence, ArchiveRefusedError,
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
+import type { Inventory } from "../skills/types.js";
 import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/index.js";
@@ -521,6 +522,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--by <dims>", "Comma-separated grouping dimensions (default: skill)")
     .option("--limit <n>", "Maximum rows (default: 20)")
     .option("--no-scan", "Report from the index without scanning for new transcripts first")
+    .option("--verbose", "List every agent whose usage cannot be attributed, instead of a count")
     .option("--json", "Output the full report envelope as JSON")
     .action(async (dimension, opts) => {
       await runUsage(dimension, opts);
@@ -570,7 +572,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       }
       const { projects, discovery } = await resolveProjectSurvey(opts.projects);
       const inventory = await buildInventory({ projects, projectDiscovery: discovery });
-      console.log(JSON.stringify(inventory, null, 2));
+      console.log(JSON.stringify(await skillsJson(inventory), null, 2));
     });
 
   cli.command("adapters", "Print installed adapter names, one per line.")
@@ -1204,7 +1206,7 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
       console.log(JSON.stringify(report, null, 2));
       return;
     }
-    printUsage(report, groupBy, skillsOnly ? undefined : explicitTool, skillsOnly);
+    printUsage(report, groupBy, skillsOnly ? undefined : explicitTool, skillsOnly, Boolean(opts.verbose));
   } finally {
     store.close();
   }
@@ -1275,6 +1277,7 @@ function parseLimit(value: unknown): number {
 
 function printUsage(
   report: UsageReport, groupBy: GroupBy[], tool: string | undefined, skillsOnly: boolean,
+  verbose = false,
 ): void {
   if (report.empty) {
     console.log("No invocations indexed yet.");
@@ -1284,7 +1287,7 @@ function printUsage(
 
   console.log(usageHeader(report, tool, skillsOnly));
   for (const line of adapterWindows(report)) console.log(line);
-  for (const line of coverageWarnings(report)) console.log(line);
+  for (const line of coverageWarnings(report, verbose)) console.log(line);
   console.log("");
 
   if (report.rows.length === 0) {
@@ -1335,15 +1338,25 @@ function adapterWindows(report: UsageReport): string[] {
     `  ${w.adapter}: ${w.days}d (${w.earliest.slice(0, 10)} to ${w.latest.slice(0, 10)}), ${w.invocations} invocations`);
 }
 
-function coverageWarnings(report: UsageReport): string[] {
+function coverageWarnings(report: UsageReport, verbose: boolean): string[] {
   const out: string[] = [];
-  for (const spot of report.blindSpots) {
-    // "cannot see usage" is a different fact from "never used", and conflating them is
-    // how a tool recommends deleting a skill it was never able to observe.
-    const why = spot.reason === "no-adapter"
-      ? "no transcript adapter"
-      : `${spot.adapter} adapter extracts no invocations`;
-    out.push(`  usage unknown for ${spot.displayName}: ${why}`);
+  // Thirty-one lines of "usage unknown for X" above every report buries the report.
+  // The count cannot honestly be shrunk — those agents are present and genuinely
+  // unobservable — so it is summarised rather than filtered, and stays reachable: a
+  // user who cannot see usage for eleven agents needs to be able to find out which.
+  if (report.blindSpots.length > 0) {
+    if (verbose || report.blindSpots.length <= 3) {
+      for (const spot of report.blindSpots) {
+        const why = spot.reason === "no-adapter"
+          ? "no transcript adapter"
+          : `${spot.adapter} adapter extracts no invocations`;
+        out.push(`  usage unknown for ${spot.displayName}: ${why}`);
+      }
+    } else {
+      const names = report.blindSpots.map((s) => s.displayName);
+      const head = names.slice(0, 3).join(", ");
+      out.push(`  usage unknown for ${names.length} agents (${head}, ...) — --verbose or --json to list them`);
+    }
   }
   for (const p of report.partiallyObserved) {
     out.push(`  ${p.agent}: ${p.missing.join(", ")} invocations not observable`);
@@ -1363,6 +1376,43 @@ function formatDimension(row: UsageRow, dim: GroupBy): string {
       return value === null || value === undefined ? "(none)" : String(value);
     }
   }
+}
+
+/**
+ * The `--json` envelope. Additive over the inventory: every existing key is preserved,
+ * and each skill gains the `segment` it falls in plus the `reason` it is there.
+ *
+ * Without this a consumer cannot reproduce the segmentation that makes the tool safe to
+ * act on — the human report says a skill is safe to archive and the JSON does not say
+ * which bucket anything is in, so a script, an MCP caller, or anyone verifying has to
+ * re-derive the rules or guess. Verifying "no archivable row lacks a mutable
+ * installation" from the outside was impossible before this; it is now a filter.
+ */
+async function skillsJson(inventory: Inventory): Promise<Record<string, unknown>> {
+  const agents = await listAgents();
+  const store = new UsageStore({});
+  let joined;
+  try { joined = joinUsage(store, inventory, agents); } finally { store.close(); }
+  const report = buildSkillsReport({ ...joined, skills: inventory.skills, costBasis: inventory.costBasis });
+
+  const placement = new Map<string, { segment: string; reason: string }>();
+  for (const segment of report.segments) {
+    for (const row of segment.rows) placement.set(row.key, { segment: segment.id, reason: row.reason });
+  }
+
+  return {
+    ...inventory,
+    skills: inventory.skills.map((skill) => ({
+      ...skill,
+      ...(placement.get(skill.key) ?? { segment: "unknown-usage", reason: "unclassified" }),
+    })),
+    // The same summary the human sees, so a consumer never re-derives it.
+    segments: report.segments.map((segment) => ({
+      id: segment.id, title: segment.title, note: segment.note,
+      count: segment.rows.length, tokens: segment.tokens,
+    })),
+    unmatched: report.unmatched,
+  };
 }
 
 /**
@@ -1410,8 +1460,18 @@ async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
     console.log(`  ${segment.note}`);
     console.log("");
     const limit = rowLimit ?? (segment.id === "archivable" ? 20 : 8);
+    // One name can be several distinct skills: ticket 04 keeps divergent copies apart
+    // on purpose, and the installer copies rather than links, so `cloudflare-email-service`
+    // exists as 27 real directories and 15 of them land in this one segment. Counted
+    // across the whole segment rather than the visible slice — the name is ambiguous
+    // whether or not its twin fits on screen, and a user who cannot see the collision is
+    // exactly the one who would resolve it by guessing.
+    const nameCounts = new Map<string, number>();
+    for (const row of segment.rows) nameCounts.set(row.name, (nameCounts.get(row.name) ?? 0) + 1);
     const rows = segment.rows.slice(0, limit).map((row) => [
-      row.name.slice(0, 36),
+      (nameCounts.get(row.name) ?? 0) > 1
+        ? `${row.name} (${row.rootHint})`.slice(0, 54)
+        : row.name.slice(0, 36),
       row.agents.join(",").slice(0, 28) || "-",
       row.usesLabel,
       String(row.tokens),

@@ -33,6 +33,15 @@ export interface SkillRow {
   /** What the count column shows: a number, "unknown", or "ambiguous". */
   usesLabel: string;
   lastSeen?: string;
+  /**
+   * The root this copy lives in, shortened. Ticket 04 keeps divergent copies of one
+   * name separate on purpose — the installer copies rather than links, so 619 distinct
+   * names span 1,071 skills and `cloudflare-email-service` exists as 27 real
+   * directories. The model is right and the table was not: three rows that look
+   * identical but mean different things get resolved by guessing, so a renderer uses
+   * this to tell same-name rows apart.
+   */
+  rootHint: string;
   /** Why this row sits in its segment. Shown for every non-archivable segment. */
   reason: string;
 }
@@ -220,6 +229,7 @@ function rowFor(input: ReportInput, skill: Skill, reason: string): SkillRow {
   return {
     key: skill.key,
     name: skill.name,
+    rootHint: shortRoot(installs[0]?.rootPath ?? skill.installations[0]?.rootPath ?? ""),
     tokens: skill.chargedTokens,
     agents: installs.map((i) => i.agent!),
     uses: input.ambiguousKeys.has(skill.key) || (uses === 0 && !fullyAttributed) ? null : uses,
@@ -227,6 +237,13 @@ function rowFor(input: ReportInput, skill: Skill, reason: string): SkillRow {
     ...(input.lastSeen?.get(skill.key) ? { lastSeen: input.lastSeen.get(skill.key)! } : {}),
     reason,
   };
+}
+
+/** `/Users/x/.config/agents/skills` -> `~/.config/agents/skills`, for a table cell. */
+function shortRoot(rootPath: string): string {
+  if (!rootPath) return "";
+  const home = process.env.HOME;
+  return home && rootPath.startsWith(home) ? `~${rootPath.slice(home.length)}` : rootPath;
 }
 
 const TITLES: Record<SegmentId, { title: string; note: string }> = {
