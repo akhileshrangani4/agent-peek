@@ -1626,8 +1626,10 @@ function printDoctor(rows: DoctorRow[], agents?: ResolvedAgent[]): void {
     const manageable = agents.filter((a) => a.manageable).length;
     console.log("");
     console.log(`agents on this machine: ${agents.length}  observable: ${observable}  manageable: ${manageable}`);
-    const blind = agents.filter((a) => !a.observable).map((a) => a.slug);
-    if (blind.length) console.log(`  usage not observable (no adapter): ${blind.join(", ")}`);
+    const noAdapter = agents.filter((a) => !a.adapter).map((a) => a.slug);
+    if (noAdapter.length) console.log(`  usage not observable (no adapter): ${noAdapter.join(", ")}`);
+    const noKinds = agents.filter((a) => a.adapter && !a.observable).map((a) => a.slug);
+    if (noKinds.length) console.log(`  usage not observable (adapter parses no tool calls): ${noKinds.join(", ")}`);
     const partial = agents.filter((a) => a.observable && !a.observes.includes("slash_command")).map((a) => a.slug);
     if (partial.length) console.log(`  slash-command usage not observable: ${partial.join(", ")}`);
   }

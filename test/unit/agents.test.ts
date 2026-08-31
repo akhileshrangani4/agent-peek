@@ -67,6 +67,11 @@ describe("adapter observability", () => {
     expect(adapterObserves("codex")).toEqual(["tool_call"]);
   });
 
+  it("reports no kinds for an adapter whose parser surfaces no tool calls", () => {
+    // goose reads role/text/timestamp only; nothing to attribute a skill invocation to.
+    expect(adapterObserves("goose")).toEqual([]);
+  });
+
   it("returns no kinds for a missing or unknown adapter", () => {
     expect(adapterObserves(undefined)).toEqual([]);
     expect(adapterObserves("tmux")).toEqual([]);
@@ -221,6 +226,9 @@ describe("listAgents and presence", () => {
     }, { stateDir });
 
     const agents = await listAgents({ home, xdgConfigHome: join(home, ".config"), stateDir });
+    // An agent can have an adapter and still be unobservable: goose parses no tool calls.
+    expect(bySlug(agents, "goose").adapter).toBe("goose");
+    expect(bySlug(agents, "goose").observable).toBe(false);
     expect(bySlug(agents, "codex").manageable).toBe(true);
     expect(bySlug(agents, "cursor").manageable).toBe(false);
     expect(bySlug(agents, "amp").observable).toBe(false);

@@ -28,7 +28,10 @@ const ADAPTER_OBSERVES: Record<string, InvocationKind[]> = {
   "claude-code": ["tool_call", "slash_command"],
   codex: ["tool_call"],
   gemini: ["tool_call"],
-  goose: ["tool_call"],
+  // goose's adapter surfaces role, text, and timestamp only: no toolCalls, so a skill
+  // invocation is unattributable there. Claiming tool_call here would render every
+  // goose skill "never used" rather than "cannot see usage".
+  goose: [],
   opencode: ["tool_call"],
   "copilot-cli": [],
   tmux: [],
