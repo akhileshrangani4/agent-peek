@@ -503,13 +503,26 @@ describe("presentation invariants (ticket 15)", () => {
   it("keeps every presence state distinguishable without colour", async () => {
     // The four states are the substance of the agent model. If styling ever carries that
     // distinction alone, it vanishes in monochrome and in a pipe.
-    const out = await runCli(["agents", "--all"]);
-    const states = new Set<string>();
-    for (const line of out.stdout.split("\n")) {
-      const match = line.match(/^\S+\s+(present|unconfirmed|absent|no-convention)\b/);
-      if (match) states.add(match[1]!);
+    //
+    // Asserted against what this machine actually has rather than a fixed count: the
+    // first version required three states and an `unconfirmed` agent, which held on the
+    // machine it was written on and failed on a clean CI runner where every agent is
+    // absent. That tested the environment, not the code. Whatever states the JSON
+    // reports must each appear as a readable word in the plain-text output.
+    const [text, json] = await Promise.all([
+      runCli(["agents", "--all"]),
+      runCli(["agents", "--all", "--json"]),
+    ]);
+    const reported = new Set<string>(
+      (JSON.parse(json.stdout).agents as { presence: string }[]).map((a) => a.presence),
+    );
+    expect(reported.size).toBeGreaterThan(0);
+    for (const state of reported) {
+      // "no-convention" renders as "no convention": the word is what must survive, not
+      // the identifier.
+      const word = state.replace("-", " ");
+      expect(text.stdout.includes(word), `state "${state}" not readable in plain text`).toBe(true);
     }
-    expect(states.size).toBeGreaterThanOrEqual(3);
-    expect(states.has("unconfirmed")).toBe(true);
+    expect(text.stdout.includes(String.fromCharCode(27))).toBe(false);
   }, 60000);
 });
