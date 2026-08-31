@@ -30,6 +30,7 @@ import {
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
 import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
 import { renderAgents } from "./agents-report.js";
+import { renderList } from "./list-report.js";
 import type { Inventory } from "../skills/types.js";
 import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
@@ -108,6 +109,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--adapter <name>", "Scan/list only one adapter (claude-code|codex|gemini|tmux|...)")
     .option("--status <s>", "Filter by status (active|idle|ended)")
     .option("--all", "Include ended sessions")
+    .option("--color", "Force colour even when piped")
+    .option("--width <n>", "Render at this width instead of the terminal width")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--include-subagents", "Include subagent sessions spawned by another session")
     .option("--ids", "Show raw session ids")
@@ -155,7 +158,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         return;
       }
       if (opts.json) { console.log(JSON.stringify(withDisplayNames(list), null, 2)); return; }
-      printList(list, { showIds: Boolean(opts.ids) });
+      await renderList(withDisplayNames(list), {
+        showIds: Boolean(opts.ids),
+        color: Boolean(opts.color),
+        width: opts.width === undefined ? undefined : Number(opts.width),
+        relativeTime,
+      });
     });
 
   cli.command("check [file]", "Exit 1 when another active agent is writing a file.")
@@ -1019,35 +1027,6 @@ function handleError(e: unknown): number {
   });
 }
 
-function printList(
-  list: { id: string; name?: string; tag?: string; adapter: string; cwd?: string; status: string; lastSeen: string; sourceType?: string; transcriptPath: string }[],
-  opts: { showIds?: boolean } = {},
-): void {
-  if (list.length === 0) { console.log("(no sessions)"); return; }
-  const rows = withDisplayNames(list).map((e) => {
-    const row = [
-      fit(e.displayName, 22),
-      e.adapter,
-      e.status,
-      relativeTime(e.lastSeen),
-      // 90 characters of worktree path pushed every other column off screen. The UUID
-      // segment identifies nothing a reader uses; the last two segments are the answer.
-      e.cwd ? shortenPath(e.cwd, 20) : "-",
-    ];
-    if (opts.showIds) row.push(e.id);
-    return row;
-  });
-  // SOURCE dropped from the default view: it repeats what ADAPTER already says in the
-  // only case it differs (tmux/screen), and it survives in --json.
-  const headers = ["NAME", "ADAPTER", "STATUS", "UPDATED", "CWD"];
-  if (opts.showIds) headers.push("ID");
-  // Widths in characters, not bytes: an elided path carries a multi-byte ellipsis, and
-  // a byte count would over-measure the column it appears in.
-  const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => displayWidth(r[i]!))));
-  const fmt = (r: string[]) => r.map((v, i) => v + " ".repeat(Math.max(0, cols[i]! - displayWidth(v)))).join("  ").trimEnd();
-  console.log(fmt(headers));
-  for (const r of rows) console.log(fmt(r));
-}
 
 function printListWithFiles(
   sessions: CoordinationDigest["sessions"],
