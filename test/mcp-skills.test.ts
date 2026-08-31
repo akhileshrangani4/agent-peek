@@ -276,3 +276,20 @@ describe("the surface takes no path", () => {
     expect(handler).toMatch(/args\.groupBy/);
   });
 });
+
+describe("unmatched names are not one fact", () => {
+  it("distinguishes a missing plugin from a name nothing on disk answers to", async () => {
+    const home = skillHome();
+    seedIndex(home, [
+      inv({ skill: "gone-entirely" }),
+      inv({ skill: "someplugin:missing" }),
+    ]);
+    const result = await skillsTool({ home });
+    const byName = Object.fromEntries((result.unmatched ?? []).map((u) => [u.name, u]));
+    expect(byName["gone-entirely"]!.reason).toBe("not-on-disk");
+    // peek cannot tell an agent-bundled skill from one uninstalled since, and says so
+    // rather than picking.
+    expect(byName["gone-entirely"]!.note).toMatch(/the agent ships it, or it was uninstalled/);
+    expect(byName["someplugin:missing"]!.reason).toBe("plugin-absent");
+  });
+});

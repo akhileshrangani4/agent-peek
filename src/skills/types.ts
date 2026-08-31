@@ -52,14 +52,31 @@ export interface Skill {
    * description. An upper bound — some hosts list a name without its description.
    */
   estimatedTokens: number;
-  /** Sum of chargedTokens across installations. */
+  /**
+   * Sum of chargedTokens across installations, excluding project-local ones: a project
+   * skill is paid for only while you work in that repo, so adding it to a machine-wide
+   * figure overstates what any one session costs.
+   */
   chargedTokens: number;
+  /** Charged tokens from project-local installations, kept separate for the same reason. */
+  projectTokens?: number;
   installations: SkillInstallation[];
   flags: SkillFlag[];
 }
 
 export interface Inventory {
   skills: Skill[];
+  /**
+   * Project-local survey. Project skills are loaded only while working in their repo, so
+   * their cost is reported here rather than folded into the machine-wide total.
+   */
+  projects?: {
+    surveyed: string[];
+    found: number;
+    capped: boolean;
+    skills: number;
+    tokens: number;
+  };
   /** Roots walked, in order, including any that turned out to be absent. */
   rootsScanned: { path: string; agent?: string; kind: SkillRootKind; present: boolean }[];
   costBasis: string;

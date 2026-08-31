@@ -64,10 +64,33 @@ export interface SkillsReport {
    * project-local root peek has not surveyed (ticket 14). Real usage, not noise, and
    * never archivable — so it is reported beside the segments rather than inside them.
    */
-  unmatched: { name: string; uses: number }[];
+  unmatched: UnmatchedName[];
   costBasis: string;
   totalSkills: number;
   totalTokens: number;
+}
+
+/**
+ * A recorded invocation naming no installed skill, and what peek can say about why.
+ *
+ * These are not one fact. "You invoked pre-pr-duplication 9 times and it is not
+ * installed" is actionable; "you invoked loop 6 times and it ships inside Claude Code"
+ * is not, and telling the user both in one voice repeats this effort's core mistake one
+ * level up. Where peek cannot tell the two apart it says so rather than picking.
+ */
+export interface UnmatchedName {
+  name: string;
+  uses: number;
+  /**
+   * - `not-on-disk`: no root peek surveyed holds it. Either the agent ships it (loop,
+   *   run, security-review, update-config, artifact-design all live inside Claude Code
+   *   and exist in no user skill root on this machine) or it was uninstalled since.
+   *   peek cannot distinguish those two from disk, and says so.
+   * - `plugin-absent`: the name carries a plugin prefix whose plugin is not installed,
+   *   which is a narrower and more actionable statement.
+   */
+  reason: "not-on-disk" | "plugin-absent";
+  note: string;
 }
 
 export interface ReportInput {
@@ -80,7 +103,7 @@ export interface ReportInput {
   ambiguousKeys: Set<string>;
   /** agent slug -> coverage. A slug absent here is treated as unreadable. */
   coverage: Map<string, InstallationCoverage>;
-  unmatched: { name: string; uses: number }[];
+  unmatched: UnmatchedName[];
   costBasis: string;
 }
 

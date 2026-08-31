@@ -21,13 +21,13 @@ import {
 } from "../agents/index.js";
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import {
-  buildInventory, buildNameIndex, builtinRowFilter,
+  buildInventory, buildNameIndex, builtinRowFilter, discoverProjects,
   buildSkillsReport, expandSkill, joinUsage,
   planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
   manifestDivergence, ArchiveRefusedError,
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
-import { UsageStore, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
+import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/index.js";
 import type { UsageReport } from "../usage/report.js";
@@ -567,9 +567,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         await runSkillsReport(opts);
         return;
       }
-      const projects = String(opts.projects ?? "").split(",").map((p: string) => p.trim()).filter(Boolean)
-        .map((p: string) => resolve(expandHome(p)));
-      const inventory = await buildInventory({ projects });
+      const { projects, discovery } = await resolveProjectSurvey(opts.projects);
+      const inventory = await buildInventory({ projects, projectDiscovery: discovery });
       console.log(JSON.stringify(inventory, null, 2));
     });
 
@@ -913,6 +912,27 @@ async function printManifestDivergence(): Promise<void> {
   console.log(`shared library manifest (${formatPath(divergence.manifestPath)}) is out of step; peek never writes it:`);
   if (presentButUnlisted.length) console.log(`  on disk but unlisted: ${presentButUnlisted.length}`);
   if (listedButMissing.length) console.log(`  listed but missing: ${listedButMissing.length}`);
+}
+
+/**
+ * Projects to survey: the ones named on the command line, or — by default — the
+ * repositories peek has recorded work in. Explicit beats discovered, so `--projects`
+ * turns discovery off rather than adding to it.
+ */
+async function resolveProjectSurvey(
+  raw: unknown,
+): Promise<{ projects: string[]; discovery?: { found: number; capped: boolean } }> {
+  const named = String(raw ?? "").split(",").map((p) => p.trim()).filter(Boolean)
+    .map((p) => resolve(expandHome(p)));
+  if (named.length) return { projects: named };
+  if (!existsSync(usageDbPath())) return { projects: [] };
+  const store = new UsageStore({});
+  try {
+    const discovered = discoverProjects(store);
+    return { projects: discovered.projects, discovery: { found: discovered.found, capped: discovered.capped } };
+  } finally {
+    store.close();
+  }
 }
 
 async function listAdapters(): Promise<void> {
@@ -1351,9 +1371,8 @@ function formatDimension(row: UsageRow, dim: GroupBy): string {
  * common rows need no caveat.
  */
 async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
-  const projects = String(opts.projects ?? "").split(",").map((p) => p.trim()).filter(Boolean)
-    .map((p) => resolve(expandHome(p)));
-  const inventory = await buildInventory({ projects });
+  const { projects, discovery } = await resolveProjectSurvey(opts.projects);
+  const inventory = await buildInventory({ projects, projectDiscovery: discovery });
   const agents = await listAgents();
   const store = new UsageStore({});
   let joined;

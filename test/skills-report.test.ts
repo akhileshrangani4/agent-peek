@@ -133,7 +133,7 @@ describe("buildSkillsReport segmentation", () => {
 
   it("reports unmatched invocation names beside the segments, never inside them", () => {
     const report = buildSkillsReport(input({
-      unmatched: [{ name: "gone", uses: 2 }, { name: "pre-pr-duplication", uses: 9 }],
+      unmatched: [{ name: "gone", uses: 2, reason: "not-on-disk" as const, note: "" }, { name: "pre-pr-duplication", uses: 9, reason: "not-on-disk" as const, note: "" }],
     }));
     expect(report.unmatched.map((u) => u.name)).toEqual(["pre-pr-duplication", "gone"]);
     for (const seg of report.segments) {

@@ -15,6 +15,8 @@ export const COST_BASIS =
 export interface InventoryOptions extends AgentRegistryOptions {
   /** Project directories to check for project-local roots, e.g. session cwds. */
   projects?: string[];
+  /** Counts from discovery, so the report can say when the survey cap bit. */
+  projectDiscovery?: { found: number; capped: boolean };
   /** Skip the shared trees. Tests only. */
   includeShared?: boolean;
 }
@@ -191,9 +193,19 @@ export async function buildInventory(opts: InventoryOptions = {}): Promise<Inven
   }
 
   const all = Array.from(skills.values());
+  let projectSkills = 0;
+  let projectTokens = 0;
   for (const skill of all) {
     skill.installations = dedupeInstallations(skill.installations);
-    skill.chargedTokens = skill.installations.reduce((sum, i) => sum + i.chargedTokens, 0);
+    const project = skill.installations.filter((i) => i.rootKind === "project");
+    skill.chargedTokens = skill.installations
+      .filter((i) => i.rootKind !== "project")
+      .reduce((sum, i) => sum + i.chargedTokens, 0);
+    if (project.length) {
+      skill.projectTokens = project.reduce((sum, i) => sum + i.chargedTokens, 0);
+      projectSkills += 1;
+      projectTokens += skill.projectTokens;
+    }
   }
   applyFlags(all, new Set(agents.filter((a) => a.tier === "verified").map((a) => a.slug)));
   all.sort((a, b) => b.chargedTokens - a.chargedTokens || a.name.localeCompare(b.name));
@@ -201,6 +213,17 @@ export async function buildInventory(opts: InventoryOptions = {}): Promise<Inven
     skills: all,
     rootsScanned: roots.map((r) => ({ path: r.path, agent: r.agent, kind: r.kind, present: true })),
     costBasis: COST_BASIS,
+    ...(opts.projects?.length || opts.projectDiscovery
+      ? {
+        projects: {
+          surveyed: opts.projects ?? [],
+          found: opts.projectDiscovery?.found ?? (opts.projects?.length ?? 0),
+          capped: opts.projectDiscovery?.capped ?? false,
+          skills: projectSkills,
+          tokens: projectTokens,
+        },
+      }
+      : {}),
   };
 }
 

@@ -18,6 +18,7 @@
 import { existsSync } from "node:fs";
 import { listAgents } from "../agents/index.js";
 import { buildInventory } from "../skills/inventory.js";
+import { discoverProjects } from "../skills/discover.js";
 import { joinUsage } from "../skills/assemble.js";
 import { buildSkillsReport, expandSkill } from "../skills/report.js";
 import type { SegmentId, SkillsReport } from "../skills/report.js";
@@ -71,6 +72,27 @@ export function indexState(home?: string): IndexState {
       + "run scans every transcript and writes this file. peek will not build it from an "
       + "MCP call.",
   };
+}
+
+/**
+ * Inventory options including the default project survey. Discovery reads the index, so
+ * it is skipped when there is none — and skipped rather than crawling, because peek only
+ * surveys repositories it has already recorded work in.
+ */
+async function inventoryOptions(home: string | undefined, index: IndexState) {
+  const base = home ? { home } : {};
+  if (index.state === "missing") return base;
+  const store = openStore(home);
+  try {
+    const discovered = discoverProjects(store);
+    return {
+      ...base,
+      projects: discovered.projects,
+      projectDiscovery: { found: discovered.found, capped: discovered.capped },
+    };
+  } finally {
+    store.close?.();
+  }
 }
 
 function openStore(home?: string): UsageStore {
@@ -165,7 +187,7 @@ export function parseSegment(raw: unknown): SegmentId | undefined {
  */
 export async function skillsTool(args: SkillsToolArgs) {
   const index = indexState(args.home);
-  const inventory = await buildInventory(args.home ? { home: args.home } : {});
+  const inventory = await buildInventory(await inventoryOptions(args.home, index));
   if (index.state === "missing") {
     // Without the index every skill would read as never used, which is precisely the
     // false confidence this effort exists to prevent. Report the inventory, refuse to
@@ -185,7 +207,13 @@ export async function skillsTool(args: SkillsToolArgs) {
     const joined = joinUsage(store, inventory, agents);
     const report = buildSkillsReport({ ...joined, skills: inventory.skills, costBasis: inventory.costBasis });
     const limit = clampLimit(args.limit);
-    return { index, ...summarize(report, limit, parseSegment(args.segment)) };
+    return {
+      index,
+      ...summarize(report, limit, parseSegment(args.segment)),
+      // Project skills are counted apart from the machine-wide figure: they are paid for
+      // only while working in their repo.
+      projects: inventory.projects,
+    };
   } finally {
     store.close?.();
   }
@@ -232,7 +260,7 @@ export interface SkillDetailArgs {
 /** One skill: its installations, per-agent coverage, and what archiving each would do. */
 export async function skillDetailTool(args: SkillDetailArgs) {
   const index = indexState(args.home);
-  const inventory = await buildInventory(args.home ? { home: args.home } : {});
+  const inventory = await buildInventory(await inventoryOptions(args.home, index));
   const skill = selectSkill(inventory, args.skill);
   const base = {
     key: skill.key,
