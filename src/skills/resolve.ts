@@ -67,3 +67,26 @@ export function resolveNames(inventory: Inventory, names: string[]): NameResolut
   const index = buildNameIndex(inventory);
   return names.map((name) => resolveName(index, name));
 }
+
+/**
+ * Row predicate that drops CLI built-ins from a usage report grouped by skill or tool.
+ *
+ * Shared by `peek usage` and the MCP surface so the rule exists once: a second copy of a
+ * coverage rule is how the two drift and one of them starts reporting `/clear` as a
+ * skill. Returns undefined when the grouping has no name column to test.
+ */
+export function builtinRowFilter<Row extends { skill?: string | null; tool?: string }>(
+  index: NameIndex,
+  dimension: string | undefined,
+): ((row: Row) => boolean) | undefined {
+  if (dimension !== "skill" && dimension !== "tool") return undefined;
+  return (row: Row) => {
+    const raw = dimension === "skill" ? row.skill : row.tool;
+    if (!raw) return true;
+    // resolveName classifies a built-in only when the name carries its leading slash, and
+    // the index stores it stripped. Testing the slash spelling unconditionally is safe
+    // because resolveName matches the inventory first: a real skill named `clear` still
+    // resolves to itself rather than to the built-in.
+    return resolveName(index, `/${raw}`).outcome !== "not-a-skill";
+  };
+}

@@ -21,7 +21,7 @@ import {
 } from "../agents/index.js";
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import {
-  buildInventory, buildNameIndex, resolveName,
+  buildInventory, buildNameIndex, builtinRowFilter,
   buildSkillsReport, expandSkill, joinUsage,
   planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
   manifestDivergence, ArchiveRefusedError,
@@ -1161,7 +1161,7 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
     // Built-in resolution is a row predicate handed to the report, not a pass over its
     // output: filtering after the limit would silently trim the tail a second time.
     const keepRow = skillsOnly && !opts.includeBuiltins
-      ? await builtinRowFilter(groupBy)
+      ? await cliBuiltinRowFilter(groupBy)
       : undefined;
     const report = await buildUsageReport(store, {
       ...(skillsOnly ? { skillsOnly: true } : {}),
@@ -1198,19 +1198,11 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
  * Only a grouping that names something can be resolved; any other passes everything
  * through rather than filtering on a name its rows do not carry.
  */
-async function builtinRowFilter(groupBy: GroupBy[]): Promise<((row: UsageRow) => boolean) | undefined> {
+async function cliBuiltinRowFilter(groupBy: GroupBy[]): Promise<((row: UsageRow) => boolean) | undefined> {
+  // The rule itself lives in src/skills/resolve.ts, shared with the MCP surface: two
+  // copies of a coverage rule is how one of them starts reporting `/clear` as a skill.
   const dim = groupBy.length === 1 ? groupBy[0] : undefined;
-  if (dim !== "skill" && dim !== "tool") return undefined;
-  const index = buildNameIndex(await buildInventory({}));
-  return (row: UsageRow) => {
-    const raw = dim === "skill" ? row.skill : row.tool;
-    if (!raw) return true;
-    // resolveName classifies a built-in only when the name carries its leading slash,
-    // and the index stores it stripped. Testing the slash spelling unconditionally is
-    // safe because resolveName matches the inventory first: a real skill named `clear`
-    // still resolves to itself rather than to the built-in.
-    return resolveName(index, `/${raw}`).outcome !== "not-a-skill";
-  };
+  return builtinRowFilter<UsageRow>(buildNameIndex(await buildInventory({})), dim);
 }
 
 function parseDimensions(dimension: unknown, by: unknown): GroupBy[] {

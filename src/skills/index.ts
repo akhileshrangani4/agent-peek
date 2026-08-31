@@ -12,7 +12,7 @@ export {
 } from "./inventory.js";
 export type { InventoryOptions } from "./inventory.js";
 export {
-  buildNameIndex, resolveName, resolveNames, invocationName, CLI_BUILTINS,
+  buildNameIndex, resolveName, resolveNames, invocationName, builtinRowFilter, CLI_BUILTINS,
 } from "./resolve.js";
 export type { NameIndex } from "./resolve.js";
 export {
