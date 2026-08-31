@@ -196,16 +196,32 @@ function View({ report, groupBy, width, limit, verbose, series, seriesDays, seri
 }
 
 /**
- * The corpus as one shape. Rows arrive ordered by count, so both the sparkline and its
- * date range must come from a date-sorted copy — reading the ends of the count-ordered
- * array reported a range that was neither the earliest nor the latest day.
+ * The corpus as one shape. Two traps, both of which shipped once.
+ *
+ * Rows arrive ordered by count, so the sparkline and its label must come from a
+ * date-sorted copy — reading the ends of the count-ordered array reported a range that
+ * was neither the earliest nor the latest day.
+ *
+ * And the view receives an ALREADY-LIMITED report, so a shape built from what it holds
+ * describes the visible slice while sitting under a rule that says "shape over time".
+ * At `--limit 3` that claimed a 3-day corpus for a 33-day one. The window is taken from
+ * the report envelope, which covers the whole index, and the shape says plainly when it
+ * is drawn from fewer days than the window spans.
  */
 function DayShape({ report }: { report: UsageReport }): React.JSX.Element {
   const byDate = report.rows.slice().sort((a, b) => (a.day ?? "").localeCompare(b.day ?? ""));
-  return h(Box, { marginTop: 1 },
-    h(Text, null, "     "),
-    h(Text, { color: "cyan" }, sparkline(byDate.map((r) => r.count))),
-    h(Text, { dimColor: true }, `  ${byDate[0]?.day ?? ""} → ${byDate.at(-1)?.day ?? ""}`));
+  const span = report.window;
+  const from = span?.earliest?.slice(0, 10) ?? byDate[0]?.day ?? "";
+  const to = span?.latest?.slice(0, 10) ?? byDate.at(-1)?.day ?? "";
+  return h(Box, { flexDirection: "column", marginTop: 1 },
+    h(Box, null,
+      h(Text, null, "     "),
+      h(Text, { color: "cyan" }, sparkline(byDate.map((r) => r.count))),
+      h(Text, { dimColor: true }, `  ${from} → ${to}`)),
+    report.truncated
+      ? h(Text, { dimColor: true },
+        `     shape covers the ${byDate.length} days shown · --limit to widen`)
+      : null);
 }
 
 function relative(iso: string): string {
