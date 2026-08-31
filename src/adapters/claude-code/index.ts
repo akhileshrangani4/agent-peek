@@ -15,6 +15,8 @@ const ADAPTER_NAME = "claude-code";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  observes: ["tool_call", "slash_command"],
+
   async scan(): Promise<SessionEntry[]> {
     const root = join(process.env.HOME ?? homedir(), ".claude", "projects");
     const out: SessionEntry[] = [];

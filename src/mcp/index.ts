@@ -14,6 +14,11 @@ import {
   PostNotFoundError, PostRejectedError, SessionNotFoundError,
 } from "../core/errors.js";
 import { expandPost, postToFeed, readFeed } from "../feed/index.js";
+import {
+  usageTool, skillsTool, skillDetailTool, archivePlanTool, agentsTool,
+  DEFAULT_LIMIT, MAX_LIMIT,
+} from "./skills.js";
+import { ArchiveRefusedError } from "../skills/archive.js";
 import type { PostInput, PostType } from "../feed/index.js";
 
 const tools = [
@@ -128,6 +133,94 @@ const FEED_TOOLS = [
         dir: { type: "string" },
       },
       required: ["post_id"],
+    },
+  },
+  {
+    name: "usage_report",
+    description:
+      "Which skills and tools have actually been invoked, across every agent, from peek's "
+      + "durable index. Returns an envelope carrying the observed window, per-adapter "
+      + "windows, and the agents peek cannot see — counts are meaningless without them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        groupBy: {
+          type: "string",
+          description: "Dimension(s), comma-separated: skill|tool|agent|adapter|day|cwd|sourceKind|sidechain|attributionAgent. Default skill.",
+        },
+        skill: { type: "string", description: "Only this skill or command name." },
+        agent: { type: "string", description: "Only this agent slug." },
+        adapter: { type: "string" },
+        tool: { type: "string", description: "Only invocations of this tool. Default: skills only." },
+        allTools: { type: "boolean", description: "Every tool, not just skills." },
+        sourceKind: { type: "string", enum: ["tool_call", "slash_command"] },
+        sidechain: { type: "boolean", description: "true for subagent calls only, false for main loop only." },
+        attributionAgent: { type: "string", description: "Subagent type that made the call." },
+        since: { type: "string", description: "ISO instant, inclusive." },
+        until: { type: "string", description: "ISO instant, exclusive." },
+        includeBuiltins: { type: "boolean", description: "Keep CLI built-ins like /clear, which are recorded but are not skills." },
+        limit: { type: "number", description: `Rows to return (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` },
+      },
+    },
+  },
+  {
+    name: "skills_report",
+    description:
+      "Skill inventory segmented by what can honestly be acted on: archivable, unknown "
+      + "usage, read-only, in use. Summary first with per-segment totals, then a capped "
+      + "slice. Needs the usage index; without it, segments are withheld rather than "
+      + "reporting every skill as unused.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        segment: {
+          type: "string",
+          enum: ["archivable", "unknown-usage", "read-only", "in-use"],
+          description: "Return rows for one segment only. Totals for every segment are always included.",
+        },
+        limit: { type: "number", description: `Rows per segment (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` },
+      },
+    },
+  },
+  {
+    name: "skill_detail",
+    description:
+      "One skill: its installations per agent, what archiving each would do, per-agent "
+      + "usage coverage, and cost. Returns paths and flags, never SKILL.md content.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        skill: { type: "string", description: "Skill name or key, as returned by skills_report." },
+      },
+      required: ["skill"],
+    },
+  },
+  {
+    name: "archive_plan",
+    description:
+      "What archiving a skill WOULD do, plus the command a human runs to do it. Changes "
+      + "nothing: peek exposes no tool that can archive, because dry-run-by-default works "
+      + "by a person reading the plan.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        skill: { type: "string", description: "Skill name or key." },
+        agent: { type: "string", description: "Limit to one agent's installation." },
+        allAgents: { type: "boolean", description: "Retire from every mutable root." },
+      },
+      required: ["skill"],
+    },
+  },
+  {
+    name: "list_agents",
+    description:
+      "Coding agents peek knows: which are on this machine, whether each entry is verified "
+      + "or sourced from a third-party table, and what peek can observe and attribute for each.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        all: { type: "boolean", description: "Include agents peek knows of that are not installed here." },
+      },
     },
   },
 ];
@@ -390,6 +483,53 @@ export async function run(): Promise<void> {
         return feedToolError(error);
       }
     }
+    // Arguments are destructured field by field, never forwarded as an object: `home` is
+    // a test-only parameter on these functions, and passing the caller's arguments
+    // straight through would let an MCP client point peek at an arbitrary directory tree.
+    // No tool on this surface takes a path.
+    if (name === "usage_report") {
+      return json(await usageTool({
+        groupBy: args.groupBy === undefined ? undefined : String(args.groupBy),
+        skill: args.skill === undefined ? undefined : String(args.skill),
+        agent: args.agent === undefined ? undefined : String(args.agent),
+        adapter: args.adapter === undefined ? undefined : String(args.adapter),
+        tool: args.tool === undefined ? undefined : String(args.tool),
+        allTools: args.allTools === true,
+        sourceKind: args.sourceKind === undefined ? undefined : String(args.sourceKind),
+        sidechain: typeof args.sidechain === "boolean" ? args.sidechain : undefined,
+        attributionAgent: args.attributionAgent === undefined ? undefined : String(args.attributionAgent),
+        since: args.since === undefined ? undefined : String(args.since),
+        until: args.until === undefined ? undefined : String(args.until),
+        includeBuiltins: args.includeBuiltins === true,
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      }));
+    }
+    if (name === "skills_report") {
+      return json(await skillsTool({
+        segment: args.segment === undefined ? undefined : String(args.segment),
+        limit: typeof args.limit === "number" ? args.limit : undefined,
+      }));
+    }
+    if (name === "skill_detail") {
+      try {
+        return json(await skillDetailTool({ skill: String(args.skill) }));
+      } catch (error) {
+        if (error instanceof ArchiveRefusedError) {
+          return json({ refused: { reason: error.reason, message: error.message, detail: error.detail } });
+        }
+        throw error;
+      }
+    }
+    if (name === "archive_plan") {
+      return json(await archivePlanTool({
+        skill: String(args.skill),
+        agent: args.agent ? String(args.agent) : undefined,
+        allAgents: args.allAgents === true,
+      }));
+    }
+    if (name === "list_agents") {
+      return json(await agentsTool({ all: args.all === true }));
+    }
     throw new Error(`Unknown tool: ${name}`);
   });
 
@@ -445,6 +585,11 @@ async function readSessionResource(
   if (view === "brief") return engine.peek(selector, { mode: "brief" });
   if (view === "handoff") return engine.peek(selector, { mode: "handoff" });
   return engine.peek(selector, { mode: "raw", limit: 50 });
+}
+
+/** Tool results travel as one JSON text block, matching the existing tools. */
+function json(value: unknown): { content: { type: "text"; text: string }[] } {
+  return { content: [{ type: "text", text: JSON.stringify(value) }] };
 }
 
 function jsonResource(uri: string, value: unknown): { contents: { uri: string; mimeType: string; text: string }[] } {

@@ -1,7 +1,7 @@
 // src/skills/inventory.ts
 import { stat } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { listAgents, sharedLibraryRoot, type AgentRegistryOptions } from "../agents/index.js";
+import { listAgents, sharedLibraryRoots, type AgentRegistryOptions } from "../agents/index.js";
 import type { ResolvedAgent } from "../agents/types.js";
 import { estimateListingTokens, parseFrontmatter } from "./parse.js";
 import { AGENT_ROOT_DEPTH, PLUGIN_ROOT_DEPTH, scanRoot, type FoundSkill, type ScanRoot } from "./scan.js";
@@ -15,7 +15,9 @@ export const COST_BASIS =
 export interface InventoryOptions extends AgentRegistryOptions {
   /** Project directories to check for project-local roots, e.g. session cwds. */
   projects?: string[];
-  /** Skip the shared library root. Tests only. */
+  /** Counts from discovery, so the report can say when the survey cap bit. */
+  projectDiscovery?: { found: number; capped: boolean };
+  /** Skip the shared trees. Tests only. */
   includeShared?: boolean;
 }
 
@@ -28,7 +30,7 @@ async function isDir(path: string): Promise<boolean> {
 }
 
 /**
- * Roots to walk: every present root of every agent, the shared library root, and any
+ * Roots to walk: every present root of every agent, the shared trees, and any
  * project-local root under a known project directory. Project roots are read-only here:
  * a repo file belongs to git and its collaborators, not to peek.
  */
@@ -38,6 +40,10 @@ export async function inventoryRoots(
 ): Promise<ScanRoot[]> {
   const roots: ScanRoot[] = [];
   for (const agent of agents) {
+    // An agent peek cannot show is installed contributes no installations: its "root" is
+    // usually the shared tree, and attributing that content to it would invent
+    // installations for agents the user does not have.
+    if (agent.presence !== "present") continue;
     for (const root of agent.roots) {
       if (!root.present) continue;
       roots.push({
@@ -50,16 +56,31 @@ export async function inventoryRoots(
     }
   }
   if (opts.includeShared !== false) {
-    const shared = sharedLibraryRoot(opts);
-    if (await isDir(shared)) {
-      roots.push({ path: shared, kind: "user", mutable: true, maxDepth: AGENT_ROOT_DEPTH });
+    for (const shared of sharedLibraryRoots(opts)) {
+      if (await isDir(shared) && !roots.some((r) => r.path === shared)) {
+        roots.push({ path: shared, kind: "shared", mutable: false, maxDepth: AGENT_ROOT_DEPTH });
+      }
     }
   }
+  // A path already scanned as an agent root or a shared tree is not also a project root.
+  // Without this, a recorded cwd of $HOME turns `$HOME/.agents/skills` into a "project"
+  // root and attributes the whole shared tree once per agent — ~390 skills x 8 agents,
+  // which is the shared library root that ticket 02 Q3 deliberately removed from the
+  // model, reintroduced under a different name.
+  const claimed = new Set(roots.map((r) => r.path));
+  for (const shared of sharedLibraryRoots(opts)) claimed.add(shared);
   for (const project of opts.projects ?? []) {
     for (const agent of agents) {
+      // Only agents actually installed here. Otherwise a sourced convention claims a
+      // directory that means something else to this repo: openclaw reads `<repo>/skills`,
+      // so peek's own `skills/` package directory was being inventoried as a project
+      // install for an agent this machine does not have.
+      if (agent.presence !== "present") continue;
       if (!agent.projectDir) continue;
       const path = join(project, agent.projectDir);
+      if (claimed.has(path)) continue;
       if (!(await isDir(path))) continue;
+      claimed.add(path);
       roots.push({
         path,
         agent: agent.slug,
@@ -186,21 +207,49 @@ export async function buildInventory(opts: InventoryOptions = {}): Promise<Inven
   }
 
   const all = Array.from(skills.values());
+  let projectSkills = 0;
+  let projectTokens = 0;
   for (const skill of all) {
     skill.installations = dedupeInstallations(skill.installations);
-    skill.chargedTokens = skill.installations.reduce((sum, i) => sum + i.chargedTokens, 0);
+    const project = skill.installations.filter((i) => i.rootKind === "project");
+    skill.chargedTokens = skill.installations
+      .filter((i) => i.rootKind !== "project")
+      .reduce((sum, i) => sum + i.chargedTokens, 0);
+    if (project.length) {
+      skill.projectTokens = project.reduce((sum, i) => sum + i.chargedTokens, 0);
+      projectSkills += 1;
+      projectTokens += skill.projectTokens;
+    }
   }
-  applyFlags(all);
+  applyFlags(all, new Set(agents.filter((a) => a.tier === "verified").map((a) => a.slug)));
   all.sort((a, b) => b.chargedTokens - a.chargedTokens || a.name.localeCompare(b.name));
   return {
     skills: all,
     rootsScanned: roots.map((r) => ({ path: r.path, agent: r.agent, kind: r.kind, present: true })),
     costBasis: COST_BASIS,
+    ...(opts.projects?.length || opts.projectDiscovery
+      ? {
+        projects: {
+          surveyed: opts.projects ?? [],
+          found: opts.projectDiscovery?.found ?? (opts.projects?.length ?? 0),
+          capped: opts.projectDiscovery?.capped ?? false,
+          skills: projectSkills,
+          tokens: projectTokens,
+        },
+      }
+      : {}),
   };
 }
 
-/** Conditions the report and the MCP surface both read, rather than re-deriving. */
-export function applyFlags(skills: Skill[]): void {
+/**
+ * Conditions the report and the MCP surface both read, rather than re-deriving.
+ *
+ * `verifiedAgents` gates `unreferenced`: several sourced-tier agents are rooted in the
+ * shared tree, so counting their installations as references would let a third-party
+ * table's claim suppress a real finding. "Nothing links to this" stays true until an
+ * agent peek has actually verified reads it.
+ */
+export function applyFlags(skills: Skill[], verifiedAgents: Set<string> = new Set()): void {
   const byName = new Map<string, number>();
   for (const skill of skills) byName.set(skill.name, (byName.get(skill.name) ?? 0) + 1);
   for (const skill of skills) {
@@ -209,7 +258,9 @@ export function applyFlags(skills: Skill[]): void {
     if (!skill.description) flags.push("no-description");
     if (skill.installations.every((i) => !i.mutable)) flags.push("immutable");
     if (!skill.modelInvocable) flags.push("not-model-invocable");
-    if (skill.installations.every((i) => i.agent === undefined)) flags.push("unreferenced");
+    if (skill.installations.every((i) => i.agent === undefined || !verifiedAgents.has(i.agent))) {
+      flags.push("unreferenced");
+    }
     skill.flags = flags;
   }
 }

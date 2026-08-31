@@ -14,6 +14,10 @@ const ADAPTER_NAME = "codex";
 const adapter: Adapter = {
   name: ADAPTER_NAME,
 
+  // slash_command since ticket 13: codex slash invocations are read from
+  // `response_item/message` records. Must match ADAPTER_OBSERVES; a test asserts it.
+  observes: ["tool_call", "slash_command"],
+
   async scan(): Promise<SessionEntry[]> {
     // Codex CLI rollouts: ~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl
     const root = join(process.env.HOME ?? homedir(), ".codex", "sessions");

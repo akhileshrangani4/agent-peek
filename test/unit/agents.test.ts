@@ -41,6 +41,42 @@ describe("builtin agent table", () => {
     expect(bySlugRaw(agents, "codex").roots[0]!.path).toBe("/home/x/.codex/skills");
   });
 
+  it("ships far more agents than any one machine has, so --all can differ from the default", () => {
+    const agents = builtinAgents({ home: "/home/x" });
+    expect(agents.length).toBeGreaterThan(50);
+    // The gap between what peek knows and what a machine has is the point of the table.
+    expect(agents.filter((a) => a.tier === "sourced").length).toBeGreaterThan(agents.filter((a) => a.tier === "verified").length);
+  });
+
+  it("marks an entry peek has resolved locally as verified and the rest as sourced", () => {
+    const agents = builtinAgents({ home: "/home/x" });
+    expect(bySlugRaw(agents, "claude-code").tier).toBe("verified");
+    expect(bySlugRaw(agents, "zed").tier).toBe("sourced");
+  });
+
+  it("lets the overlay win over the generated table, so regeneration cannot revert a fix", () => {
+    const claude = bySlugRaw(builtinAgents({ home: "/home/x" }), "claude-code");
+    // The plugin root is peek's own correction; the generated table knows nothing of it.
+    expect(claude.roots.some((r) => r.kind === "plugin" && r.path.endsWith("plugins/cache"))).toBe(true);
+    expect(claude.adapter).toBe("claude-code");
+  });
+
+  it("gives copilot-cli a real agent record, which the adapter previously lacked", () => {
+    const copilot = builtinAgents({ home: "/home/x" }).find((a) => a.adapter === "copilot-cli");
+    expect(copilot).toBeDefined();
+    expect(copilot!.roots.length).toBeGreaterThan(0);
+  });
+
+  it("marks a shared-tree root immutable even when it is an agent's own root", () => {
+    // amp, cline, warp and zed read ~/.agents/skills directly; its content backs every
+    // other agent's symlinks, so peek reports it and never offers to move it.
+    const zed = bySlugRaw(builtinAgents({ home: "/home/x" }), "zed");
+    const shared = zed.roots.find((r) => r.path === "/home/x/.agents/skills");
+    expect(shared).toBeDefined();
+    expect(shared!.kind).toBe("shared");
+    expect(shared!.mutable).toBe(false);
+  });
+
   it("marks plugin roots immutable", () => {
     const claude = bySlugRaw(builtinAgents({ home: "/home/x" }), "claude-code");
     const plugin = claude.roots.find((r) => r.kind === "plugin");
@@ -256,6 +292,77 @@ describe("listAgents and presence", () => {
     expect(isPresent(bySlug(agents, "codex"))).toBe(true);
     expect(isPresent(bySlug(agents, "cursor"))).toBe(false);
     // An installed agent with no skills yet is still real if peek can read its sessions.
-    expect(isPresent(bySlug(agents, "gemini"), new Set(["gemini"]))).toBe(true);
+    expect(isPresent(bySlug(agents, "gemini-cli"), new Set(["gemini"]))).toBe(true);
+  });
+});
+
+describe("presence and install detection", () => {
+  it("does not treat the shared tree existing as evidence an agent is installed", async () => {
+    // The installer creates ~/.agents/skills for anyone who has used it once. Several
+    // agents are rooted there, so root-existence alone would invent installed agents.
+    const home = await fixtureHome();
+    await mkdir(join(home, ".agents", "skills"), { recursive: true });
+    const agents = await listAgents({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    const zed = bySlug(agents, "zed");
+    expect(zed.roots.some((r) => r.present)).toBe(true);
+    expect(zed.installed).toBe(false);
+    expect(zed.presence).toBe("absent");
+  });
+
+  it("treats the agent's own directory as the evidence instead", async () => {
+    const home = await fixtureHome();
+    await mkdir(join(home, ".agents", "skills"), { recursive: true });
+    await mkdir(join(home, ".config", "zed"), { recursive: true });
+    const agents = await listAgents({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    const zed = bySlug(agents, "zed");
+    expect(zed.installed).toBe(true);
+    expect(zed.presence).toBe("present");
+    // Still not manageable: its root is the shared tree.
+    expect(zed.manageable).toBe(false);
+  });
+
+  it("reports an agent peek knows of but has no root path for as no-convention", async () => {
+    const home = await fixtureHome();
+    const agents = await listAgents({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    const noConvention = agents.filter((a) => a.presence === "no-convention");
+    expect(noConvention.length).toBeGreaterThan(0);
+    for (const agent of noConvention) expect(agent.roots).toEqual([]);
+  });
+
+  it("reports a declared agent with nothing on disk as absent, not present", async () => {
+    const home = await fixtureHome();
+    const agents = await listAgents({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    expect(bySlug(agents, "qoder").presence).toBe("absent");
+    expect(agents.filter((a) => a.presence === "absent").length).toBeGreaterThan(50);
+  });
+});
+
+describe("observes is declared on the adapter", () => {
+  it("mirrors every registered adapter's own declaration", async () => {
+    // The table in builtin.ts exists so callers need not load an adapter; this test is
+    // what stops the two drifting apart.
+    const adapters = await Promise.all([
+      import("../../src/adapters/claude-code/index.js"),
+      import("../../src/adapters/codex/index.js"),
+      import("../../src/adapters/gemini/index.js"),
+      import("../../src/adapters/goose/index.js"),
+      import("../../src/adapters/opencode/index.js"),
+      import("../../src/adapters/copilot-cli/index.js"),
+      import("../../src/adapters/tmux/index.js"),
+      import("../../src/adapters/screen/index.js"),
+    ]);
+    expect(adapters).toHaveLength(8);
+    for (const mod of adapters) {
+      const adapter = mod.default;
+      expect(adapterObserves(adapter.name)).toEqual(adapter.observes ?? []);
+    }
   });
 });

@@ -9,7 +9,7 @@ import type { Inventory, Skill, SkillInstallation } from "./types.js";
  * the installation, never configured:
  *
  * - `unlink`: the installation is a symlink, so the content lives somewhere else (the
- *   shared library root, for all 57 multi-agent skills on the author's machine). Removing
+ *   shared tree, for all 57 multi-agent skills on the author's machine). Removing
  *   the link retires the skill for that agent and leaves every other agent's link intact.
  * - `move`: the installation *is* the content, so it has to go somewhere recoverable.
  *
@@ -122,14 +122,16 @@ export function planArchive(
   const candidates: SkillInstallation[] = [];
   for (const install of skill.installations) {
     if (!install.agent) {
-      skipped.push({ path: install.path, reason: "shared library root: not an agent's installation" });
+      skipped.push({ path: install.path, reason: "shared tree: not an agent's installation" });
       continue;
     }
     if (!install.mutable) {
       skipped.push({
         path: install.path,
         agent: install.agent,
-        reason: `${install.rootKind} root is read-only`,
+        reason: install.rootKind === "shared"
+          ? "shared tree: its content backs every other agent's links"
+          : `${install.rootKind} root is read-only`,
       });
       continue;
     }

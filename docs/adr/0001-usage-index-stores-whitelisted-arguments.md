@@ -59,3 +59,27 @@ best-effort filter over unbounded text; the failure mode is silent, permanent, a
 discovered after the material has already been retained. A whitelist fails the other
 way — visibly, by not having the data — which is the direction this project prefers to
 fail in.
+
+## Addendum (ticket 08): the MCP surface is not judged by CLI parity
+
+The naive reading of this ADR is "an MCP tool may expose whatever the CLI prints." That
+test is wrong, and ticket 08 rejected it.
+
+The CLI is run by someone who already has the files: printing an aggregate to their
+terminal tells them nothing they could not read from their own disk. An MCP tool is a
+channel into a session that may not have those files, and whose caller is a model rather
+than the person whose transcripts these are. So the boundary is the schema, not the
+terminal: tools return aggregates and whitelisted arguments only — never transcript text,
+message content, or a raw invocation row — and no tool accepts SQL, a free-form query, or
+a filesystem path. Every read goes through the narrow query API, which is where this
+retention boundary is enforced.
+
+Two consequences worth stating, because both were nearly violated by accident:
+
+- **No tool builds the index.** A first scan writes tens of megabytes after reading every
+  transcript. A missing index returns a state and a hint to run the CLI once; it never
+  bootstraps inside someone else's session.
+- **No tool mutates.** `archive_plan` returns what archiving would do plus the command a
+  human runs. Dry-run-by-default works because a person reads the plan, and an argument
+  named `confirm` is set by the model, not the user — so the safeguard does not survive
+  the MCP boundary, and the mutating half stays in the CLI.

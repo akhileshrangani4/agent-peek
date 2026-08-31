@@ -26,11 +26,26 @@ against disk. Each root has a kind (`user`, `plugin`, `project`) and is mutable 
 plugin roots are read-only.
 _Avoid_: skills dir, skills folder
 
-**Shared library root**:
-`~/.agents/skills` — a root that no agent's system prompt reads directly, holding the
-skill directories that per-agent roots symlink into. It is a foreign installer's
-territory: peek reads it and does not write it.
-_Avoid_: central skills, the agents dir
+**Shared tree**:
+A root holding skill directories that other agents' roots symlink into. Two exist:
+`~/.agents/skills` and `~/.config/agents/skills`. Some agents read a shared tree
+directly rather than linking into it, so it can be an agent's own root — but its content
+backs every other agent's links, so peek reports it and never moves it.
+_Avoid_: shared library root, central skills, the agents dir
+
+**Tier**:
+How much peek knows about an agent entry it ships: `verified` means peek has resolved
+that agent's root on a machine that had it; `sourced` means the entry comes from a named
+third-party table and peek has never confirmed it. A sourced entry self-verifies on a
+user's machine by resolving, or not.
+_Avoid_: trusted, official, confidence
+
+**Presence**:
+Whether an agent is on this machine: `present` (its own directory or a non-shared root
+resolved), `absent` (peek knows the convention, nothing is here), `no-convention` (peek
+knows the agent exists but has no root path for it). A shared tree existing is never
+evidence an agent is installed.
+_Avoid_: installed, available, detected
 
 **Observable**:
 Derived, never stored: an agent is observable when its adapter is present and can

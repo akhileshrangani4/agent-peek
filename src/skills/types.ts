@@ -10,11 +10,11 @@ export type SkillFlag =
   | "no-description"        // no description frontmatter: nearly unpickable by a model
   | "immutable"             // every installation sits in a read-only root
   | "not-model-invocable"   // disable-model-invocation: only a human can reach it
-  | "unreferenced";         // in the shared library root, linked by no agent
+  | "unreferenced";         // no agent peek has verified links to it
 
 /** One agent's access to one skill. */
 export interface SkillInstallation {
-  /** Agent slug, or undefined for the shared library root, which is not an agent. */
+  /** Agent slug, or undefined for a shared tree scanned in its own right. */
   agent?: string;
   rootPath: string;
   rootKind: SkillRootKind;
@@ -52,14 +52,31 @@ export interface Skill {
    * description. An upper bound — some hosts list a name without its description.
    */
   estimatedTokens: number;
-  /** Sum of chargedTokens across installations. */
+  /**
+   * Sum of chargedTokens across installations, excluding project-local ones: a project
+   * skill is paid for only while you work in that repo, so adding it to a machine-wide
+   * figure overstates what any one session costs.
+   */
   chargedTokens: number;
+  /** Charged tokens from project-local installations, kept separate for the same reason. */
+  projectTokens?: number;
   installations: SkillInstallation[];
   flags: SkillFlag[];
 }
 
 export interface Inventory {
   skills: Skill[];
+  /**
+   * Project-local survey. Project skills are loaded only while working in their repo, so
+   * their cost is reported here rather than folded into the machine-wide total.
+   */
+  projects?: {
+    surveyed: string[];
+    found: number;
+    capped: boolean;
+    skills: number;
+    tokens: number;
+  };
   /** Roots walked, in order, including any that turned out to be absent. */
   rootsScanned: { path: string; agent?: string; kind: SkillRootKind; present: boolean }[];
   costBasis: string;

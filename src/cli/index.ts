@@ -16,16 +16,18 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot } from "../agents/index.js";
+import {
+  addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
+} from "../agents/index.js";
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import {
-  buildInventory, buildNameIndex, resolveName,
+  buildInventory, buildNameIndex, builtinRowFilter, discoverProjects,
   buildSkillsReport, expandSkill, joinUsage,
   planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
   manifestDivergence, ArchiveRefusedError,
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
-import { UsageStore, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
+import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/index.js";
 import type { UsageReport } from "../usage/report.js";
@@ -565,9 +567,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         await runSkillsReport(opts);
         return;
       }
-      const projects = String(opts.projects ?? "").split(",").map((p: string) => p.trim()).filter(Boolean)
-        .map((p: string) => resolve(expandHome(p)));
-      const inventory = await buildInventory({ projects });
+      const { projects, discovery } = await resolveProjectSurvey(opts.projects);
+      const inventory = await buildInventory({ projects, projectDiscovery: discovery });
       console.log(JSON.stringify(inventory, null, 2));
     });
 
@@ -774,9 +775,14 @@ async function adaptersWithSessions(): Promise<Set<string>> {
 async function printAgentsCommand(opts: { all: boolean; json: boolean }): Promise<void> {
   const agents = await listAgents();
   const seen = await adaptersWithSessions();
-  const shown = opts.all ? agents : agents.filter((a) => isPresent(a, seen));
-  if (opts.json) { console.log(JSON.stringify(shown, null, 2)); return; }
+  const present = agents.filter((a) => isPresent(a, seen));
+  const shown = opts.all ? agents : present;
+  if (opts.json) {
+    console.log(JSON.stringify({ source: AGENT_TABLE_SOURCE, agents: shown }, null, 2));
+    return;
+  }
   printAgents(shown);
+  printAgentsSummary(agents, present);
 }
 
 function printAgents(agents: ResolvedAgent[]): void {
@@ -788,13 +794,15 @@ function printAgents(agents: ResolvedAgent[]): void {
     const present = agent.roots.filter((r) => r.present);
     return [
       agent.slug,
+      agent.presence,
+      agent.tier ?? "user",
       agent.adapter ?? "-",
       agent.observable ? agent.observes.join(",") : "none",
       agent.manageable ? "yes" : "no",
-      present.length === 0 ? "-" : present.map((r) => formatPath(r.path)).join(" "),
+      (present.length ? present : agent.roots).map((r) => formatPath(r.path)).join(" ") || "-",
     ];
   });
-  const headers = ["AGENT", "ADAPTER", "OBSERVES", "MANAGEABLE", "SKILL ROOTS"];
+  const headers = ["AGENT", "PRESENCE", "SOURCE", "ADAPTER", "OBSERVES", "MANAGEABLE", "SKILL ROOTS"];
   const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
   console.log(fmt(headers));
@@ -885,6 +893,16 @@ function printArchivePlan(plan: ArchivePlan): void {
   console.log("nothing has changed. Re-run with --yes to execute.");
 }
 
+function printAgentsSummary(all: ResolvedAgent[], present: ResolvedAgent[]): void {
+  const verified = all.filter((a) => a.tier === "verified").length;
+  console.log("");
+  console.log(
+    `${present.length} on this machine, ${all.length} known to peek `
+    + `(${verified} verified by peek, ${all.length - verified} sourced from `
+    + `${AGENT_TABLE_SOURCE.package}@${AGENT_TABLE_SOURCE.version}). Use --all to list them.`,
+  );
+}
+
 async function printManifestDivergence(): Promise<void> {
   const divergence = await manifestDivergence(sharedLibraryRoot());
   if (!divergence) return;
@@ -894,6 +912,27 @@ async function printManifestDivergence(): Promise<void> {
   console.log(`shared library manifest (${formatPath(divergence.manifestPath)}) is out of step; peek never writes it:`);
   if (presentButUnlisted.length) console.log(`  on disk but unlisted: ${presentButUnlisted.length}`);
   if (listedButMissing.length) console.log(`  listed but missing: ${listedButMissing.length}`);
+}
+
+/**
+ * Projects to survey: the ones named on the command line, or — by default — the
+ * repositories peek has recorded work in. Explicit beats discovered, so `--projects`
+ * turns discovery off rather than adding to it.
+ */
+async function resolveProjectSurvey(
+  raw: unknown,
+): Promise<{ projects: string[]; discovery?: { found: number; capped: boolean } }> {
+  const named = String(raw ?? "").split(",").map((p) => p.trim()).filter(Boolean)
+    .map((p) => resolve(expandHome(p)));
+  if (named.length) return { projects: named };
+  if (!existsSync(usageDbPath())) return { projects: [] };
+  const store = new UsageStore({});
+  try {
+    const discovered = discoverProjects(store);
+    return { projects: discovered.projects, discovery: { found: discovered.found, capped: discovered.capped } };
+  } finally {
+    store.close();
+  }
 }
 
 async function listAdapters(): Promise<void> {
@@ -1142,7 +1181,7 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
     // Built-in resolution is a row predicate handed to the report, not a pass over its
     // output: filtering after the limit would silently trim the tail a second time.
     const keepRow = skillsOnly && !opts.includeBuiltins
-      ? await builtinRowFilter(groupBy)
+      ? await cliBuiltinRowFilter(groupBy)
       : undefined;
     const report = await buildUsageReport(store, {
       ...(skillsOnly ? { skillsOnly: true } : {}),
@@ -1179,19 +1218,11 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
  * Only a grouping that names something can be resolved; any other passes everything
  * through rather than filtering on a name its rows do not carry.
  */
-async function builtinRowFilter(groupBy: GroupBy[]): Promise<((row: UsageRow) => boolean) | undefined> {
+async function cliBuiltinRowFilter(groupBy: GroupBy[]): Promise<((row: UsageRow) => boolean) | undefined> {
+  // The rule itself lives in src/skills/resolve.ts, shared with the MCP surface: two
+  // copies of a coverage rule is how one of them starts reporting `/clear` as a skill.
   const dim = groupBy.length === 1 ? groupBy[0] : undefined;
-  if (dim !== "skill" && dim !== "tool") return undefined;
-  const index = buildNameIndex(await buildInventory({}));
-  return (row: UsageRow) => {
-    const raw = dim === "skill" ? row.skill : row.tool;
-    if (!raw) return true;
-    // resolveName classifies a built-in only when the name carries its leading slash,
-    // and the index stores it stripped. Testing the slash spelling unconditionally is
-    // safe because resolveName matches the inventory first: a real skill named `clear`
-    // still resolves to itself rather than to the built-in.
-    return resolveName(index, `/${raw}`).outcome !== "not-a-skill";
-  };
+  return builtinRowFilter<UsageRow>(buildNameIndex(await buildInventory({})), dim);
 }
 
 function parseDimensions(dimension: unknown, by: unknown): GroupBy[] {
@@ -1340,9 +1371,8 @@ function formatDimension(row: UsageRow, dim: GroupBy): string {
  * common rows need no caveat.
  */
 async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
-  const projects = String(opts.projects ?? "").split(",").map((p) => p.trim()).filter(Boolean)
-    .map((p) => resolve(expandHome(p)));
-  const inventory = await buildInventory({ projects });
+  const { projects, discovery } = await resolveProjectSurvey(opts.projects);
+  const inventory = await buildInventory({ projects, projectDiscovery: discovery });
   const agents = await listAgents();
   const store = new UsageStore({});
   let joined;

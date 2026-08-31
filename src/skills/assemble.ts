@@ -11,7 +11,7 @@ import type { InstallationCoverage } from "../usage/coverage.js";
 import type { ResolvedAgent } from "../agents/index.js";
 import { buildNameIndex, resolveName } from "./resolve.js";
 import type { Inventory } from "./types.js";
-import type { ReportInput } from "./report.js";
+import type { ReportInput, UnmatchedName } from "./report.js";
 
 /**
  * Resolve recorded invocation names against the inventory and bucket them.
@@ -27,6 +27,13 @@ export function joinUsage(
   agents: ResolvedAgent[],
 ): Omit<ReportInput, "skills" | "costBasis"> {
   const index = buildNameIndex(inventory);
+  // Plugin names peek can see installed, so a `plugin:skill` spelling whose plugin is
+  // gone gets the narrower explanation rather than the generic one.
+  const installedPlugins = new Set(
+    inventory.skills
+      .map((s) => s.qualifiedName?.split(":")[0])
+      .filter((p): p is string => Boolean(p)),
+  );
   const usage = new Map<string, Map<string, number>>();
   const lastSeen = new Map<string, string>();
   const ambiguousKeys = new Set<string>();
@@ -66,6 +73,29 @@ export function joinUsage(
     lastSeen,
     ambiguousKeys,
     coverage,
-    unmatched: [...unmatched].map(([name, uses]) => ({ name, uses })),
+    unmatched: [...unmatched].map(([name, uses]) => classifyUnmatched(name, uses, installedPlugins)),
+  };
+}
+
+/**
+ * What peek can honestly say about a name nothing on disk answers to. It cannot tell an
+ * agent-bundled skill from one uninstalled since — neither leaves a trace — so it reports
+ * both possibilities rather than choosing one and sounding certain.
+ */
+function classifyUnmatched(name: string, uses: number, installedPlugins: Set<string>): UnmatchedName {
+  const prefix = name.includes(":") ? name.split(":")[0]! : undefined;
+  if (prefix && !installedPlugins.has(prefix)) {
+    return {
+      name,
+      uses,
+      reason: "plugin-absent",
+      note: `plugin \`${prefix}\` is not installed here`,
+    };
+  }
+  return {
+    name,
+    uses,
+    reason: "not-on-disk",
+    note: "in no skill root peek surveyed: either the agent ships it, or it was uninstalled since",
   };
 }

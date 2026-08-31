@@ -75,10 +75,10 @@ describe("planArchive", () => {
     expect(plan.actions.every((a) => a.kind === "unlink")).toBe(true);
   });
 
-  it("skips the shared library root rather than removing the content behind everyone's links", async () => {
+  it("skips the shared tree rather than removing the content behind everyone's links", async () => {
     const { inventory } = await fixture();
     const plan = planArchive(inventory, "shared-skill", { allAgents: true });
-    expect(plan.skipped.some((s) => s.reason.includes("shared library root"))).toBe(true);
+    expect(plan.skipped.some((s) => s.reason.includes("shared tree"))).toBe(true);
   });
 
   it("refuses an immutable installation", async () => {

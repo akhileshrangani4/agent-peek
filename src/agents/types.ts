@@ -7,8 +7,36 @@
  */
 export type InvocationKind = "tool_call" | "slash_command";
 
-/** Where a skill root sits in an agent's install layout. */
-export type SkillRootKind = "user" | "plugin" | "project";
+/**
+ * How much peek actually knows about an entry:
+ * - `verified`: peek has resolved this agent's root on a machine that had the agent.
+ * - `sourced`: taken from a named third-party table or official docs, never confirmed by
+ *   peek. A sourced entry self-verifies on a user's machine by resolving, or not.
+ */
+export type AgentTier = "verified" | "sourced";
+
+/** One row of the generated third-party table, before peek's overlay is applied. */
+export interface GeneratedAgent {
+  slug: string;
+  displayName: string;
+  /** Path, relative to a project, this agent reads skills from. */
+  projectDir: string;
+  /** Global root with {home}/{config}/... placeholders, or absent when unresolvable. */
+  globalRoot?: string;
+  /**
+   * Paths whose existence proves the agent itself is installed. Needed because several
+   * agents' skill root is the shared tree, whose existence says nothing about them.
+   */
+  detectPaths?: string[];
+}
+
+/**
+ * Where a skill root sits in an agent's install layout. `shared` is the library tree
+ * (`~/.agents/skills`): several agents read it *directly* rather than symlinking into it,
+ * so it can appear as an agent's own root — but its contents back every other agent's
+ * links, which is why it is never mutable.
+ */
+export type SkillRootKind = "user" | "plugin" | "project" | "shared";
 
 export interface SkillRoot {
   /** Candidate absolute path. Resolved against disk; may not exist. */
@@ -41,6 +69,10 @@ export interface Agent {
    * unknown elsewhere, so cost stays an upper bound rather than a false zero.
    */
   honoursDisableModelInvocation?: boolean;
+  /** How much peek knows about this entry. Absent on a user-registered agent. */
+  tier?: AgentTier;
+  /** Paths proving this agent is installed, independent of any shared skill root. */
+  detectPaths?: string[];
   /** True when the entry came from ~/.agent-peek/agents.json rather than the builtin table. */
   userDefined?: boolean;
 }
@@ -76,4 +108,12 @@ export interface ResolvedAgent extends Omit<Agent, "roots"> {
   attributable: boolean;
   /** At least one present, mutable root — skills here may be archived. */
   manageable: boolean;
+  /** True when one of the agent's own directories exists on this machine. */
+  installed: boolean;
+  /**
+   * - `present`: a declared root resolved on this machine.
+   * - `absent`: peek knows the convention, nothing is here.
+   * - `no-convention`: peek knows the agent exists but has no root path for it.
+   */
+  presence: "present" | "absent" | "no-convention";
 }

@@ -278,10 +278,9 @@ describe("applyFlags", () => {
       description: "d",
       installations: [{ agent: "claude-code", rootPath: "/p", rootKind: "plugin", mutable: false, path: "/p/n", symlink: false, chargedTokens: 1 }],
     }];
-    applyFlags(skills);
+    applyFlags(skills, new Set(["claude-code"]));
     expect(skills[0]!.flags).toEqual(["immutable"]);
   });
-});
 
 describe("plugin version dedupe", () => {
   const install = (version: string, mtimeMs = 0): SkillInstallation => ({
@@ -366,5 +365,23 @@ describe("project-local roots", () => {
       projects: [await mkdtemp(join(tmpdir(), "peek-empty-project-"))],
     });
     expect(inv.rootsScanned.every((r) => r.kind !== "project")).toBe(true);
+  });
+});
+
+  it("keeps `unreferenced` true when only a sourced-tier agent appears to link it", () => {
+    // Several sourced agents are rooted in the shared tree. Letting a third-party table's
+    // claim count as a reference would suppress a real "nothing links to this" finding.
+    const skills: Skill[] = [{
+      key: "k", name: "n", description: "d", modelInvocable: true, estimatedTokens: 1,
+      chargedTokens: 1, flags: [],
+      installations: [{
+        agent: "zed", rootPath: "/shared", rootKind: "shared", mutable: false,
+        path: "/shared/n", symlink: false, chargedTokens: 0,
+      }],
+    }];
+    applyFlags(skills, new Set(["claude-code"]));
+    expect(skills[0]!.flags).toContain("unreferenced");
+    applyFlags(skills, new Set(["zed"]));
+    expect(skills[0]!.flags).not.toContain("unreferenced");
   });
 });

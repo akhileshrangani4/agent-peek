@@ -12,7 +12,7 @@ export {
 } from "./inventory.js";
 export type { InventoryOptions } from "./inventory.js";
 export {
-  buildNameIndex, resolveName, resolveNames, invocationName, CLI_BUILTINS,
+  buildNameIndex, resolveName, resolveNames, invocationName, builtinRowFilter, CLI_BUILTINS,
 } from "./resolve.js";
 export type { NameIndex } from "./resolve.js";
 export {
@@ -26,3 +26,6 @@ export type {
 export { buildSkillsReport, expandSkill, selectableForArchive } from "./report.js";
 export type { SkillsReport, Segment, SegmentId, SkillRow, InstallationRow, ReportInput } from "./report.js";
 export { joinUsage } from "./assemble.js";
+export { gitRootFor, projectRootsFromCwds, PROJECT_SCAN_LIMIT } from "./projects.js";
+export type { ProjectDiscovery } from "./projects.js";
+export { discoverProjects } from "./discover.js";

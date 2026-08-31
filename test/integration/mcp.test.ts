@@ -40,8 +40,15 @@ describe("MCP integration", () => {
     await client.connect(transport);
 
     const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name).sort()).toEqual(
-      ["coordination_digest", "expand_post", "list_sessions", "peek_session", "post_to_feed", "read_feed", "tag_session"]);
+    expect(tools.tools.map((t) => t.name).sort()).toEqual([
+      "archive_plan", "coordination_digest", "expand_post", "list_agents", "list_sessions",
+      "peek_session", "post_to_feed", "read_feed", "skill_detail", "skills_report",
+      "tag_session", "usage_report",
+    ]);
+    // Nothing on this surface mutates a skill root: archive_plan returns a plan and the
+    // command a human runs, and there is deliberately no archive or restore tool.
+    expect(tools.tools.map((t) => t.name)).not.toContain("archive_skill");
+    expect(tools.tools.map((t) => t.name)).not.toContain("restore_skill");
 
     const res = await client.callTool({ name: "list_sessions", arguments: {} });
     const text = (res.content as any)?.[0]?.text ?? "[]";

@@ -1,5 +1,6 @@
 // src/adapters/types.ts
 import type { SessionEntry, RawMessage, Cursor } from "../core/types.js";
+import type { InvocationKind } from "../agents/types.js";
 
 export interface AdapterReadResult {
   messages: RawMessage[];
@@ -10,6 +11,15 @@ export interface AdapterReadResult {
 export interface Adapter {
   /** Stable adapter name. Used as id prefix and registry key. */
   name: string;
+
+  /**
+   * Which kinds of skill invocation this parser can extract. Declared here because
+   * seeing a slash command is a property of the parser, not of the agent: an adapter
+   * that reads structured tool calls but has no slash syntax to extract leaves
+   * human-initiated usage invisible, which is a different state from "never used".
+   * Omitted means none, which is honest for an adapter that surfaces no tool calls.
+   */
+  observes?: InvocationKind[];
 
   /** Discover sessions on disk. Returns SessionEntry[]; loader merges into registry. */
   scan(): Promise<SessionEntry[]>;

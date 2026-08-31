@@ -99,6 +99,14 @@ export async function resolveAgent(agent: Agent): Promise<ResolvedAgent> {
     roots.push({ ...root, present: await isDir(root.path) });
   }
   const observes = adapterObserves(agent.adapter);
+  let installed = false;
+  for (const path of agent.detectPaths ?? []) {
+    if (await isDir(path)) { installed = true; break; }
+  }
+  // A root that resolves is evidence the agent is here — unless that root is the shared
+  // tree, which exists for anyone who has ever used the installer and says nothing about
+  // whether this particular agent is installed. Those agents need their own directory.
+  const ownRootPresent = roots.some((r) => r.present && r.kind !== "shared");
   const attributes = adapterAttributes(agent.adapter);
   return {
     ...agent,
@@ -108,6 +116,10 @@ export async function resolveAgent(agent: Agent): Promise<ResolvedAgent> {
     attributes,
     attributable: attributes.length > 0,
     manageable: roots.some((r) => r.present && r.mutable),
+    installed,
+    presence: ownRootPresent || installed ? "present"
+      : roots.length === 0 ? "no-convention"
+      : "absent",
   };
 }
 
@@ -122,7 +134,7 @@ export async function listAgents(opts: AgentRegistryOptions = {}): Promise<Resol
  * could support from what is actually installed here.
  */
 export function isPresent(agent: ResolvedAgent, adaptersWithSessions: Set<string> = new Set()): boolean {
-  if (agent.roots.some((r) => r.present)) return true;
+  if (agent.presence === "present") return true;
   return Boolean(agent.adapter && adaptersWithSessions.has(agent.adapter));
 }
 
