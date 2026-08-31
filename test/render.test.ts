@@ -65,3 +65,48 @@ describe("colorEnabled", () => {
     expect(colorEnabled()).toBe(true);
   });
 });
+
+describe("segment naming (ticket 15)", () => {
+  it("accepts every label it shows on screen", async () => {
+    // The header read "reclaimable", the id was `archivable`, and the flag took only
+    // the id — so a user read the word, typed it, and got an empty result, which reads
+    // as "nothing here" rather than "wrong word". Same shape as the observes/attributes
+    // invariant: two representations of one fact that must not drift.
+    const { segmentWords, resolveSegment } = await import("../src/cli/skills-report.js");
+    for (const { id, label } of segmentWords()) {
+      expect(resolveSegment(label), `label shown as "${label}"`).toBe(id);
+      expect(resolveSegment(id), `id "${id}"`).toBe(id);
+    }
+  });
+
+  it("tolerates the spacing a user would actually type", async () => {
+    const { resolveSegment } = await import("../src/cli/skills-report.js");
+    expect(resolveSegment("in use")).toBe("in-use");
+    expect(resolveSegment("In-Use")).toBe("in-use");
+    expect(resolveSegment("READ-ONLY")).toBe("read-only");
+  });
+
+  it("returns undefined for a word it does not know, rather than an empty result", async () => {
+    const { resolveSegment } = await import("../src/cli/skills-report.js");
+    expect(resolveSegment("nonsense")).toBeUndefined();
+  });
+});
+
+describe("sparkline", () => {
+  it("renders one cell per bucket", async () => {
+    const { sparkline } = await import("../src/cli/render.js");
+    expect([...sparkline([0, 1, 2, 3])].length).toBe(4);
+  });
+
+  it("scales to the row's own maximum, so a quiet skill is still legible", async () => {
+    const { sparkline } = await import("../src/cli/render.js");
+    expect(sparkline([0, 4])).toBe("▁█");
+    expect(sparkline([0, 400])).toBe("▁█");
+  });
+
+  it("is empty for no data rather than throwing", async () => {
+    const { sparkline, sparklineBlank } = await import("../src/cli/render.js");
+    expect(sparkline([])).toBe("");
+    expect(sparklineBlank(4)).toBe("────");
+  });
+});

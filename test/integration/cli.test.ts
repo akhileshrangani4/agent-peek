@@ -1,10 +1,11 @@
 // test/integration/cli.test.ts
-import { describe, it, expect } from "vitest";
+import { describe, it, expect , beforeAll} from "vitest";
 import { spawn } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { assertDistFresh } from "../helpers/fresh-dist.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = resolve(__dirname, "../../bin/peek.js");
@@ -18,6 +19,8 @@ function runCli(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ code: nu
     p.on("close", (code) => res({ code: code ?? 0, stdout: out, stderr: err }));
   });
 }
+
+beforeAll(() => assertDistFresh());
 
 describe("CLI integration", () => {
   it("--help prints usage", async () => {

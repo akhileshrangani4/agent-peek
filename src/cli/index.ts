@@ -23,7 +23,7 @@ import {
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import {
   buildInventory, buildNameIndex, builtinRowFilter, discoverProjects,
-  buildSkillsReport, expandSkill, joinUsage,
+  buildSkillsReport, expandSkill, joinUsage, usageSeries,
   planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
   manifestDivergence, ArchiveRefusedError,
 } from "../skills/index.js";
@@ -1473,8 +1473,10 @@ async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
   const agents = await listAgents();
   const store = new UsageStore({});
   let joined;
+  let shape: { series: Map<string, number[]>; days: number };
   try {
     joined = joinUsage(store, inventory, agents);
+    shape = usageSeries(store, inventory);
   } finally {
     store.close();
   }
@@ -1502,6 +1504,8 @@ async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
     ...(opts.width ? { width: Number(opts.width) } : {}),
     ...(opts.color ? { color: true } : {}),
     ...(rowLimit === undefined ? {} : { limit: rowLimit }),
+    series: shape.series,
+    seriesDays: shape.days,
     blindAgents,
   };
   if (typeof opts.segment === "string") {

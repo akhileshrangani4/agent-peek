@@ -5,11 +5,30 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { Row, Rows, Rule, num, overflow, renderStatic, terminalWidth } from "./render.js";
+import { Row, Rows, Rule, num, overflow, renderStatic, sparkline, sparklineBlank, terminalWidth } from "./render.js";
 import type { Role } from "./render.js";
 import type { SkillsReport, SkillRow } from "../skills/report.js";
 
 const h = React.createElement;
+
+/**
+ * A label shown on screen must be accepted by `--segment`. The header read
+ * "reclaimable", the id was `archivable`, and the flag took only the id — so a user
+ * read the word, typed it, and got an empty result, which reads as "nothing here"
+ * rather than "wrong word". Both spellings resolve; `SEGMENT_WORDS` pins it in a test.
+ */
+export function resolveSegment(word: string): string | undefined {
+  const key = word.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  for (const [id, label] of Object.entries(LABEL)) {
+    if (key === id || key === label.toLowerCase().replace(/\s+/g, "-")) return id;
+  }
+  return undefined;
+}
+
+/** Every word a user can read on screen, for the test that pins the flag to the UI. */
+export function segmentWords(): { id: string; label: string }[] {
+  return Object.entries(LABEL).map(([id, label]) => ({ id, label }));
+}
 
 const LABEL: Record<string, string> = {
   archivable: "reclaimable",
@@ -24,7 +43,13 @@ const ROLE: Record<string, Role> = {
   "in-use": "live",
 };
 
+/** skill name -> per-bucket invocation counts, for the sparkline column. */
+export type UsageSeries = Map<string, number[]>;
+
 export interface SkillsViewOptions {
+  /** Per-bucket counts per skill, and how many days the buckets span. */
+  series?: UsageSeries;
+  seriesDays?: number;
   width?: number;
   color?: boolean;
   /** Rows shown per segment before the overflow line. */
@@ -72,12 +97,15 @@ function skillCells(row: SkillRow, nameW: number) {
   ];
 }
 
-function View({ report, width, limit, blindAgents }: {
+function View({ report, width, limit, blindAgents, series, seriesDays }: {
   report: SkillsReport; width: number; limit: number; blindAgents: number;
+  series: UsageSeries; seriesDays: number;
 }): React.JSX.Element {
   const arch = report.segments.find((s) => s.id === "archivable");
   const used = report.segments.find((s) => s.id === "in-use");
   const nameW = Math.min(32, Math.max(18, width - 48));
+  // Drop the sparkline rather than squeezing the name column when space is tight.
+  const seriesCells = width >= 88 ? 15 : width >= 76 ? 10 : 0;
   const headRight = `${num(report.totalSkills)} skills`;
 
   return h(Box, { flexDirection: "column", width },
@@ -103,7 +131,7 @@ function View({ report, width, limit, blindAgents }: {
           h(Row, { key: r.key, cells: skillCells(r, nameW) }))),
         arch.rows.length > limit
           ? h(Box, { marginTop: 1 }, h(Text, { dimColor: true },
-            `     ${overflow(limit, arch.rows.length, "peek skills --segment archivable")}`))
+            `     ${overflow(limit, arch.rows.length, `peek skills --segment ${LABEL.archivable}`)}`))
           : null)
       : null,
 
@@ -113,14 +141,26 @@ function View({ report, width, limit, blindAgents }: {
         h(Rows, null, ...[...used.rows]
           .sort((a, b) => (b.uses ?? 0) - (a.uses ?? 0))
           .slice(0, limit)
-          .map((r) => h(Row, {
-            key: r.key,
-            cells: [
-              { text: r.name, width: nameW },
-              { text: r.usesLabel, role: "muted" as Role, width: 8, align: "right" as const },
-              { text: r.lastSeen ? relative(r.lastSeen) : "", role: "muted" as Role, width: 9, align: "right" as const },
-            ],
-          }))))
+          .map((r) => {
+            const counts = series.get(r.name);
+            const cells = seriesCells > 0
+              ? [{
+                text: counts ? sparkline(counts) : sparklineBlank(seriesCells),
+                role: (counts ? "live" : "muted") as Role,
+                width: seriesCells,
+              }]
+              : [];
+            return h(Row, {
+              key: r.key,
+              cells: [
+                { text: r.name, width: nameW },
+                ...cells,
+                { text: r.usesLabel, role: "muted" as Role, width: 6, align: "right" as const },
+                { text: r.lastSeen ? relative(r.lastSeen) : "", role: "muted" as Role, width: 8, align: "right" as const },
+              ],
+            });
+          })),
+        h(Box, { marginTop: 1 }, h(Text, { dimColor: true }, `     last ${seriesDays} days`)))
       : null,
 
     h(Box, { marginTop: 1 }, h(Text, { dimColor: true },
@@ -137,13 +177,14 @@ function relative(iso: string): string {
 function SegmentView({ report, width, segment }: {
   report: SkillsReport; width: number; segment: string;
 }): React.JSX.Element {
-  const seg = report.segments.find((s) => s.id === segment);
+  const resolved = resolveSegment(segment) ?? segment;
+  const seg = report.segments.find((s) => s.id === resolved);
   const nameW = Math.min(32, Math.max(18, width - 48));
   if (!seg) {
     return h(Box, { flexDirection: "column", width },
       h(Text, null, `Unknown segment: ${segment}`),
       h(Text, { dimColor: true },
-        `Valid: ${report.segments.map((s) => s.id).join(", ")}`));
+        `Valid: ${segmentWords().map((w) => w.label).join(", ")}`));
   }
   return h(Box, { flexDirection: "column", width },
     h(Rule, {
@@ -170,7 +211,10 @@ export async function renderSkillsReport(
 ): Promise<void> {
   const width = terminalWidth(opts.width);
   await renderStatic(
-    h(View, { report, width, limit: opts.limit ?? 8, blindAgents: opts.blindAgents ?? 0 }),
+    h(View, {
+      report, width, limit: opts.limit ?? 8, blindAgents: opts.blindAgents ?? 0,
+      series: opts.series ?? new Map(), seriesDays: opts.seriesDays ?? 30,
+    }),
     { forceColor: opts.color, width },
   );
 }
