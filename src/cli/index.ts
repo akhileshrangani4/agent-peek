@@ -16,7 +16,7 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { displayWidth, fit, shortenPath, wrapList } from "./paths.js";
+import { displayWidth, fit, shortenPath, wrap, wrapList } from "./paths.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
@@ -910,15 +910,32 @@ function printArchivePlan(plan: ArchivePlan): void {
 
 function printAgentsSummary(all: ResolvedAgent[], present: ResolvedAgent[]): void {
   const verified = all.filter((a) => a.tier === "verified").length;
-  const unconfirmed = all.filter((a) => a.presence === "unconfirmed").length;
+  // Aligned type rather than a graphic: four counts are a fact about grouping, not a
+  // quantity worth plotting, and a right-aligned grid reads faster than a sentence.
+  const counts: [string, number][] = [
+    ["present", all.filter((a) => a.presence === "present").length],
+    ["unconfirmed", all.filter((a) => a.presence === "unconfirmed").length],
+    ["absent", all.filter((a) => a.presence === "absent").length],
+    ["no convention", all.filter((a) => a.presence === "no-convention").length],
+  ];
+  const width = Math.max(...counts.map(([, n]) => String(n).length));
   console.log("");
-  console.log(`${present.length} present, ${unconfirmed} unconfirmed, ${all.length} known to peek.`);
-  console.log(
-    `  ${verified} verified by peek, ${all.length - verified} sourced from `
-    + `${AGENT_TABLE_SOURCE.package}@${AGENT_TABLE_SOURCE.version}.`,
-  );
-  console.log("  unconfirmed: a skill root exists, but nothing else does — the installer");
-  console.log("  creates those directories, so peek will not claim the agent is installed.");
+  for (const [label, n] of counts) {
+    if (n === 0) continue;
+    const pct = Math.round((n / all.length) * 100);
+    console.log(`  ${label.padEnd(15)}${String(n).padStart(width)}   ${String(pct).padStart(3)}%`);
+  }
+  console.log("");
+  for (const line of wrap(
+    `${all.length} agents known to peek: ${verified} verified locally, `
+    + `${all.length - verified} sourced from ${AGENT_TABLE_SOURCE.package}@${AGENT_TABLE_SOURCE.version}.`,
+    76, "  ",
+  )) console.log(line);
+  for (const line of wrap(
+    "unconfirmed means a skill root exists but nothing else does: the installer creates "
+    + "those directories, so peek will not claim the agent is installed.",
+    76, "  ",
+  )) console.log(line);
 }
 
 async function printManifestDivergence(): Promise<void> {
