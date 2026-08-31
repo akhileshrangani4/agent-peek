@@ -431,10 +431,16 @@ describe("CLI integration", () => {
     const r = await runCli(["doctor"], { HOME: home });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/agent-peek \d+\.\d+\.\d+/);
-    expect(r.stdout).toMatch(/ADAPTER/);
+    // ADAPTER and "next:" were ALLCAPS/label chrome that ticket 15 replaced with rules
+    // and a command list. Assert what the report must SAY rather than how it is decorated,
+    // so a restyle does not fail and a lost capability does.
     expect(r.stdout).toMatch(/claude-code/);
     expect(r.stdout).toMatch(/tmux/);
-    expect(r.stdout).toMatch(/next:/);
+    // every adapter is accounted for under some status heading
+    expect(r.stdout).toMatch(/── (ready|opt-in|needs command|not found) ─/);
+    // the follow-on commands are still offered
+    expect(r.stdout).toMatch(/peek agents/);
+    expect(r.stdout).toMatch(/peek list --terminals/);
   });
 });
 

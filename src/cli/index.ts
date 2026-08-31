@@ -16,11 +16,10 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { displayWidth, fit, shortenPath, wrapList } from "./paths.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
-import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
+import type { SkillRoot } from "../agents/index.js";
 import {
   buildInventory, buildNameIndex, builtinRowFilter, discoverProjects,
   buildSkillsReport, expandSkill, joinUsage,
@@ -31,6 +30,7 @@ import type { ArchivePlan, InstallationRow } from "../skills/index.js";
 import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
 import { renderAgents } from "./agents-report.js";
 import { renderList } from "./list-report.js";
+import { renderDoctor } from "./doctor-report.js";
 import type { Inventory } from "../skills/types.js";
 import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
@@ -742,13 +742,19 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek doctor")
     .example("peek doctor --json")
     .option("--json", "Output machine-readable diagnostic JSON")
+    .option("--color", "Force colour even when piped")
+    .option("--width <n>", "Render at this width instead of the terminal width")
     .action(async (opts) => {
       const rows = await doctorRows();
       const seen = await adaptersWithSessions();
       const agents = (await listAgents()).filter((a) => isPresent(a, seen));
       const divergence = await manifestDivergence(sharedLibraryRoot());
       if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents, divergence }, null, 2)); return; }
-      printDoctor(rows, agents);
+      await renderDoctor(rows, agents, {
+        version: VERSION,
+        color: Boolean(opts.color),
+        width: opts.width === undefined ? undefined : Number(opts.width),
+      });
       await printManifestDivergence();
     });
 
@@ -2149,54 +2155,6 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function printDoctor(rows: DoctorRow[], agents?: ResolvedAgent[]): void {
-  const ready = rows.filter((row) => row.status === "ready").length;
-  const optIn = rows.filter((row) => row.status === "opt-in").length;
-  const blocked = rows.filter((row) => row.status === "needs command").length;
-  // The NOTE column ran the table to 158 columns for a sentence repeated per row. Notes
-  // print under the table instead, once per adapter that has one.
-  const table = rows.map((row) => [
-    row.adapter,
-    row.status,
-    row.source,
-    row.path ? shortenPath(row.path, 34) : row.command ?? "-",
-  ]);
-  const headers = ["ADAPTER", "STATUS", "SOURCE", "TARGET"];
-  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => displayWidth(r[i]!))));
-  const fmt = (r: string[]) => r.map((v, i) => v + " ".repeat(Math.max(0, cols[i]! - displayWidth(v)))).join("  ").trimEnd();
-  console.log(`agent-peek ${VERSION}`);
-  console.log(`ready: ${ready}  opt-in: ${optIn}  needs-command: ${blocked}`);
-  console.log("");
-  console.log(fmt(headers));
-  for (const row of table) console.log(fmt(row));
-  const notes = rows.filter((r) => r.note);
-  if (notes.length) {
-    console.log("");
-    for (const row of notes) console.log(`  ${row.adapter}: ${fit(row.note!, 72 - row.adapter.length)}`);
-  }
-  if (agents) {
-    const observable = agents.filter((a) => a.observable).length;
-    const manageable = agents.filter((a) => a.manageable).length;
-    console.log("");
-    console.log(`agents on this machine: ${agents.length}  observable: ${observable}  manageable: ${manageable}`);
-    // Lists of agent slugs run past 80 columns as soon as there are more than a handful,
-    // so they wrap rather than being truncated: the names are the content.
-    const listLine = (label: string, slugs: string[]) => {
-      for (const line of wrapList(label, slugs, 78)) console.log(line);
-    };
-    listLine("usage not observable (no adapter)", agents.filter((a) => !a.adapter).map((a) => a.slug));
-    listLine("usage not observable (adapter parses no tool calls)",
-      agents.filter((a) => a.adapter && !a.observable).map((a) => a.slug));
-    listLine("slash-command usage not observable",
-      agents.filter((a) => a.observable && !a.observes.includes("slash_command")).map((a) => a.slug));
-  }
-  console.log("");
-  console.log("next:");
-  console.log("  - use `peek agents` to see skill roots and what usage peek can observe");
-  console.log("  - use `peek list` to discover ready file/database adapters");
-  console.log("  - use `peek list --terminals` to opt into tmux/screen capture");
-  console.log("  - use `peek update` to check whether this CLI is current");
-}
 
 function isTerminalAdapter(adapter: unknown): boolean {
   return typeof adapter === "string" && TERMINAL_ADAPTERS.has(adapter);
