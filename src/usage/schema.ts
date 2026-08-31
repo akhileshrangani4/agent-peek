@@ -44,7 +44,9 @@ export interface Invocation {
   tool: string;
   /**
    * Whitelisted, named argument. Never the raw input blob — see ADR 0001.
-   * For `Skill`, the skill argument. Null where the whitelist extracts nothing.
+   * For a `Skill` tool call, the skill argument. For a slash command, the command
+   * name (so a skill invoked both ways groups together). Null where the whitelist
+   * extracts nothing.
    */
   skill: string | null;
 
