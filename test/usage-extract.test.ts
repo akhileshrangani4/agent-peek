@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  claudeCodeExtractor, defaultExtractor, extractorFor, registerExtractor, whitelistedArgument,
+  claudeCodeExtractor, codexExtractor, defaultExtractor, extractorFor, registerExtractor,
+  whitelistedArgument,
 } from "../src/usage/extract.js";
 import type { ExtractContext } from "../src/usage/extract.js";
 import type { RawMessage } from "../src/core/types.js";
@@ -196,13 +197,14 @@ describe("extractor registry", () => {
     expect(extractorFor("claude-code")).toBe(claudeCodeExtractor);
   });
 
-  it("defaults every other adapter to tool calls only", () => {
-    // Codex has no Skill tool at all; its extractor is a separate future function.
-    expect(extractorFor("codex")).toBe(defaultExtractor);
+  it("defaults an adapter with no extractor to tool calls only", () => {
+    // gemini has no extractor of its own, so its slash invocations — if it has any —
+    // are unattributable, which is why its `attributes` entry stays empty.
+    expect(extractorFor("gemini")).toBe(defaultExtractor);
     const rows = defaultExtractor([{
       role: "user", raw: { type: "user", message: { content: "<command-name>/clear</command-name>" } },
       toolCalls: [{ name: "exec" }],
-    }], { ...ctx, adapter: "codex" });
+    }], { ...ctx, adapter: "gemini" });
     expect(rows.map((r) => r.tool)).toEqual(["exec"]);
   });
 
@@ -210,5 +212,91 @@ describe("extractor registry", () => {
     const custom = () => [];
     registerExtractor("made-up", custom);
     expect(extractorFor("made-up")).toBe(custom);
+  });
+});
+
+describe("codexExtractor", () => {
+  const codexCtx: ExtractContext = { ...ctx, adapter: "codex", agent: "codex" };
+
+  /** The shape codex writes twice: once as an event, once as a response item. */
+  function userTurn(text: string): RawMessage {
+    return {
+      role: "user",
+      timestamp: "2026-08-30T12:00:00.000Z",
+      raw: {
+        type: "response_item",
+        timestamp: "2026-08-30T12:00:00.000Z",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+      },
+    };
+  }
+  function eventCopy(text: string): RawMessage {
+    // The adapter normalises event_msg to role "system"; this is the duplicate record.
+    return {
+      role: "system",
+      raw: { type: "event_msg", payload: { type: "user_message", message: text } },
+    };
+  }
+
+  it("extracts a slash invocation from a codex user turn", () => {
+    const rows = codexExtractor([userTurn("<command-name>/humanizer-zh</command-name>")], codexCtx);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sourceKind: "slash_command", tool: "humanizer-zh", skill: "humanizer-zh",
+      callIndex: 0, adapter: "codex",
+    });
+  });
+
+  it("counts one invocation despite codex writing every user turn twice", () => {
+    // event_msg/user_message and response_item/message[role=user] are the SAME
+    // invocation. Reading both shapes doubles every count.
+    const text = "<command-name>/ce-code-review</command-name>";
+    const rows = codexExtractor([eventCopy(text), userTurn(text)], codexCtx);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("ignores a command echoed in tool output", () => {
+    const rows = codexExtractor([{
+      role: "tool",
+      raw: {
+        type: "response_item",
+        payload: { type: "custom_tool_call_output", output: "<command-name>/clear</command-name>" },
+      },
+    }], codexCtx);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("ignores an assistant message quoting a command", () => {
+    const rows = codexExtractor([{
+      role: "assistant",
+      raw: {
+        type: "response_item",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "<command-name>/mcp</command-name>" }] },
+      },
+    }], codexCtx);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("counts one invocation per turn however many tags the turn carries", () => {
+    const rows = codexExtractor([userTurn(
+      "<command-name>/mcp</command-name> and <command-name>/mcp</command-name>",
+    )], codexCtx);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("still records codex tool calls, which remain unattributable to a skill", () => {
+    // A codex skill invocation is an `exec` like any other, so tool calls are indexed
+    // but never carry a skill name. That is what makes codex partial, not attributed.
+    const rows = codexExtractor([{
+      role: "assistant",
+      raw: { type: "response_item", payload: { type: "function_call" } },
+      toolCalls: [{ name: "exec_command" }],
+    }], codexCtx);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ sourceKind: "tool_call", tool: "exec_command", skill: null });
+  });
+
+  it("is the registered extractor for codex", () => {
+    expect(extractorFor("codex")).toBe(codexExtractor);
   });
 });
