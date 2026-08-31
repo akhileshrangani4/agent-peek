@@ -119,7 +119,7 @@ export interface UsageToolArgs {
 
 /**
  * 03's `UsageReport` verbatim: rows plus window, per-adapter windows, blindSpots,
- * partial, truncated. Trimming it to rows is what turns "these counts cover 33 days on
+ * partiallyObserved, truncated. Trimming it to rows is what turns "these counts cover 33 days on
  * claude-code and three agents are unreadable" into a confident wrong answer.
  */
 export async function usageTool(args: UsageToolArgs) {

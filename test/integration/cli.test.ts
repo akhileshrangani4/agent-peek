@@ -438,6 +438,32 @@ describe("CLI integration", () => {
   });
 });
 
+describe("skills --json segmentation", () => {
+  it("labels every skill with its segment and carries per-segment totals", async () => {
+    // Without this a consumer cannot reproduce the segmentation that makes the tool
+    // safe to act on: the human report says a skill is archivable and the JSON did not
+    // say which bucket anything was in, so verifying "no archivable row lacks a mutable
+    // installation" from the outside was impossible.
+    const r = await runCli(["skills", "--json"]);
+    expect(r.code).toBe(0);
+    const doc = JSON.parse(r.stdout) as {
+      skills: { segment?: string; installations: { mutable: boolean }[] }[];
+      segments: { id: string; count: number; tokens: number }[];
+    };
+    expect(Array.isArray(doc.segments)).toBe(true);
+    expect(doc.segments.map((s) => s.id)).toContain("archivable");
+    expect(doc.skills.every((s) => typeof s.segment === "string")).toBe(true);
+
+    // The assertion this field exists to make checkable from outside.
+    const archivable = doc.skills.filter((s) => s.segment === "archivable");
+    expect(archivable.every((s) => s.installations.some((i) => i.mutable))).toBe(true);
+
+    // The summary must agree with the rows it summarises.
+    const counted = doc.segments.find((s) => s.id === "archivable")!.count;
+    expect(counted).toBe(archivable.length);
+  }, 120_000);
+});
+
 describe("presentation invariants (ticket 15)", () => {
   const commands = [["agents"], ["agents", "--all"], ["list"], ["doctor"]];
   const ANSI = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*m", "g");

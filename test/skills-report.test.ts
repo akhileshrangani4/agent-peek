@@ -131,6 +131,21 @@ describe("buildSkillsReport segmentation", () => {
     expect(segment(report, "archivable").rows.map((r) => r.name)).toEqual(["big", "small"]);
   });
 
+  it("carries the root of each copy, so same-name skills can be told apart", () => {
+    // Ticket 04 keeps divergent copies of one name separate on purpose: the installer
+    // copies rather than links, so one name can be many distinct skills. A renderer
+    // needs something to distinguish rows that would otherwise look identical.
+    const report = buildSkillsReport(input({
+      skills: [
+        skill({ key: "a", installations: [install({ rootPath: "/home/u/.agents/skills" })] }),
+        skill({ key: "b", installations: [install({ rootPath: "/home/u/.zencoder/skills" })] }),
+      ],
+    }));
+    const roots = segment(report, "archivable").rows.map((r) => r.rootHint);
+    expect(new Set(roots).size).toBe(2);
+    expect(roots.every((r) => r.length > 0)).toBe(true);
+  });
+
   it("reports unmatched invocation names beside the segments, never inside them", () => {
     const report = buildSkillsReport(input({
       unmatched: [{ name: "gone", uses: 2, reason: "not-on-disk" as const, note: "" }, { name: "pre-pr-duplication", uses: 9, reason: "not-on-disk" as const, note: "" }],

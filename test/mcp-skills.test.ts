@@ -120,7 +120,7 @@ describe("usage_report", () => {
     expect(report!).toHaveProperty("window");
     expect(report!).toHaveProperty("windows");
     expect(report!).toHaveProperty("blindSpots");
-    expect(report!).toHaveProperty("partial");
+    expect(report!).toHaveProperty("partiallyObserved");
     expect(report!).toHaveProperty("truncated");
     expect(report!.rows.length).toBeGreaterThan(0);
   });

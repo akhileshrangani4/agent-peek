@@ -138,3 +138,34 @@ describe("explainCoverage", () => {
     expect(line).toContain("tool_call");
   });
 });
+
+describe("adapter capability tables agree", () => {
+  it("never attributes an invocation kind it cannot observe", async () => {
+    // Attribution is strictly downstream of seeing: an adapter that can name the skill
+    // in an invocation must, by definition, be able to see that invocation.
+    //
+    // This invariant exists because the tables drifted. Ticket 13 taught the codex
+    // extractor to read slash commands and updated ADAPTER_ATTRIBUTES but not
+    // ADAPTER_OBSERVES, so `peek usage` printed "codex: slash_command invocations not
+    // observable" directly above codex rows that could only have come from slash
+    // commands. It is the second time in this effort that state split across two
+    // tables drifted, and both times the fix was a test asserting the relationship
+    // rather than remembering to update the second place.
+    const { adapterObserves, adapterAttributes } = await import("../src/agents/builtin.js");
+    const adapters = [
+      "claude-code", "codex", "gemini", "goose", "opencode", "copilot-cli", "tmux", "screen",
+    ];
+    for (const adapter of adapters) {
+      const observes = adapterObserves(adapter);
+      for (const kind of adapterAttributes(adapter)) {
+        expect(observes, `${adapter} attributes ${kind} but does not observe it`).toContain(kind);
+      }
+    }
+  });
+
+  it("holds for an adapter peek has never heard of", async () => {
+    const { adapterObserves, adapterAttributes } = await import("../src/agents/builtin.js");
+    expect(adapterObserves("made-up")).toEqual([]);
+    expect(adapterAttributes("made-up")).toEqual([]);
+  });
+});

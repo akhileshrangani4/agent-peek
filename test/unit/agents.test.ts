@@ -109,7 +109,10 @@ describe("builtin agent table", () => {
 describe("adapter observability", () => {
   it("reports invocation kinds per adapter, not per product", () => {
     expect(adapterObserves("claude-code")).toEqual(["tool_call", "slash_command"]);
-    expect(adapterObserves("codex")).toEqual(["tool_call"]);
+    // codex gained slash_command when ticket 13 shipped its extractor; gemini still
+    // sees tool calls only, so the per-adapter distinction is asserted there.
+    expect(adapterObserves("codex")).toEqual(["tool_call", "slash_command"]);
+    expect(adapterObserves("gemini")).toEqual(["tool_call"]);
   });
 
   it("reports no kinds for an adapter whose parser surfaces no tool calls", () => {
@@ -156,7 +159,8 @@ describe("resolveAgent", () => {
   it("distinguishes three usage states: full, blind, and tool-calls-only", async () => {
     const base = { displayName: "x", roots: [] };
     const full = await resolveAgent({ ...base, slug: "claude-code", adapter: "claude-code" });
-    const partial = await resolveAgent({ ...base, slug: "codex", adapter: "codex" });
+    // gemini, not codex: codex gained slash_command with its ticket 13 extractor.
+    const partial = await resolveAgent({ ...base, slug: "gemini", adapter: "gemini" });
     const blind = await resolveAgent({ ...base, slug: "cursor" });
 
     expect(full.observable).toBe(true);
@@ -168,6 +172,16 @@ describe("resolveAgent", () => {
 
     expect(blind.observable).toBe(false);
     expect(blind.observes).toEqual([]);
+  });
+
+  it("attributes only what the shipped extractor reads, which may be less than it observes", async () => {
+    // codex observes both kinds but attributes only slash commands: a codex skill
+    // invocation on the tool-call path is an `exec` like any other. This is the gap
+    // between seeing an invocation and knowing which skill it was.
+    const codex = await resolveAgent({ displayName: "x", roots: [], slug: "codex", adapter: "codex" });
+    expect(codex.observes).toEqual(["tool_call", "slash_command"]);
+    expect(codex.attributes).toEqual(["slash_command"]);
+    expect(codex.attributable).toBe(true);
   });
 
   it("never stores the derived flags on the input agent", async () => {

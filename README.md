@@ -319,6 +319,57 @@ peek forget <id>
 peek untag researcher
 ```
 
+## Skill Usage
+
+Which skills do you actually use, across every agent on this machine, and which
+are costing you context for nothing?
+
+```bash
+peek usage                       # skills, most used first
+peek usage --since 7d            # a duration or an ISO date
+peek usage sourceKind            # agent-invoked vs. you typing a slash command
+peek skills                      # inventory, segmented by what you can act on
+peek skills --interactive        # browse and mark for archiving
+```
+
+`peek usage` is backed by a durable index under `~/.agent-peek/`, built by
+scanning local transcripts. That durability is the point: Claude Code deletes
+session transcripts after 30 days, so without an index your usage history is a
+rolling window that keeps forgetting.
+
+**Four things worth knowing before you delete a skill.** They are the difference
+between a tool that helps and one that confidently recommends removing something
+you rely on:
+
+1. **A zero can mean "not used" or "not seen."** peek can attribute an invocation
+   to a skill only on agents whose transcripts it reads and whose invocations
+   name the skill. Elsewhere it prints **`unknown`**, never `0`, and excludes the
+   row from bulk actions. A skill is offered for archiving only when *every*
+   installation is attributable.
+
+2. **The observed window is per agent.** Claude Code deletes transcripts at 30
+   days; Codex never does. One machine can hold 33 days of one and 334 of the
+   other, so `peek usage` prints a line per adapter rather than one combined
+   figure that would overstate coverage for the capped agent.
+
+3. **Cost is an estimate and an upper bound.** Tokens are estimated from each
+   skill's frontmatter, charged once per agent that lists it. Some hosts list a
+   name without its description, so the real figure is lower. The basis is
+   printed with the number.
+
+4. **A skill only you can invoke costs the model nothing.** With
+   `disable-model-invocation`, an agent that honours it never lists the skill —
+   zero tokens — but you can still invoke it. Such a skill can never appear in
+   tool-call data, so a usage tool reading only tool calls calls it unused.
+
+Archiving is per installation: one skill symlinked into five agents is one skill
+with five installations, and unlinking one is not retiring it everywhere.
+Everything is a dry run without `--yes`, plugin skills are reported but never
+mutated, and `peek skills restore` reverses an archive.
+
+Full detail, including the coverage states and what to do when a number
+surprises you: [Skill usage](https://agent-peek.dev/docs/usage).
+
 ## Coordination
 
 Git worktrees already give each agent its own working directory, so file

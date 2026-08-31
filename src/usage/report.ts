@@ -33,7 +33,7 @@ export interface BlindSpot {
  * but has no slash-command syntax peek reads, so a codex skill invoked only by the user
  * is invisible even though the agent is observable.
  */
-export interface PartialCoverage {
+export interface PartiallyObserved {
   agent: string;
   observes: InvocationKind[];
   missing: InvocationKind[];
@@ -73,7 +73,13 @@ export interface UsageReport {
   totalInvocations: number;
   observedAdapters: string[];
   blindSpots: BlindSpot[];
-  partial: PartialCoverage[];
+  /**
+   * Agents whose adapter cannot *see* every invocation kind. Distinct from
+   * `coverage[].state === "partial"`, which is about *attribution*: codex observes both
+   * kinds but attributes only slash commands, so it is partial there and not here.
+   * Named apart because the two were both called "partial" and disagreed about codex.
+   */
+  partiallyObserved: PartiallyObserved[];
   /**
    * Ticket 06: per-agent coverage for every agent installed on this machine, so a
    * consumer can tell a zero that means "not used" from a zero that means "peek could
@@ -122,7 +128,7 @@ export async function buildUsageReport(
   const installed = agents.filter((agent) => agent.roots.some((root) => root.present));
 
   const blindSpots: BlindSpot[] = [];
-  const partial: PartialCoverage[] = [];
+  const partiallyObserved: PartiallyObserved[] = [];
   for (const agent of installed) {
     if (!agent.observable) {
       blindSpots.push({
@@ -135,7 +141,7 @@ export async function buildUsageReport(
     }
     const missing = ALL_KINDS.filter((kind) => !agent.observes.includes(kind));
     if (missing.length > 0) {
-      partial.push({ agent: agent.slug, observes: agent.observes, missing });
+      partiallyObserved.push({ agent: agent.slug, observes: agent.observes, missing });
     }
   }
 
@@ -164,7 +170,7 @@ export async function buildUsageReport(
     totalInvocations: cov.totalInvocations,
     observedAdapters: cov.observedAdapters,
     blindSpots,
-    partial,
+    partiallyObserved,
     coverage: installed.map((agent) => {
       const c = coverageFor(agent);
       return { ...c, displayName: agent.displayName, explanation: explainCoverage(c, agent.displayName) };

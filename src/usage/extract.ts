@@ -146,6 +146,75 @@ function nativeIdFor(rec: ClaudeRecord, callIndex: number): string | null {
   return block ? str(block.id) : null;
 }
 
+/**
+ * Codex records slash commands with the same `<command-name>` markup Claude Code uses,
+ * but writes **every user turn twice**: once as `event_msg/user_message` and once as
+ * `response_item/message` with `role: "user"`. Verified on a single rollout — lines 2
+ * and 3 are the same invocation in the two shapes — so an extractor reading both
+ * doubles every count.
+ *
+ * This keys on `response_item/message` + `role: "user"`, which carries an explicit role
+ * field. The adapter already normalises `event_msg` records to role "system", so the
+ * duplicate never reaches here; keying structurally means that stays true even if it
+ * did. `response_item/custom_tool_call_output` tags are echoes of a command inside tool
+ * output, not invocations, and are excluded for the same reason assistant quotes are on
+ * claude-code.
+ *
+ * Codex tool calls stay unattributable: a skill invocation there is an `exec` like any
+ * other, which is why codex's `attributes` is slash-only.
+ */
+export const codexExtractor: Extractor = (messages, ctx) => {
+  const out: Invocation[] = [...defaultExtractor(messages, ctx)];
+  messages.forEach((msg, i) => {
+    const rec = (msg.raw ?? {}) as CodexRecord;
+    if (rec.type !== "response_item") return;
+    const payload = rec.payload;
+    if (!payload || payload.type !== "message" || payload.role !== "user") return;
+    const command = firstCommandName(codexText(payload.content));
+    if (command === null) return;
+    out.push({
+      sourcePath: ctx.sourcePath,
+      msgIndex: ctx.baseMsgIndex + i,
+      callIndex: SLASH_CALL_INDEX,
+      sourceKind: "slash_command",
+      adapter: ctx.adapter,
+      agent: ctx.agent,
+      sessionId: ctx.sessionId,
+      timestamp: msg.timestamp ?? str(rec.timestamp) ?? new Date(0).toISOString(),
+      tool: command,
+      skill: command,
+      cwd: ctx.cwd,
+      status: null,
+      sidechain: false,
+      attributionAgent: null,
+      nativeCallId: null,
+    });
+  });
+  return out;
+};
+
+interface CodexRecord {
+  type?: unknown;
+  timestamp?: unknown;
+  payload?: { type?: unknown; role?: unknown; content?: unknown };
+}
+
+function codexText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((b): b is { text: string } =>
+      !!b && typeof b === "object" && typeof (b as { text?: unknown }).text === "string")
+    .map((b) => b.text)
+    .join("\n");
+}
+
+/** First tag only, so a turn echoing the command many times still yields one invocation. */
+function firstCommandName(text: string): string | null {
+  const m = COMMAND_NAME_RE.exec(text);
+  return m && m[1] !== undefined ? m[1] : null;
+}
+
 /** Tool calls only. The documented default for adapters with no extractor. */
 export const defaultExtractor: Extractor = (messages, ctx) => {
   const out: Invocation[] = [];
@@ -174,7 +243,10 @@ export const defaultExtractor: Extractor = (messages, ctx) => {
   return out;
 };
 
-const EXTRACTORS = new Map<string, Extractor>([["claude-code", claudeCodeExtractor]]);
+const EXTRACTORS = new Map<string, Extractor>([
+  ["claude-code", claudeCodeExtractor],
+  ["codex", codexExtractor],
+]);
 
 export function extractorFor(adapter: string): Extractor {
   return EXTRACTORS.get(adapter) ?? defaultExtractor;

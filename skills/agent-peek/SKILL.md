@@ -1,6 +1,6 @@
 ---
 name: agent-peek
-description: Use this skill whenever the user wants an AI agent to inspect, monitor, summarize, or coordinate with other local AI agent sessions using agent-peek, peek CLI, or the agent-peek MCP server. This includes requests like "peek at what Codex was doing", "check the other agent", "set up agent-peek MCP", "configure MCP for Cursor/Codex/Claude/Gemini/Windsurf/Cline/VS Code", or "help agents share context without writing into each other's chats." The skill installs or verifies agent-peek, configures the right MCP shape for the current client, and uses read-only peek/list/tag commands safely.
+description: Use this skill whenever the user wants an AI agent to inspect, monitor, summarize, or coordinate with other local AI agent sessions using agent-peek, peek CLI, or the agent-peek MCP server. This includes requests like "peek at what Codex was doing", "check the other agent", "set up agent-peek MCP", "configure MCP for Cursor/Codex/Claude/Gemini/Windsurf/Cline/VS Code", or "help agents share context without writing into each other's chats." It also answers "which skills do I actually use", "what is costing me context", and "help me prune my skills", via `peek usage` and `peek skills`. The skill installs or verifies agent-peek, configures the right MCP shape for the current client, and uses read-only peek/list/tag commands safely.
 ---
 
 # Agent Peek
@@ -105,6 +105,50 @@ peek at <selector> --last 50
 peek at <selector> --around 100 --limit 30
 peek at <selector> --last 50 --reverse
 ```
+
+## Skill Usage And Pruning
+
+`peek usage` aggregates tool and skill invocations from a durable index; `peek skills`
+inventories skills across every agent root and can archive one.
+
+```bash
+peek usage                                  # skill invocations, most used first
+peek usage --since 7d                       # duration or ISO date
+peek usage sourceKind                       # agent-invoked vs. human slash command
+peek usage attributionAgent --sidechain     # which subagent types reach for skills
+peek usage --json                           # full envelope: rows + coverage + window
+peek skills                                 # inventory segmented by what is actionable
+peek skills --skill <name>                  # every installation of one skill
+peek skills archive <name> --agent <slug>   # describes the plan; changes nothing
+```
+
+**Never present a usage count as complete without its coverage.** Four rules, and
+breaking any one of them means telling the user something false:
+
+- **A zero is not evidence of disuse unless every installation is attributable.** peek
+  prints `unknown` where it cannot see, and the `--json` envelope carries `coverage[]`
+  per agent. Report `unknown` as unknown; never round it to "unused". Today claude-code
+  is `attributed`, codex `partial`, goose `opaque`, and cursor/continue/factory
+  `unreadable`.
+- **State the window.** Claude Code deletes transcripts after 30 days and Codex does not,
+  so counts come from different spans per agent. "3 uses" means 3 in the observed window,
+  not 3 ever. The envelope's `windows[]` has the per-adapter spans.
+- **Cost is an estimated upper bound**, printed with its basis. Do not quote it as
+  measured.
+- **A `disable-model-invocation` skill costs zero tokens and can only be human-invoked.**
+  It will never appear in tool-call data, so its absence there means nothing.
+
+**Never archive without the user's explicit say-so.** `peek skills archive` describes a
+plan and changes nothing until `--yes`. Show the plan, including which installations it
+would skip and why, and let the user decide. Archiving is per installation: one skill
+symlinked into five agents is one skill with five installations, and unlinking one agent
+is not the same act as retiring it everywhere. Plugin skills are reported for cost and
+never mutated — to stop paying for a whole plugin's set, the user disables it with
+`/plugin` themselves.
+
+If a count looks wrong, re-derive it a second way before reporting it. Count invocations
+rather than mentions of a command name, check which record shapes you actually examined,
+and be suspicious of a check that cannot fail loudly or that races what it measures.
 
 ## Context Feed Workflow
 

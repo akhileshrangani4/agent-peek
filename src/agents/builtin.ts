@@ -24,7 +24,11 @@ function resolveHome(env: HomeEnv): { home: string; config: string } {
  */
 const ADAPTER_OBSERVES: Record<string, InvocationKind[]> = {
   "claude-code": ["tool_call", "slash_command"],
-  codex: ["tool_call"],
+  // slash_command since ticket 13: the codex extractor reads slash invocations from
+  // `response_item/message` records. This table and ADAPTER_ATTRIBUTES must move
+  // together — attribution is strictly downstream of seeing, and a test asserts the
+  // relationship rather than relying on both being remembered.
+  codex: ["tool_call", "slash_command"],
   gemini: ["tool_call"],
   goose: [],
   opencode: ["tool_call"],
@@ -55,6 +59,11 @@ export function adapterObserves(adapter: string | undefined): InvocationKind[] {
  */
 const ADAPTER_ATTRIBUTES: Record<string, InvocationKind[]> = {
   "claude-code": ["tool_call", "slash_command"],
+  // Earned by shipping the extractor (ticket 13), not declared ahead of it: codex slash
+  // commands are now read, so a codex skill invoked by hand is attributable. Its
+  // tool-call path stays blind, because a skill invocation there is an `exec` like any
+  // other — which is what makes codex `partial` rather than `attributed`.
+  codex: ["slash_command"],
 };
 
 export function adapterAttributes(adapter: string | undefined): InvocationKind[] {

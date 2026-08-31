@@ -8,6 +8,7 @@ export default defineMeta({
     "quickstart",
     "context-feed",
     "observation",
+    "usage",
     "coordination",
     "mcp",
     "agent-skill",
