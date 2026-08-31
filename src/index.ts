@@ -61,6 +61,8 @@ export {
   coverageFor, zeroMeansUnused, renderCount, eligibleForBulkUnused, explainCoverage,
   buildUsageReport,
 } from "./usage/index.js";
+export { buildSkillsReport, expandSkill, selectableForArchive, joinUsage } from "./skills/index.js";
+export type { SkillsReport, Segment, SkillRow, InstallationRow } from "./skills/index.js";
 export type {
   Invocation, SourceKind, Watermark, ScanResult, ScanOptions,
   UsageQuery, UsageFilter, UsageRow, GroupBy, CoverageReport, Extractor,

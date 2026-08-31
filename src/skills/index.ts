@@ -23,3 +23,6 @@ export type {
   ArchiveAction, ArchiveActionKind, ArchiveOptions, ArchivePlan, ArchiveRecord,
   ManifestDivergence, PlanArchiveOptions,
 } from "./archive.js";
+export { buildSkillsReport, expandSkill, selectableForArchive } from "./report.js";
+export type { SkillsReport, Segment, SegmentId, SkillRow, InstallationRow, ReportInput } from "./report.js";
+export { joinUsage } from "./assemble.js";

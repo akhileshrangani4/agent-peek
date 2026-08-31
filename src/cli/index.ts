@@ -20,10 +20,11 @@ import { addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot } from 
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import {
   buildInventory, buildNameIndex, resolveName,
+  buildSkillsReport, expandSkill, joinUsage,
   planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
   manifestDivergence, ArchiveRefusedError,
 } from "../skills/index.js";
-import type { ArchivePlan } from "../skills/index.js";
+import type { ArchivePlan, InstallationRow } from "../skills/index.js";
 import { UsageStore, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/index.js";
@@ -535,6 +536,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--agent <slug>", "Limit an archive to one agent's installation")
     .option("--all-agents", "Retire the skill from every mutable root it is installed in")
     .option("--yes", "Execute. Without it, archive and restore only describe what they would do.")
+    .option("--skill <name>", "Show every installation of one skill and what archiving each would do")
     .action(async (action, selector, opts) => {
       if (action === "archive" || action === "restore" || action === "archives") {
         await skillsMutationCommand(action, selector, opts);
@@ -550,13 +552,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         });
       }
       if (!opts.json) {
-        fail({
-          code: 5,
-          error: "report_not_implemented",
-          message: "`peek skills` has no printed report yet.",
-          hint: "The human report and interactive screen land in 0.5.0. Use --json today.",
-          next: ["peek skills --json", "peek agents"],
-        });
+        await runSkillsReport(opts);
+        return;
       }
       const projects = String(opts.projects ?? "").split(",").map((p: string) => p.trim()).filter(Boolean)
         .map((p: string) => resolve(expandHome(p)));
@@ -1324,6 +1321,108 @@ function formatDimension(row: UsageRow, dim: GroupBy): string {
       return value === null || value === undefined ? "(none)" : String(value);
     }
   }
+}
+
+/**
+ * `peek skills` printed report. Segmented by what the user can act on, because this is
+ * the screen that deletes things: a skill is offered only when every one of its rows can
+ * be rendered honestly, and excluded otherwise. Segmentation carries the honesty so the
+ * common rows need no caveat.
+ */
+async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
+  const projects = String(opts.projects ?? "").split(",").map((p) => p.trim()).filter(Boolean)
+    .map((p) => resolve(expandHome(p)));
+  const inventory = await buildInventory({ projects });
+  const agents = await listAgents();
+  const store = new UsageStore({});
+  let joined;
+  try {
+    joined = joinUsage(store, inventory, agents);
+  } finally {
+    store.close();
+  }
+  const input = { ...joined, skills: inventory.skills, costBasis: inventory.costBasis };
+  const report = buildSkillsReport(input);
+
+  const selector = typeof opts.skill === "string" ? opts.skill : undefined;
+  if (selector) {
+    const skill = inventory.skills.find((s) => s.name === selector || s.key === selector
+      || s.qualifiedName === selector);
+    if (!skill) {
+      fail({
+        code: 4, error: "skill_not_found", message: `No skill named ${selector}`,
+        hint: "Use the name as it appears in `peek skills`.", next: ["peek skills"],
+      });
+      return;
+    }
+    printSkillExpansion(skill.name, expandSkill(input, skill));
+    return;
+  }
+
+  console.log(`${report.totalSkills} skills, ~${report.totalTokens.toLocaleString()} tokens charged`);
+  console.log(`cost basis: ${report.costBasis}`);
+  for (const segment of report.segments) {
+    if (segment.rows.length === 0) continue;
+    console.log("");
+    console.log(`${segment.title.toUpperCase()} — ${segment.rows.length} skills, ~${segment.tokens.toLocaleString()} tokens`);
+    console.log(`  ${segment.note}`);
+    console.log("");
+    const limit = segment.id === "archivable" ? 20 : 8;
+    const rows = segment.rows.slice(0, limit).map((row) => [
+      row.name.slice(0, 36),
+      row.agents.join(",").slice(0, 28) || "-",
+      row.usesLabel,
+      String(row.tokens),
+      segment.id === "archivable" ? "" : row.reason.slice(0, 46),
+    ]);
+    const headers = ["SKILL", "AGENTS", "USED", "TOKENS", segment.id === "archivable" ? "" : "WHY"];
+    const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
+    const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ").trimEnd();
+    console.log(fmt(headers));
+    for (const row of rows) console.log(fmt(row));
+    if (segment.rows.length > limit) {
+      console.log(`  ... and ${segment.rows.length - limit} more`);
+    }
+  }
+
+  if (report.unmatched.length > 0) {
+    console.log("");
+    console.log(`INVOKED BUT NOT INSTALLED — ${report.unmatched.length} names`);
+    console.log("  recorded usage naming no skill in any scanned root: uninstalled since, or");
+    console.log("  living in a project-local root peek has not surveyed. Not archivable.");
+    console.log("");
+    for (const row of report.unmatched.slice(0, 6)) {
+      console.log(`  ${row.name.padEnd(36)}  ${row.uses}`);
+    }
+  }
+
+  console.log("");
+  console.log("`peek skills --skill <name>` shows every installation and what archiving each would do.");
+}
+
+/**
+ * The per-installation view (ticket 07 variant B, as the expansion of one row). This is
+ * where unlink-versus-retire has to be visible: unlinking one agent is a different act
+ * from retiring a skill everywhere, and neither can be chosen without seeing the others.
+ */
+function printSkillExpansion(name: string, rows: InstallationRow[]): void {
+  console.log(`${name} — ${rows.length} installation${rows.length === 1 ? "" : "s"}`);
+  console.log("");
+  const table = rows.map((row) => [
+    row.agent, row.usesLabel, row.coverage,
+    row.action === "refuse" ? "refuses (read-only)" : row.action === "unlink" ? "unlink" : "move to archive",
+    String(row.tokens), formatPath(row.path).slice(0, 52),
+  ]);
+  const headers = ["AGENT", "USED", "COVERAGE", "ARCHIVE WOULD", "TOKENS", "PATH"];
+  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
+  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ").trimEnd();
+  console.log(fmt(headers));
+  for (const row of table) console.log(fmt(row));
+  console.log("");
+  console.log("Nothing has been changed. Archiving is per installation:");
+  console.log(`  peek skills archive ${name} --agent <slug>   one agent only`);
+  console.log(`  peek skills archive ${name} --all-agents     every mutable installation`);
+  console.log("Both describe the plan and stop; add --yes to execute.");
 }
 
 function parseDurationMs(value: unknown, flag: string): number {
