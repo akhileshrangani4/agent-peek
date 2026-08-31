@@ -24,6 +24,18 @@ export { Registry } from "./core/registry.js";
 export { ClaimsStore } from "./core/claims.js";
 export { Engine } from "./core/engine.js";
 export { encodeCursor, decodeCursor, cursorAdapter } from "./core/cursor.js";
+
+// The usage index. `queryUsage` is the only public way to read it: it is the seam
+// that keeps the schema an implementation detail, and the single enforcement point for
+// the ADR 0001 retention boundary.
+export {
+  UsageStore, usageDbPath, scanAdapter, queryUsage, coverage,
+  extractorFor, registerExtractor, SCHEMA_VERSION as USAGE_SCHEMA_VERSION,
+} from "./usage/index.js";
+export type {
+  Invocation, SourceKind, Watermark, ScanResult, ScanOptions,
+  UsageQuery, UsageFilter, UsageRow, GroupBy, CoverageReport, Extractor,
+} from "./usage/index.js";
 export { toRaw, toStructured, toBrief, toHandoff, toSummary } from "./core/snapshot.js";
 export {
   encodeCoordinationCursor, decodeCoordinationCursor,
