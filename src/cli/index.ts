@@ -16,6 +16,8 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
+import { addAgent, isPresent, listAgents, removeAgent } from "../agents/index.js";
+import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import type { PostType } from "../feed/schema.js";
 import { resolveAuthor } from "../feed/identity.js";
 
@@ -401,6 +403,81 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       console.log(`forgot ${id}`);
     });
 
+  cli.command("agents [action] [slug]", "List coding agents peek knows, their skill roots, and what it can observe.")
+    .usage("agents [add|remove <slug>] [--skills <path>] [--adapter <name>] [--name <display>] [--all] [--json]")
+    .example("peek agents")
+    .example("peek agents --json")
+    .example("peek agents add amp --skills ~/.amp/skills")
+    .example("peek agents remove amp")
+    .option("--skills <path>", "Skill root for `add` (repeatable via comma-separated list)")
+    .option("--adapter <name>", "Transcript adapter this agent uses, when peek has one")
+    .option("--name <display>", "Display name for `add`")
+    .option("--all", "Include agents with no skill root on this machine")
+    .option("--json", "Output machine-readable JSON")
+    .action(async (action, slug, opts) => {
+      if (action === undefined || action === "list") {
+        await printAgentsCommand({ all: Boolean(opts.all), json: Boolean(opts.json) });
+        return;
+      }
+      if (action === "add") {
+        if (!slug) {
+          fail({
+            code: 5,
+            error: "missing_slug",
+            message: "`peek agents add` needs an agent slug.",
+            hint: "Use the product slug, e.g. `peek agents add amp --skills ~/.amp/skills`.",
+            next: ["peek agents", "peek agents add <slug> --skills <path>"],
+          });
+        }
+        const paths = String(opts.skills ?? "").split(",").map((p: string) => p.trim()).filter(Boolean);
+        if (paths.length === 0) {
+          fail({
+            code: 5,
+            error: "missing_skill_root",
+            message: "`peek agents add` needs at least one --skills path.",
+            hint: "An agent with no skill root and no adapter is invisible to peek.",
+            next: ["peek agents add <slug> --skills <path>"],
+          });
+        }
+        const roots: SkillRoot[] = paths.map((path: string) => ({
+          path: resolve(expandHome(path)),
+          kind: "user" as const,
+          mutable: true,
+        }));
+        await addAgent({
+          slug,
+          displayName: opts.name ?? slug,
+          adapter: opts.adapter,
+          roots,
+        });
+        console.log(`registered agent ${slug}`);
+        return;
+      }
+      if (action === "remove") {
+        if (!slug) {
+          fail({
+            code: 5,
+            error: "missing_slug",
+            message: "`peek agents remove` needs an agent slug.",
+            hint: "Run `peek agents --all` to see registered slugs.",
+            next: ["peek agents --all"],
+          });
+        }
+        const removed = await removeAgent(slug);
+        console.log(removed
+          ? `removed agent entry ${slug}`
+          : `no user entry for ${slug} (builtin agents cannot be removed)`);
+        return;
+      }
+      fail({
+        code: 5,
+        error: "invalid_agents_action",
+        message: `Unknown agents action: ${action}`,
+        hint: "Supported actions are `add` and `remove`; omit the action to list.",
+        next: ["peek agents", "peek agents add <slug> --skills <path>", "peek agents remove <slug>"],
+      });
+    });
+
   cli.command("adapters", "Print installed adapter names, one per line.")
     .action(async () => {
       await listAdapters();
@@ -552,8 +629,10 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--json", "Output machine-readable diagnostic JSON")
     .action(async (opts) => {
       const rows = await doctorRows();
-      if (opts.json) { console.log(JSON.stringify(rows, null, 2)); return; }
-      printDoctor(rows);
+      const seen = await adaptersWithSessions();
+      const agents = (await listAgents()).filter((a) => isPresent(a, seen));
+      if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents }, null, 2)); return; }
+      printDoctor(rows, agents);
     });
 
   cli.help();
@@ -579,6 +658,52 @@ export async function run(argv: string[] = process.argv): Promise<number> {
 
 function isGlobalInfoRequest(argv: string[]): boolean {
   return argv.slice(2).some((arg) => arg === "--help" || arg === "-h" || arg === "--version" || arg === "-v");
+}
+
+function expandHome(path: string): string {
+  if (path === "~") return process.env.HOME ?? homedir();
+  if (path.startsWith("~/")) return join(process.env.HOME ?? homedir(), path.slice(2));
+  return path;
+}
+
+async function adaptersWithSessions(): Promise<Set<string>> {
+  try {
+    const engine = await createEngine({ withExternal: true });
+    const sessions = await engine.list({});
+    return new Set(sessions.map((s) => s.adapter));
+  } catch {
+    return new Set();
+  }
+}
+
+async function printAgentsCommand(opts: { all: boolean; json: boolean }): Promise<void> {
+  const agents = await listAgents();
+  const seen = await adaptersWithSessions();
+  const shown = opts.all ? agents : agents.filter((a) => isPresent(a, seen));
+  if (opts.json) { console.log(JSON.stringify(shown, null, 2)); return; }
+  printAgents(shown);
+}
+
+function printAgents(agents: ResolvedAgent[]): void {
+  if (agents.length === 0) {
+    console.log("no agents found. Run `peek agents --all` to see every agent peek knows.");
+    return;
+  }
+  const table = agents.map((agent) => {
+    const present = agent.roots.filter((r) => r.present);
+    return [
+      agent.slug,
+      agent.adapter ?? "-",
+      agent.observable ? agent.observes.join(",") : "none",
+      agent.manageable ? "yes" : "no",
+      present.length === 0 ? "-" : present.map((r) => formatPath(r.path)).join(" "),
+    ];
+  });
+  const headers = ["AGENT", "ADAPTER", "OBSERVES", "MANAGEABLE", "SKILL ROOTS"];
+  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
+  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  console.log(fmt(headers));
+  for (const row of table) console.log(fmt(row));
 }
 
 async function listAdapters(): Promise<void> {
@@ -1477,7 +1602,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function printDoctor(rows: DoctorRow[]): void {
+function printDoctor(rows: DoctorRow[], agents?: ResolvedAgent[]): void {
   const ready = rows.filter((row) => row.status === "ready").length;
   const optIn = rows.filter((row) => row.status === "opt-in").length;
   const blocked = rows.filter((row) => row.status === "needs command").length;
@@ -1496,8 +1621,19 @@ function printDoctor(rows: DoctorRow[]): void {
   console.log("");
   console.log(fmt(headers));
   for (const row of table) console.log(fmt(row));
+  if (agents) {
+    const observable = agents.filter((a) => a.observable).length;
+    const manageable = agents.filter((a) => a.manageable).length;
+    console.log("");
+    console.log(`agents on this machine: ${agents.length}  observable: ${observable}  manageable: ${manageable}`);
+    const blind = agents.filter((a) => !a.observable).map((a) => a.slug);
+    if (blind.length) console.log(`  usage not observable (no adapter): ${blind.join(", ")}`);
+    const partial = agents.filter((a) => a.observable && !a.observes.includes("slash_command")).map((a) => a.slug);
+    if (partial.length) console.log(`  slash-command usage not observable: ${partial.join(", ")}`);
+  }
   console.log("");
   console.log("next:");
+  console.log("  - use `peek agents` to see skill roots and what usage peek can observe");
   console.log("  - use `peek list` to discover ready file/database adapters");
   console.log("  - use `peek list --terminals` to opt into tmux/screen capture");
   console.log("  - use `peek update` to check whether this CLI is current");

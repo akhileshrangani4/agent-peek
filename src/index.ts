@@ -20,6 +20,14 @@ export {
   PostRejectedError, PostNotFoundError, NotAProjectError,
 } from "./core/errors.js";
 
+export {
+  addAgent, adapterObserves, builtinAgents, isPresent, listAgents, mergeAgents,
+  readUserAgents, removeAgent, resolveAgent, sharedLibraryRoot,
+} from "./agents/index.js";
+export type {
+  Agent, InvocationKind, ResolvedAgent, ResolvedSkillRoot, SkillRoot, SkillRootKind,
+} from "./agents/index.js";
+
 export { Registry } from "./core/registry.js";
 export { ClaimsStore } from "./core/claims.js";
 export { Engine } from "./core/engine.js";
