@@ -784,7 +784,7 @@ async function printAgentsCommand(opts: { all: boolean; json: boolean }): Promis
     return;
   }
   printAgents(shown);
-  printAgentsSummary(agents, present);
+  printAgentsSummary(agents);
 }
 
 function printAgents(agents: ResolvedAgent[]): void {
@@ -908,7 +908,7 @@ function printArchivePlan(plan: ArchivePlan): void {
   console.log("nothing has changed. Re-run with --yes to execute.");
 }
 
-function printAgentsSummary(all: ResolvedAgent[], present: ResolvedAgent[]): void {
+function printAgentsSummary(all: ResolvedAgent[]): void {
   const verified = all.filter((a) => a.tier === "verified").length;
   // Aligned type rather than a graphic: four counts are a fact about grouping, not a
   // quantity worth plotting, and a right-aligned grid reads faster than a sentence.
