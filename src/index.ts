@@ -38,6 +38,14 @@ export type {
   Inventory, InventoryOptions, NameIndex, NameResolution, NameResolutionOutcome,
   Skill, SkillFlag, SkillInstallation, SkillFrontmatter, ScanRoot, FoundSkill,
 } from "./skills/index.js";
+export {
+  planArchive, executeArchive, executeRestore, readArchiveLog, findArchive, selectSkill,
+  archiveDir, manifestDivergence, ArchiveRefusedError,
+} from "./skills/index.js";
+export type {
+  ArchiveAction, ArchiveActionKind, ArchiveOptions, ArchivePlan, ArchiveRecord,
+  ManifestDivergence, PlanArchiveOptions,
+} from "./skills/index.js";
 
 export { Registry } from "./core/registry.js";
 export { ClaimsStore } from "./core/claims.js";

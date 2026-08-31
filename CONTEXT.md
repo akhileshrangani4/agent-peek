@@ -79,6 +79,17 @@ not what the file contains. Charged once per agent that lists it, and always an 
 with a stated basis rather than a measurement.
 _Avoid_: size, weight, tokens
 
+**Archive**:
+Removing a skill from an agent without destroying it. Two acts on disk, derived from the
+installation and never configured: unlinking an installation whose content lives
+elsewhere, or moving an installation that *is* the content. Reversible by restore.
+_Avoid_: prune, delete, remove, uninstall
+
+**Retire**:
+Archiving every one of a skill's installations, so no agent reaches it. Distinct from
+archiving one installation; peek refuses to guess which was meant.
+_Avoid_: purge, remove everywhere
+
 **Initiator**:
 Who reached for the skill, orthogonal to invocation kind: the human (slash command), the
 main agent loop, or a subagent. Subagent-initiated use marks a skill as a dependency of

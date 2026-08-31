@@ -15,3 +15,11 @@ export {
   buildNameIndex, resolveName, resolveNames, invocationName, CLI_BUILTINS,
 } from "./resolve.js";
 export type { NameIndex } from "./resolve.js";
+export {
+  planArchive, executeArchive, executeRestore, readArchiveLog, findArchive, selectSkill,
+  archiveDir, manifestDivergence, ArchiveRefusedError,
+} from "./archive.js";
+export type {
+  ArchiveAction, ArchiveActionKind, ArchiveOptions, ArchivePlan, ArchiveRecord,
+  ManifestDivergence, PlanArchiveOptions,
+} from "./archive.js";

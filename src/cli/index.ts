@@ -16,9 +16,13 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { addAgent, isPresent, listAgents, removeAgent } from "../agents/index.js";
+import { addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot } from "../agents/index.js";
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
-import { buildInventory } from "../skills/index.js";
+import {
+  buildInventory, planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
+  manifestDivergence, ArchiveRefusedError,
+} from "../skills/index.js";
+import type { ArchivePlan } from "../skills/index.js";
 import type { PostType } from "../feed/schema.js";
 import { resolveAuthor } from "../feed/identity.js";
 
@@ -479,13 +483,32 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       });
     });
 
-  cli.command("skills", "Inventory skills across every agent root. JSON only for now; `peek skills` gains a report in 0.5.0.")
-    .usage("skills --json [--projects <dir,dir>]")
+  cli.command("skills [action] [selector]", "Inventory skills across every agent root, and archive or restore one.")
+    .usage("skills [archive|restore|archives] [<name>] [--agent <slug>] [--all-agents] [--yes] [--json] [--projects <dir,dir>]")
     .example("peek skills --json")
-    .example("peek skills --json --projects .")
-    .option("--json", "Output the inventory as JSON (currently required)")
+    .example("peek skills archive my-skill --agent codex")
+    .example("peek skills archive my-skill --all-agents --yes")
+    .example("peek skills restore my-skill --yes")
+    .example("peek skills archives")
+    .option("--json", "Output JSON")
     .option("--projects <dirs>", "Comma-separated project directories to scan for project-local roots")
-    .action(async (opts) => {
+    .option("--agent <slug>", "Limit an archive to one agent's installation")
+    .option("--all-agents", "Retire the skill from every mutable root it is installed in")
+    .option("--yes", "Execute. Without it, archive and restore only describe what they would do.")
+    .action(async (action, selector, opts) => {
+      if (action === "archive" || action === "restore" || action === "archives") {
+        await skillsMutationCommand(action, selector, opts);
+        return;
+      }
+      if (action !== undefined) {
+        fail({
+          code: 5,
+          error: "invalid_skills_action",
+          message: `Unknown skills action: ${action}`,
+          hint: "Supported actions are `archive`, `restore`, and `archives`; omit the action to inventory.",
+          next: ["peek skills --json", "peek skills archive <name> --agent <slug>", "peek skills archives"],
+        });
+      }
       if (!opts.json) {
         fail({
           code: 5,
@@ -654,8 +677,10 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const rows = await doctorRows();
       const seen = await adaptersWithSessions();
       const agents = (await listAgents()).filter((a) => isPresent(a, seen));
-      if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents }, null, 2)); return; }
+      const divergence = await manifestDivergence(sharedLibraryRoot());
+      if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents, divergence }, null, 2)); return; }
       printDoctor(rows, agents);
+      await printManifestDivergence();
     });
 
   cli.help();
@@ -727,6 +752,101 @@ function printAgents(agents: ResolvedAgent[]): void {
   const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
   console.log(fmt(headers));
   for (const row of table) console.log(fmt(row));
+}
+
+async function skillsMutationCommand(
+  action: "archive" | "restore" | "archives",
+  selector: string | undefined,
+  opts: { agent?: string; allAgents?: boolean; yes?: boolean; json?: boolean },
+): Promise<void> {
+  if (action === "archives") {
+    const records = await readArchiveLog();
+    if (opts.json) { console.log(JSON.stringify(records, null, 2)); return; }
+    if (records.length === 0) { console.log("nothing archived"); return; }
+    for (const record of records) {
+      console.log(`${record.id}  ${record.skillName}  ${record.archivedAt}`);
+      for (const a of record.actions) console.log(`  ${a.kind}  ${a.agent ?? "-"}  ${formatPath(a.path)}`);
+    }
+    return;
+  }
+  if (!selector) {
+    fail({
+      code: 5,
+      error: "missing_selector",
+      message: `\`peek skills ${action}\` needs a skill name or key.`,
+      hint: "Run `peek skills --json` to see names and keys.",
+      next: ["peek skills --json", `peek skills ${action} <name>`],
+    });
+  }
+
+  try {
+    if (action === "restore") {
+      const record = findArchive(await readArchiveLog(), selector);
+      if (!opts.yes) {
+        console.log(`would restore ${record.skillName} (archived ${record.archivedAt}):`);
+        for (const a of record.actions) {
+          console.log(`  ${a.kind === "move" ? "move back" : "re-link"}  ${formatPath(a.path)}`);
+        }
+        console.log("");
+        console.log("re-run with --yes to execute");
+        return;
+      }
+      await executeRestore(record);
+      console.log(`restored ${record.skillName}`);
+      return;
+    }
+
+    const inventory = await buildInventory({});
+    const plan = planArchive(inventory, selector, {
+      agent: opts.agent,
+      allAgents: Boolean(opts.allAgents),
+    });
+    if (!opts.yes) {
+      printArchivePlan(plan);
+      return;
+    }
+    const record = await executeArchive(plan);
+    console.log(`archived ${record.skillName} (${record.id})`);
+    console.log(`restore with: peek skills restore ${record.skillName} --yes`);
+  } catch (e) {
+    if (e instanceof ArchiveRefusedError) {
+      fail({
+        code: 5,
+        error: e.reason,
+        message: e.message,
+        hint: "peek refuses rather than guessing which installation you meant.",
+        next: e.detail.length ? e.detail.map((d) => `  ${d}`) : ["peek skills --json"],
+      });
+    }
+    throw e;
+  }
+}
+
+function printArchivePlan(plan: ArchivePlan): void {
+  console.log(`would archive ${plan.skillName}:`);
+  for (const action of plan.actions) {
+    const verb = action.kind === "unlink"
+      ? "unlink (content lives elsewhere)"
+      : "move    (this is the content)";
+    console.log(`  ${verb}  ${action.agent ?? "-"}  ${formatPath(action.path)}`);
+  }
+  for (const skip of plan.skipped) {
+    console.log(`  skip    ${skip.agent ?? "-"}  ${formatPath(skip.path)}  (${skip.reason})`);
+  }
+  for (const warning of plan.warnings) console.log(`  warning: ${warning}`);
+  console.log("");
+  console.log("nothing has changed. Re-run with --yes to execute.");
+}
+
+async function printManifestDivergence(): Promise<void> {
+  const divergence = await manifestDivergence(sharedLibraryRoot());
+  if (!divergence) return;
+  const { presentButUnlisted, listedButMissing } = divergence;
+  if (!presentButUnlisted.length && !listedButMissing.length) return;
+  console.log("");
+  console.log(`shared library manifest (${formatPath(divergence.manifestPath)}) is out of step; peek never writes it:`);
+  if (presentButUnlisted.length) console.log(`  on disk but unlisted: ${presentButUnlisted.length}`);
+  if (listedButMissing.length) console.log(`  listed but missing: ${listedButMissing.length}`);
 }
 
 async function listAdapters(): Promise<void> {
