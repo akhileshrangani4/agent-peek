@@ -79,16 +79,18 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     });
 
   cli.command("list [target]", "List local agent sessions. Use `list adapters` for supported adapters.")
-    .usage("list [adapters] [--adapter <name>] [--status <status>] [--all] [--terminals] [--ids] [--files] [--json]")
+    .usage("list [adapters] [--adapter <name>] [--status <status>] [--all] [--terminals] [--include-subagents] [--ids] [--files] [--json]")
     .example("peek list")
     .example("peek list --adapter codex")
     .example("peek list --all --ids")
     .example("peek list --terminals")
+    .example("peek list --include-subagents")
     .example("peek list adapters")
     .option("--adapter <name>", "Scan/list only one adapter (claude-code|codex|gemini|tmux|...)")
     .option("--status <s>", "Filter by status (active|idle|ended)")
     .option("--all", "Include ended sessions")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
+    .option("--include-subagents", "Include subagent sessions spawned by another session")
     .option("--ids", "Show raw session ids")
     .option("--files", "Show active/recent file context for coordination")
     .option("--json", "Output JSON with id, displayName, sourceType, cwd, and status")
@@ -115,6 +117,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       });
       if (!status && !opts.all) {
         list = list.filter((entry) => entry.status !== "ended");
+      }
+      // Discovery is truthful, the view is opinionated: subagents are found, tracked,
+      // and fed to coordination and the usage index, but they would roughly triple a
+      // machine's session list, so the default view hides them.
+      if (!opts.includeSubagents) {
+        list = list.filter((entry) => entry.parentSessionId === undefined);
       }
       if (opts.files) {
         const digest = await engine.coordinate({
