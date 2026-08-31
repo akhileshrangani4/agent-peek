@@ -2,14 +2,19 @@
 import { basename } from "node:path";
 import type { SessionEntry } from "./types.js";
 
-export type NameableSession = Pick<SessionEntry, "id" | "adapter"> & Partial<Pick<SessionEntry, "tag" | "name" | "cwd">>;
+export type NameableSession = Pick<SessionEntry, "id" | "adapter">
+  & Partial<Pick<SessionEntry, "tag" | "name" | "cwd" | "parentSessionId">>;
 
 export function displayName(entry: NameableSession): string {
   if (entry.tag) return entry.tag;
+  // A subagent shares its parent's cwd, so a cwd-derived name would be
+  // indistinguishable from the session that spawned it. Mark it here rather than in
+  // the adapter, so every surface that renders a name gets the marker.
+  const suffix = entry.parentSessionId ? "-sub" : "";
   if (entry.name) return entry.name;
   const cwd = entry.cwd ? basename(entry.cwd) : "";
-  if (cwd && cwd !== "." && cwd !== "/") return `${cwd}-${shortAdapter(entry.adapter)}`;
-  return decodeIdTail(entry.id);
+  if (cwd && cwd !== "." && cwd !== "/") return `${cwd}-${shortAdapter(entry.adapter)}${suffix}`;
+  return `${decodeIdTail(entry.id)}${suffix}`;
 }
 
 export function displayNames(entries: readonly NameableSession[]): string[] {

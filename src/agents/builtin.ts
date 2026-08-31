@@ -39,6 +39,30 @@ export function adapterObserves(adapter: string | undefined): InvocationKind[] {
 }
 
 /**
+ * Invocation kinds whose extractor can name the skill involved. Strictly a subset of
+ * ADAPTER_OBSERVES: observing an invocation and attributing it to a skill are different
+ * capabilities, and only claude-code does both today.
+ *
+ * Measured: 38,106 indexed claude-code invocations, 203 carrying a skill name; 8,237
+ * codex invocations, zero. Codex records slash commands (in `response_item/message`
+ * records with role "user"), so this entry becomes ["slash_command"] once an extractor
+ * reads them — but not before, because an agent marked attributable while nothing
+ * extracts its names reports every one of its skills as never used.
+ *
+ * An adapter absent from this table attributes nothing. That default is deliberate:
+ * unknown collapses to unattributable, so a missing entry costs a caveat rather than a
+ * wrong "never used".
+ */
+const ADAPTER_ATTRIBUTES: Record<string, InvocationKind[]> = {
+  "claude-code": ["tool_call", "slash_command"],
+};
+
+export function adapterAttributes(adapter: string | undefined): InvocationKind[] {
+  if (!adapter) return [];
+  return ADAPTER_ATTRIBUTES[adapter] ?? [];
+}
+
+/**
  * The primary shared tree: skill directories that per-agent roots symlink into. No
  * agent's system prompt reads it, so it is not an agent. A foreign installer owns its
  * `.skill-lock.json` manifest; peek reads this tree and does not write it.

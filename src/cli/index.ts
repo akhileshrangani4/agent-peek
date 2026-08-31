@@ -21,10 +21,16 @@ import {
 } from "../agents/index.js";
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
 import {
-  buildInventory, planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
+  buildInventory, buildNameIndex, resolveName,
+  buildSkillsReport, expandSkill, joinUsage,
+  planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
   manifestDivergence, ArchiveRefusedError,
 } from "../skills/index.js";
-import type { ArchivePlan } from "../skills/index.js";
+import type { ArchivePlan, InstallationRow } from "../skills/index.js";
+import { UsageStore, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
+import { buildUsageReport } from "../usage/report.js";
+import type { GroupBy, UsageRow } from "../usage/index.js";
+import type { UsageReport } from "../usage/report.js";
 import type { PostType } from "../feed/schema.js";
 import { resolveAuthor } from "../feed/identity.js";
 
@@ -88,16 +94,18 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     });
 
   cli.command("list [target]", "List local agent sessions. Use `list adapters` for supported adapters.")
-    .usage("list [adapters] [--adapter <name>] [--status <status>] [--all] [--terminals] [--ids] [--files] [--json]")
+    .usage("list [adapters] [--adapter <name>] [--status <status>] [--all] [--terminals] [--include-subagents] [--ids] [--files] [--json]")
     .example("peek list")
     .example("peek list --adapter codex")
     .example("peek list --all --ids")
     .example("peek list --terminals")
+    .example("peek list --include-subagents")
     .example("peek list adapters")
     .option("--adapter <name>", "Scan/list only one adapter (claude-code|codex|gemini|tmux|...)")
     .option("--status <s>", "Filter by status (active|idle|ended)")
     .option("--all", "Include ended sessions")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
+    .option("--include-subagents", "Include subagent sessions spawned by another session")
     .option("--ids", "Show raw session ids")
     .option("--files", "Show active/recent file context for coordination")
     .option("--json", "Output JSON with id, displayName, sourceType, cwd, and status")
@@ -124,6 +132,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       });
       if (!status && !opts.all) {
         list = list.filter((entry) => entry.status !== "ended");
+      }
+      // Discovery is truthful, the view is opinionated: subagents are found, tracked,
+      // and fed to coordination and the usage index, but they would roughly triple a
+      // machine's session list, so the default view hides them.
+      if (!opts.includeSubagents) {
+        list = list.filter((entry) => entry.parentSessionId === undefined);
       }
       if (opts.files) {
         const digest = await engine.coordinate({
@@ -485,8 +499,37 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       });
     });
 
+  cli.command("usage [dimension]", "Aggregate tool and skill invocations across every agent, from a durable index.")
+    .usage("usage [skill|tool|agent|adapter|day|cwd|sourceKind|sidechain|attributionAgent] [--tool <name>] [--since <30d|ISO>] [--json]")
+    .example("peek usage")
+    .example("peek usage --since 7d")
+    .example("peek usage tool --all-tools")
+    .example("peek usage attributionAgent --sidechain")
+    .example("peek usage day --skill wayfinder")
+    .option("--tool <name>", "Only invocations of this tool (default: Skill)")
+    .option("--all-tools", "Every tool, not just skills")
+    .option("--include-builtins", "Keep CLI built-ins like /clear, which are recorded but are not skills")
+    .option("--skill <name>", "Only this skill or command name")
+    .option("--agent <slug>", "Only this agent")
+    .option("--adapter <name>", "Only this adapter")
+    .option("--cwd <path>", "Only invocations recorded in this directory")
+    .option("--since <when>", "Duration (30d, 24h) or ISO date")
+    .option("--until <when>", "Duration or ISO date, exclusive")
+    .option("--sidechain", "Only invocations made inside a subagent")
+    .option("--main-loop", "Only invocations made outside a subagent")
+    .option("--attribution-agent <type>", "Only invocations by this subagent type")
+    .option("--by <dims>", "Comma-separated grouping dimensions (default: skill)")
+    .option("--limit <n>", "Maximum rows (default: 20)")
+    .option("--no-scan", "Report from the index without scanning for new transcripts first")
+    .option("--json", "Output the full report envelope as JSON")
+    .action(async (dimension, opts) => {
+      await runUsage(dimension, opts);
+    });
+
   cli.command("skills [action] [selector]", "Inventory skills across every agent root, and archive or restore one.")
-    .usage("skills [archive|restore|archives] [<name>] [--agent <slug>] [--all-agents] [--yes] [--json] [--projects <dir,dir>]")
+    .usage("skills [archive|restore|archives] [<name>] [--interactive] [--skill <name>] [--agent <slug>] [--all-agents] [--yes] [--json] [--projects <dir,dir>]")
+    .example("peek skills")
+    .example("peek skills --interactive")
     .example("peek skills --json")
     .example("peek skills archive my-skill --agent codex")
     .example("peek skills archive my-skill --all-agents --yes")
@@ -497,6 +540,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--agent <slug>", "Limit an archive to one agent's installation")
     .option("--all-agents", "Retire the skill from every mutable root it is installed in")
     .option("--yes", "Execute. Without it, archive and restore only describe what they would do.")
+    .option("--skill <name>", "Show every installation of one skill and what archiving each would do")
+    .option("--interactive", "Browse and mark skills to archive in a terminal picker")
     .action(async (action, selector, opts) => {
       if (action === "archive" || action === "restore" || action === "archives") {
         await skillsMutationCommand(action, selector, opts);
@@ -511,14 +556,16 @@ export async function run(argv: string[] = process.argv): Promise<number> {
           next: ["peek skills --json", "peek skills archive <name> --agent <slug>", "peek skills archives"],
         });
       }
+      if (opts.interactive) {
+        const projects = String(opts.projects ?? "").split(",").map((p: string) => p.trim())
+          .filter(Boolean).map((p: string) => resolve(expandHome(p)));
+        const { runSkillsUi } = await import("./skills-ui.js");
+        process.exitCode = await runSkillsUi({ projects });
+        return;
+      }
       if (!opts.json) {
-        fail({
-          code: 5,
-          error: "report_not_implemented",
-          message: "`peek skills` has no printed report yet.",
-          hint: "The human report and interactive screen land in 0.5.0. Use --json today.",
-          next: ["peek skills --json", "peek agents"],
-        });
+        await runSkillsReport(opts);
+        return;
       }
       const projects = String(opts.projects ?? "").split(",").map((p: string) => p.trim()).filter(Boolean)
         .map((p: string) => resolve(expandHome(p)));
@@ -1071,6 +1118,340 @@ function readFilesFrom(path: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
+}
+
+/**
+ * `peek usage`. Defaults to skills rather than to every tool: a primitive whose default
+ * answer is always "Bash, a lot" is one nobody runs twice. The header states what the
+ * numbers are conditional on, and is load-bearing — every count is scoped to the window
+ * peek has been able to observe, and the likeliest way this command does harm is a user
+ * reading "wayfinder: 3" as "3 ever" rather than "3 in the 32 days peek can see".
+ */
+async function runUsage(dimension: unknown, opts: Record<string, unknown>): Promise<void> {
+  const store = new UsageStore({});
+  try {
+    if (opts.scan !== false) {
+      const engine = await createEngine({ withExternal: true });
+      const adapters = engine.adapters();
+      // adapter -> agent slug. They are orthogonal (ticket 02): an adapter may belong
+      // to no agent, so an unmapped adapter records a null agent rather than guessing.
+      const agentByAdapter = new Map<string, string>();
+      for (const agent of await listAgents()) {
+        if (agent.adapter) agentByAdapter.set(agent.adapter, agent.slug);
+      }
+      const wasEmpty = store.isEmpty();
+      if (wasEmpty && !opts.json) {
+        // Bootstrap parses every transcript once; later scans resume from a watermark.
+        console.error("[agent-peek] first run: indexing existing transcripts, this happens once.");
+      }
+      const result = await scanAll(adapters, store, {
+        agentFor: (entry) => agentByAdapter.get(entry.adapter) ?? null,
+      });
+      for (const err of result.errors.slice(0, 3)) {
+        console.error(`[agent-peek] ${err.sourcePath}: ${err.message}`);
+      }
+    }
+
+    const groupBy = parseDimensions(dimension, opts.by);
+    const explicitTool = opts.tool as string | undefined;
+    // The default is "skill invocations", not `tool = Skill`: a slash invocation stores
+    // the command name in `tool`, so filtering by tool name drops every slash-only
+    // skill — 14 of them on the machine this was built against.
+    const skillsOnly = !opts.allTools && explicitTool === undefined;
+    // Built-in resolution is a row predicate handed to the report, not a pass over its
+    // output: filtering after the limit would silently trim the tail a second time.
+    const keepRow = skillsOnly && !opts.includeBuiltins
+      ? await builtinRowFilter(groupBy)
+      : undefined;
+    const report = await buildUsageReport(store, {
+      ...(skillsOnly ? { skillsOnly: true } : {}),
+      ...(explicitTool ? { tool: explicitTool } : {}),
+      ...(opts.skill ? { skill: String(opts.skill) } : {}),
+      ...(opts.agent ? { agent: String(opts.agent) } : {}),
+      ...(opts.adapter ? { adapter: String(opts.adapter) } : {}),
+      ...(opts.cwd ? { cwd: resolve(String(opts.cwd)) } : {}),
+      ...(opts.since ? { since: parseWhen(opts.since, "--since") } : {}),
+      ...(opts.until ? { until: parseWhen(opts.until, "--until") } : {}),
+      ...(opts.sidechain ? { sidechain: true } : {}),
+      ...(opts.mainLoop ? { sidechain: false } : {}),
+      ...(opts.attributionAgent ? { attributionAgent: String(opts.attributionAgent) } : {}),
+      groupBy,
+      limit: parseLimit(opts.limit),
+    }, keepRow ? { keepRow } : {});
+
+    if (opts.json) {
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+    printUsage(report, groupBy, skillsOnly ? undefined : explicitTool, skillsOnly);
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * A row predicate dropping names that resolve to a CLI built-in. The index records
+ * every slash command verbatim, built-ins included — ticket 01 deliberately left "is
+ * this a skill" to the inventory rather than freezing an answer into the schema, and
+ * this is where that resolution happens.
+ *
+ * Only a grouping that names something can be resolved; any other passes everything
+ * through rather than filtering on a name its rows do not carry.
+ */
+async function builtinRowFilter(groupBy: GroupBy[]): Promise<((row: UsageRow) => boolean) | undefined> {
+  const dim = groupBy.length === 1 ? groupBy[0] : undefined;
+  if (dim !== "skill" && dim !== "tool") return undefined;
+  const index = buildNameIndex(await buildInventory({}));
+  return (row: UsageRow) => {
+    const raw = dim === "skill" ? row.skill : row.tool;
+    if (!raw) return true;
+    // resolveName classifies a built-in only when the name carries its leading slash,
+    // and the index stores it stripped. Testing the slash spelling unconditionally is
+    // safe because resolveName matches the inventory first: a real skill named `clear`
+    // still resolves to itself rather than to the built-in.
+    return resolveName(index, `/${raw}`).outcome !== "not-a-skill";
+  };
+}
+
+function parseDimensions(dimension: unknown, by: unknown): GroupBy[] {
+  const raw = by !== undefined ? String(by) : dimension !== undefined ? String(dimension) : "skill";
+  const dims = raw.split(",").map((d) => d.trim()).filter(Boolean);
+  const invalid = dims.filter((d) => !GROUP_BY_DIMENSIONS.includes(d as GroupBy));
+  if (invalid.length > 0) {
+    fail({
+      code: 5,
+      error: "invalid_dimension",
+      message: `Unknown usage dimension: ${invalid.join(", ")}`,
+      hint: `Valid dimensions: ${GROUP_BY_DIMENSIONS.join(", ")}.`,
+      next: ["peek usage skill", "peek usage attributionAgent --sidechain"],
+    });
+  }
+  return dims as GroupBy[];
+}
+
+/** Accepts a duration (30d, 24h) or an ISO date, since the retention window makes both natural. */
+function parseWhen(value: unknown, flag: string): string {
+  const text = String(value ?? "").trim();
+  if (/^\d+(ms|s|m|h|d)?$/i.test(text)) {
+    return new Date(Date.now() - parseDurationMs(text, flag)).toISOString();
+  }
+  const parsed = Date.parse(text);
+  if (Number.isNaN(parsed)) {
+    fail({
+      code: 5,
+      error: "invalid_time",
+      message: `Invalid ${flag}: ${text}`,
+      hint: "Use a duration like 7d or 24h, or an ISO date like 2026-08-01.",
+      next: ["peek usage --since 7d", "peek usage --since 2026-08-01"],
+    });
+  }
+  return new Date(parsed).toISOString();
+}
+
+function parseLimit(value: unknown): number {
+  if (value === undefined) return 20;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) {
+    fail({
+      code: 5, error: "invalid_limit", message: `Invalid --limit: ${String(value)}`,
+      hint: "Use a positive integer.", next: ["peek usage --limit 50"],
+    });
+  }
+  return n;
+}
+
+function printUsage(
+  report: UsageReport, groupBy: GroupBy[], tool: string | undefined, skillsOnly: boolean,
+): void {
+  if (report.empty) {
+    console.log("No invocations indexed yet.");
+    console.log("Run `peek usage` again once a session has been recorded, or check `peek doctor`.");
+    return;
+  }
+
+  console.log(usageHeader(report, tool, skillsOnly));
+  for (const line of adapterWindows(report)) console.log(line);
+  for (const line of coverageWarnings(report)) console.log(line);
+  console.log("");
+
+  if (report.rows.length === 0) {
+    console.log("No invocations match those filters.");
+    return;
+  }
+
+  const headers = [...groupBy.map((d) => d.toUpperCase()), "COUNT", "LAST"];
+  const rows = report.rows.map((row) => [
+    ...groupBy.map((d) => formatDimension(row, d)),
+    String(row.count),
+    relativeTime(row.lastSeen),
+  ]);
+  const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
+  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  console.log(fmt(headers));
+  for (const row of rows) console.log(fmt(row));
+
+  if (report.truncated) {
+    console.log("");
+    console.log(`Showing ${report.groupsReturned}; more exist. Use --limit to widen.`);
+  }
+}
+
+/**
+ * The window is not a caveat to state once. Every number below it is conditional on it,
+ * so it prints on every run. Treat removing it as a breaking change.
+ */
+function usageHeader(report: UsageReport, tool: string | undefined, skillsOnly: boolean): string {
+  const scope = skillsOnly ? "skills" : tool ? `${tool} calls` : "all tools";
+  const span = report.window.days > 0
+    ? `${report.window.days}d observed (${report.window.earliest?.slice(0, 10)} to ${report.window.latest?.slice(0, 10)})`
+    : "no window";
+  const sources = report.sources.tombstoned > 0
+    ? `${report.sources.total} sources (${report.sources.tombstoned} since deleted)`
+    : `${report.sources.live} sources`;
+  return `${scope}: ${span}, ${sources}, ${report.totalInvocations} invocations indexed`;
+}
+
+/**
+ * Retention is per-agent: Claude Code deletes transcripts at 30 days, Codex keeps them.
+ * One global span would tell a user peek has seen a year of their usage when the agent
+ * holding most of their skills is capped at a month.
+ */
+function adapterWindows(report: UsageReport): string[] {
+  if (report.windows.length < 2) return [];
+  return report.windows.map((w) =>
+    `  ${w.adapter}: ${w.days}d (${w.earliest.slice(0, 10)} to ${w.latest.slice(0, 10)}), ${w.invocations} invocations`);
+}
+
+function coverageWarnings(report: UsageReport): string[] {
+  const out: string[] = [];
+  for (const spot of report.blindSpots) {
+    // "cannot see usage" is a different fact from "never used", and conflating them is
+    // how a tool recommends deleting a skill it was never able to observe.
+    const why = spot.reason === "no-adapter"
+      ? "no transcript adapter"
+      : `${spot.adapter} adapter extracts no invocations`;
+    out.push(`  usage unknown for ${spot.displayName}: ${why}`);
+  }
+  for (const p of report.partial) {
+    out.push(`  ${p.agent}: ${p.missing.join(", ")} invocations not observable`);
+  }
+  return out;
+}
+
+function formatDimension(row: UsageRow, dim: GroupBy): string {
+  switch (dim) {
+    case "sidechain": return row.sidechain ? "subagent" : "main-loop";
+    case "attributionAgent": return row.attributionAgent ?? "(main loop)";
+    case "sourceKind": return row.sourceKind ?? "-";
+    case "day": return row.day ?? "-";
+    case "tool": return row.tool ?? "-";
+    default: {
+      const value = (row as unknown as Record<string, unknown>)[dim];
+      return value === null || value === undefined ? "(none)" : String(value);
+    }
+  }
+}
+
+/**
+ * `peek skills` printed report. Segmented by what the user can act on, because this is
+ * the screen that deletes things: a skill is offered only when every one of its rows can
+ * be rendered honestly, and excluded otherwise. Segmentation carries the honesty so the
+ * common rows need no caveat.
+ */
+async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
+  const projects = String(opts.projects ?? "").split(",").map((p) => p.trim()).filter(Boolean)
+    .map((p) => resolve(expandHome(p)));
+  const inventory = await buildInventory({ projects });
+  const agents = await listAgents();
+  const store = new UsageStore({});
+  let joined;
+  try {
+    joined = joinUsage(store, inventory, agents);
+  } finally {
+    store.close();
+  }
+  const input = { ...joined, skills: inventory.skills, costBasis: inventory.costBasis };
+  const report = buildSkillsReport(input);
+
+  const selector = typeof opts.skill === "string" ? opts.skill : undefined;
+  if (selector) {
+    const skill = inventory.skills.find((s) => s.name === selector || s.key === selector
+      || s.qualifiedName === selector);
+    if (!skill) {
+      fail({
+        code: 4, error: "skill_not_found", message: `No skill named ${selector}`,
+        hint: "Use the name as it appears in `peek skills`.", next: ["peek skills"],
+      });
+      return;
+    }
+    printSkillExpansion(skill.name, expandSkill(input, skill));
+    return;
+  }
+
+  console.log(`${report.totalSkills} skills, ~${report.totalTokens.toLocaleString()} tokens charged`);
+  console.log(`cost basis: ${report.costBasis}`);
+  for (const segment of report.segments) {
+    if (segment.rows.length === 0) continue;
+    console.log("");
+    console.log(`${segment.title.toUpperCase()} — ${segment.rows.length} skills, ~${segment.tokens.toLocaleString()} tokens`);
+    console.log(`  ${segment.note}`);
+    console.log("");
+    const limit = segment.id === "archivable" ? 20 : 8;
+    const rows = segment.rows.slice(0, limit).map((row) => [
+      row.name.slice(0, 36),
+      row.agents.join(",").slice(0, 28) || "-",
+      row.usesLabel,
+      String(row.tokens),
+      segment.id === "archivable" ? "" : row.reason.slice(0, 46),
+    ]);
+    const headers = ["SKILL", "AGENTS", "USED", "TOKENS", segment.id === "archivable" ? "" : "WHY"];
+    const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
+    const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ").trimEnd();
+    console.log(fmt(headers));
+    for (const row of rows) console.log(fmt(row));
+    if (segment.rows.length > limit) {
+      console.log(`  ... and ${segment.rows.length - limit} more`);
+    }
+  }
+
+  if (report.unmatched.length > 0) {
+    console.log("");
+    console.log(`INVOKED BUT NOT INSTALLED — ${report.unmatched.length} names`);
+    console.log("  recorded usage naming no skill in any scanned root: uninstalled since, or");
+    console.log("  living in a project-local root peek has not surveyed. Not archivable.");
+    console.log("");
+    for (const row of report.unmatched.slice(0, 6)) {
+      console.log(`  ${row.name.padEnd(36)}  ${row.uses}`);
+    }
+  }
+
+  console.log("");
+  console.log("`peek skills --skill <name>` shows every installation and what archiving each would do.");
+}
+
+/**
+ * The per-installation view (ticket 07 variant B, as the expansion of one row). This is
+ * where unlink-versus-retire has to be visible: unlinking one agent is a different act
+ * from retiring a skill everywhere, and neither can be chosen without seeing the others.
+ */
+function printSkillExpansion(name: string, rows: InstallationRow[]): void {
+  console.log(`${name} — ${rows.length} installation${rows.length === 1 ? "" : "s"}`);
+  console.log("");
+  const table = rows.map((row) => [
+    row.agent, row.usesLabel, row.coverage,
+    row.action === "refuse" ? "refuses (read-only)" : row.action === "unlink" ? "unlink" : "move to archive",
+    String(row.tokens), formatPath(row.path).slice(0, 52),
+  ]);
+  const headers = ["AGENT", "USED", "COVERAGE", "ARCHIVE WOULD", "TOKENS", "PATH"];
+  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
+  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ").trimEnd();
+  console.log(fmt(headers));
+  for (const row of table) console.log(fmt(row));
+  console.log("");
+  console.log("Nothing has been changed. Archiving is per installation:");
+  console.log(`  peek skills archive ${name} --agent <slug>   one agent only`);
+  console.log(`  peek skills archive ${name} --all-agents     every mutable installation`);
+  console.log("Both describe the plan and stop; add --yes to execute.");
 }
 
 function parseDurationMs(value: unknown, flag: string): number {

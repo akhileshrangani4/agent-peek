@@ -1,5 +1,6 @@
 // src/adapters/claude-code/index.ts
 import { open, readdir, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
@@ -33,29 +34,10 @@ const adapter: Adapter = {
       } catch { continue; }
       for (const f of files) {
         if (!f.endsWith(".jsonl")) continue;
-        const fpath = join(projDir, f);
-        let st;
-        try { st = await stat(fpath); } catch { continue; }
-        let sessionId = f.replace(/\.jsonl$/, "");
-        let cwd: string | undefined;
-        try {
-          const metadata = await readSessionMetadata(fpath);
-          if (metadata.sessionId) sessionId = metadata.sessionId;
-          if (metadata.cwd) cwd = metadata.cwd;
-        } catch { /* skip */ }
-        const status = statusFromMtime(st.mtimeMs);
-        const inferredName = cwd ? `${basename(cwd)}-claude` : `${projectNameFromDir(p)}-claude`;
-        out.push({
-          id: `${ADAPTER_NAME}:${sessionId}`,
-          name: inferredName,
-          adapter: ADAPTER_NAME,
-          transcriptPath: fpath,
-          cwd,
-          sourceType: "file",
-          lastSeen: new Date(st.mtimeMs).toISOString(),
-          status,
-        });
+        const entry = await entryFor(join(projDir, f), p, { sessionIdFallback: f.replace(/\.jsonl$/, "") });
+        if (entry) out.push(entry);
       }
+      out.push(...await scanSubagents(projDir, p));
     }
     return out;
   },
@@ -86,9 +68,81 @@ const adapter: Adapter = {
   },
 };
 
-async function readSessionMetadata(path: string): Promise<{ sessionId?: string; cwd?: string }> {
+/**
+ * Subagent transcripts sit in a sidecar directory beside their parent's transcript:
+ *
+ *     <project>/<session-uuid>.jsonl              the parent, a direct child
+ *     <project>/<session-uuid>/subagents/agent-<agentId>.jsonl
+ *
+ * Discovery targets that exact pattern rather than walking recursively. A recursive
+ * walk would need a denylist, and a denylist that falls behind Claude Code does not
+ * error — it feeds a non-transcript to the transcript parser. Two other things nest
+ * under a project directory today and neither is a session: `vercel-plugin/`
+ * (hook telemetry, 120 files on the machine this was written against) and `memory/`.
+ */
+async function scanSubagents(projDir: string, projectDirName: string): Promise<SessionEntry[]> {
+  const out: SessionEntry[] = [];
+  let children: Dirent[];
+  try {
+    children = await readdir(projDir, { withFileTypes: true });
+  } catch { return out; }
+  for (const child of children) {
+    if (!child.isDirectory()) continue;
+    const subDir = join(projDir, child.name, "subagents");
+    let files: string[];
+    try {
+      files = await readdir(subDir);
+    } catch { continue; }
+    for (const f of files) {
+      if (!f.endsWith(".jsonl")) continue;
+      const entry = await entryFor(join(subDir, f), projectDirName, {
+        // A subagent transcript's `sessionId` field holds its PARENT's id, so keying on
+        // it would collide every subagent onto the session that spawned it.
+        sessionIdFallback: f.replace(/\.jsonl$/, ""),
+        preferAgentId: true,
+        parentSessionId: child.name,
+      });
+      if (entry) out.push(entry);
+    }
+  }
+  return out;
+}
+
+async function entryFor(
+  fpath: string,
+  projectDirName: string,
+  opts: { sessionIdFallback: string; preferAgentId?: boolean; parentSessionId?: string },
+): Promise<SessionEntry | undefined> {
+  let st;
+  try { st = await stat(fpath); } catch { return undefined; }
+  let sessionId = opts.sessionIdFallback;
+  let cwd: string | undefined;
+  try {
+    const metadata = await readSessionMetadata(fpath);
+    if (opts.preferAgentId) {
+      if (metadata.agentId) sessionId = metadata.agentId;
+    } else if (metadata.sessionId) {
+      sessionId = metadata.sessionId;
+    }
+    if (metadata.cwd) cwd = metadata.cwd;
+  } catch { /* skip */ }
+  const base = cwd ? basename(cwd) : projectNameFromDir(projectDirName);
+  return {
+    id: `${ADAPTER_NAME}:${sessionId}`,
+    name: opts.parentSessionId ? `${base}-claude-sub` : `${base}-claude`,
+    adapter: ADAPTER_NAME,
+    transcriptPath: fpath,
+    cwd,
+    sourceType: "file",
+    lastSeen: new Date(st.mtimeMs).toISOString(),
+    status: statusFromMtime(st.mtimeMs),
+    ...(opts.parentSessionId ? { parentSessionId: opts.parentSessionId } : {}),
+  };
+}
+
+async function readSessionMetadata(path: string): Promise<{ sessionId?: string; cwd?: string; agentId?: string }> {
   const lines = await readHeadLines(path, 50);
-  const metadata: { sessionId?: string; cwd?: string } = {};
+  const metadata: { sessionId?: string; cwd?: string; agentId?: string } = {};
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -105,7 +159,10 @@ async function readSessionMetadata(path: string): Promise<{ sessionId?: string; 
     if (!metadata.cwd && typeof (rec as { cwd?: unknown }).cwd === "string") {
       metadata.cwd = (rec as { cwd: string }).cwd;
     }
-    if (metadata.sessionId && metadata.cwd) break;
+    if (!metadata.agentId && typeof (rec as { agentId?: unknown }).agentId === "string") {
+      metadata.agentId = (rec as { agentId: string }).agentId;
+    }
+    if (metadata.sessionId && metadata.cwd && metadata.agentId) break;
   }
 
   return metadata;

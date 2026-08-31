@@ -15,6 +15,18 @@ export interface SessionEntry {
   sourceType?: SessionSourceType;
   lastSeen: string;       // ISO timestamp
   status: SessionStatus;
+  /**
+   * Set when this session is a subagent spawned by another: the id of the session that
+   * spawned it. Absent for top-level sessions.
+   *
+   * Subagent transcripts live in a sidecar beside their parent's transcript, at
+   * `<project>/<session-uuid>/subagents/agent-<agentId>.jsonl`. They are discovered and
+   * tracked like any other session — coordination in particular needs them, because 158
+   * of the 164 paths subagents write are never written by their parent — but the
+   * default `peek list` view hides them behind `--include-subagents` so a machine's
+   * session list does not triple.
+   */
+  parentSessionId?: string;
 }
 
 export interface FileClaim {
@@ -136,6 +148,12 @@ export interface CoordinationWritingFileEvent {
 export interface CoordinationSession {
   id: string;
   displayName: string;
+  /**
+   * Present when this is a subagent session. Carried through coordination so the
+   * display name recompute keeps the subagent marker — a subagent shares its parent's
+   * cwd, so without it the two render identically.
+   */
+  parentSessionId?: string;
   adapter: string;
   status: SessionStatus;
   activity?: Activity;

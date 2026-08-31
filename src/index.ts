@@ -53,6 +53,23 @@ export { Registry } from "./core/registry.js";
 export { ClaimsStore } from "./core/claims.js";
 export { Engine } from "./core/engine.js";
 export { encodeCursor, decodeCursor, cursorAdapter } from "./core/cursor.js";
+
+// The usage index. `queryUsage` is the only public way to read it: it is the seam
+// that keeps the schema an implementation detail, and the single enforcement point for
+// the ADR 0001 retention boundary.
+export {
+  UsageStore, usageDbPath, scanAdapter, scanAll, queryUsage, coverage, GROUP_BY_DIMENSIONS,
+  extractorFor, registerExtractor, SCHEMA_VERSION as USAGE_SCHEMA_VERSION,
+  coverageFor, zeroMeansUnused, renderCount, eligibleForBulkUnused, explainCoverage,
+  buildUsageReport,
+} from "./usage/index.js";
+export { buildSkillsReport, expandSkill, selectableForArchive, joinUsage } from "./skills/index.js";
+export type { SkillsReport, Segment, SkillRow, InstallationRow } from "./skills/index.js";
+export type {
+  Invocation, SourceKind, Watermark, ScanResult, ScanOptions,
+  UsageQuery, UsageFilter, UsageRow, GroupBy, CoverageReport, Extractor,
+  CoverageState, InstallationCoverage, UsageReport, BlindSpot, PartialCoverage, AdapterWindow,
+} from "./usage/index.js";
 export { toRaw, toStructured, toBrief, toHandoff, toSummary } from "./core/snapshot.js";
 export {
   encodeCoordinationCursor, decodeCoordinationCursor,

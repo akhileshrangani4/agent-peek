@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { adapterObserves, builtinAgents, type HomeEnv } from "./builtin.js";
+import { adapterAttributes, adapterObserves, builtinAgents, type HomeEnv } from "./builtin.js";
 import type { Agent, ResolvedAgent, ResolvedSkillRoot, SkillRoot } from "./types.js";
 
 interface AgentsFile {
@@ -107,11 +107,14 @@ export async function resolveAgent(agent: Agent): Promise<ResolvedAgent> {
   // tree, which exists for anyone who has ever used the installer and says nothing about
   // whether this particular agent is installed. Those agents need their own directory.
   const ownRootPresent = roots.some((r) => r.present && r.kind !== "shared");
+  const attributes = adapterAttributes(agent.adapter);
   return {
     ...agent,
     roots,
     observes,
     observable: observes.length > 0,
+    attributes,
+    attributable: attributes.length > 0,
     manageable: roots.some((r) => r.present && r.mutable),
     installed,
     presence: ownRootPresent || installed ? "present"

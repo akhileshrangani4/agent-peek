@@ -67,6 +67,7 @@ export function buildCoordinationSession(opts: {
   return {
     id: opts.entry.id,
     displayName: opts.displayName,
+    ...(opts.entry.parentSessionId ? { parentSessionId: opts.entry.parentSessionId } : {}),
     adapter: opts.entry.adapter,
     status: opts.entry.status,
     activity: opts.structured?.activity,
@@ -141,6 +142,7 @@ export function coordinationSessionFor(
     lastAssistantMessage: value.session.lastAssistantMessage,
     id: entry.id,
     displayName,
+    ...(entry.parentSessionId ? { parentSessionId: entry.parentSessionId } : {}),
     adapter: entry.adapter,
     status: entry.status,
     cwd: entry.cwd,
