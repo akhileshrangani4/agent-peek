@@ -28,6 +28,16 @@ export type {
   Agent, InvocationKind, ResolvedAgent, ResolvedSkillRoot, SkillRoot, SkillRootKind,
 } from "./agents/index.js";
 
+export {
+  buildInventory, inventoryRoots, applyFlags, pluginKeyFor, COST_BASIS,
+  buildNameIndex, resolveName, resolveNames, invocationName, CLI_BUILTINS,
+  parseFrontmatter, estimateListingTokens, scanRoot,
+} from "./skills/index.js";
+export type {
+  Inventory, InventoryOptions, NameIndex, NameResolution, NameResolutionOutcome,
+  Skill, SkillFlag, SkillInstallation, SkillFrontmatter, ScanRoot, FoundSkill,
+} from "./skills/index.js";
+
 export { Registry } from "./core/registry.js";
 export { ClaimsStore } from "./core/claims.js";
 export { Engine } from "./core/engine.js";

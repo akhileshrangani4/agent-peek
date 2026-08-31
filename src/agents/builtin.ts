@@ -64,49 +64,61 @@ export function builtinAgents(env: HomeEnv = {}): Agent[] {
   return [
     {
       slug: "claude-code",
+      projectDir: ".claude/skills",
+      honoursDisableModelInvocation: true,
       displayName: "Claude Code",
       adapter: "claude-code",
       roots: [
         { path: dot("claude", "skills"), kind: "user", mutable: true },
-        { path: dot("claude", "plugins"), kind: "plugin", mutable: false },
+        // `cache` only: sibling `marketplaces/` holds catalogue checkouts of the same
+        // plugins, which the agent never loads. Walking the parent counts every plugin
+        // skill twice and flags 481 spurious duplicate names.
+        { path: dot("claude", "plugins", "cache"), kind: "plugin", mutable: false },
       ],
     },
     {
       slug: "codex",
+      projectDir: ".codex/skills",
       displayName: "Codex",
       adapter: "codex",
       roots: [{ path: dot("codex", "skills"), kind: "user", mutable: true }],
     },
     {
       slug: "cursor",
+      projectDir: ".cursor/skills",
       displayName: "Cursor",
       roots: [{ path: dot("cursor", "skills"), kind: "user", mutable: true }],
     },
     {
       slug: "gemini",
+      projectDir: ".gemini/skills",
       displayName: "Gemini CLI",
       adapter: "gemini",
       roots: [{ path: dot("gemini", "skills"), kind: "user", mutable: true }],
     },
     {
       slug: "opencode",
+      projectDir: ".opencode/skills",
       displayName: "opencode",
       adapter: "opencode",
       roots: [{ path: join(config, "opencode", "skills"), kind: "user", mutable: true }],
     },
     {
       slug: "goose",
+      projectDir: ".goose/skills",
       displayName: "Goose",
       adapter: "goose",
       roots: [{ path: join(config, "goose", "skills"), kind: "user", mutable: true }],
     },
     {
       slug: "continue",
+      projectDir: ".continue/skills",
       displayName: "Continue",
       roots: [{ path: dot("continue", "skills"), kind: "user", mutable: true }],
     },
     {
       slug: "factory",
+      projectDir: ".factory/skills",
       displayName: "Factory",
       roots: [{ path: dot("factory", "skills"), kind: "user", mutable: true }],
     },

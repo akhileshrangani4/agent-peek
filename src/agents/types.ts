@@ -30,6 +30,17 @@ export interface Agent {
   /** Reference to an adapter name, when peek can read this agent's transcripts. */
   adapter?: string;
   roots: SkillRoot[];
+  /**
+   * Path, relative to a project directory, where this agent reads project-local skills
+   * (e.g. ".claude/skills"). Undefined when the agent has no project-local convention.
+   */
+  projectDir?: string;
+  /**
+   * True when this agent is known to honour `disable-model-invocation` frontmatter, and
+   * therefore does not pay listing tokens for such a skill. Verified for Claude Code;
+   * unknown elsewhere, so cost stays an upper bound rather than a false zero.
+   */
+  honoursDisableModelInvocation?: boolean;
   /** True when the entry came from ~/.agent-peek/agents.json rather than the builtin table. */
   userDefined?: boolean;
 }

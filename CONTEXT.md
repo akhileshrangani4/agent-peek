@@ -67,8 +67,27 @@ message) or `slash_command` (in a user message, and the only path available to a
 carrying `disable-model-invocation`).
 _Avoid_: source, type, channel
 
+**Model-invocable**:
+Whether an agent may reach a skill on its own. Frontmatter can withhold a skill from the
+model, leaving the slash command as its only path. A skill withheld this way is not
+listed, so it is charged nothing.
+_Avoid_: enabled, auto, visible
+
+**Cost**:
+What an agent's system prompt pays per turn to list a skill: its name and description,
+not what the file contains. Charged once per agent that lists it, and always an estimate
+with a stated basis rather than a measurement.
+_Avoid_: size, weight, tokens
+
 **Initiator**:
 Who reached for the skill, orthogonal to invocation kind: the human (slash command), the
 main agent loop, or a subagent. Subagent-initiated use marks a skill as a dependency of
 a workflow rather than a habit of the user.
 _Avoid_: caller, actor, origin
+
+## Durability
+
+The usage index is durable because it must be: transcripts are deleted at 30 days, so
+once a session's invocations are recorded, the index is the only remaining evidence the
+session happened. The inventory is live because it can be: skill roots are not deleted
+out from under it, so it is walked fresh on every command and never cached.

@@ -18,6 +18,7 @@ import type {
 import { displayNames } from "../core/names.js";
 import { addAgent, isPresent, listAgents, removeAgent } from "../agents/index.js";
 import type { ResolvedAgent, SkillRoot } from "../agents/index.js";
+import { buildInventory } from "../skills/index.js";
 import type { PostType } from "../feed/schema.js";
 import { resolveAuthor } from "../feed/identity.js";
 
@@ -476,6 +477,28 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         hint: "Supported actions are `add` and `remove`; omit the action to list.",
         next: ["peek agents", "peek agents add <slug> --skills <path>", "peek agents remove <slug>"],
       });
+    });
+
+  cli.command("skills", "Inventory skills across every agent root. JSON only for now; `peek skills` gains a report in 0.5.0.")
+    .usage("skills --json [--projects <dir,dir>]")
+    .example("peek skills --json")
+    .example("peek skills --json --projects .")
+    .option("--json", "Output the inventory as JSON (currently required)")
+    .option("--projects <dirs>", "Comma-separated project directories to scan for project-local roots")
+    .action(async (opts) => {
+      if (!opts.json) {
+        fail({
+          code: 5,
+          error: "report_not_implemented",
+          message: "`peek skills` has no printed report yet.",
+          hint: "The human report and interactive screen land in 0.5.0. Use --json today.",
+          next: ["peek skills --json", "peek agents"],
+        });
+      }
+      const projects = String(opts.projects ?? "").split(",").map((p: string) => p.trim()).filter(Boolean)
+        .map((p: string) => resolve(expandHome(p)));
+      const inventory = await buildInventory({ projects });
+      console.log(JSON.stringify(inventory, null, 2));
     });
 
   cli.command("adapters", "Print installed adapter names, one per line.")
