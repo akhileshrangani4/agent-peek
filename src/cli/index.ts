@@ -525,7 +525,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     });
 
   cli.command("skills [action] [selector]", "Inventory skills across every agent root, and archive or restore one.")
-    .usage("skills [archive|restore|archives] [<name>] [--agent <slug>] [--all-agents] [--yes] [--json] [--projects <dir,dir>]")
+    .usage("skills [archive|restore|archives] [<name>] [--interactive] [--skill <name>] [--agent <slug>] [--all-agents] [--yes] [--json] [--projects <dir,dir>]")
+    .example("peek skills")
+    .example("peek skills --interactive")
     .example("peek skills --json")
     .example("peek skills archive my-skill --agent codex")
     .example("peek skills archive my-skill --all-agents --yes")
@@ -537,6 +539,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--all-agents", "Retire the skill from every mutable root it is installed in")
     .option("--yes", "Execute. Without it, archive and restore only describe what they would do.")
     .option("--skill <name>", "Show every installation of one skill and what archiving each would do")
+    .option("--interactive", "Browse and mark skills to archive in a terminal picker")
     .action(async (action, selector, opts) => {
       if (action === "archive" || action === "restore" || action === "archives") {
         await skillsMutationCommand(action, selector, opts);
@@ -550,6 +553,13 @@ export async function run(argv: string[] = process.argv): Promise<number> {
           hint: "Supported actions are `archive`, `restore`, and `archives`; omit the action to inventory.",
           next: ["peek skills --json", "peek skills archive <name> --agent <slug>", "peek skills archives"],
         });
+      }
+      if (opts.interactive) {
+        const projects = String(opts.projects ?? "").split(",").map((p: string) => p.trim())
+          .filter(Boolean).map((p: string) => resolve(expandHome(p)));
+        const { runSkillsUi } = await import("./skills-ui.js");
+        process.exitCode = await runSkillsUi({ projects });
+        return;
       }
       if (!opts.json) {
         await runSkillsReport(opts);
