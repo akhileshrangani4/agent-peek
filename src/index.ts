@@ -58,10 +58,13 @@ export { encodeCursor, decodeCursor, cursorAdapter } from "./core/cursor.js";
 export {
   UsageStore, usageDbPath, scanAdapter, scanAll, queryUsage, coverage, GROUP_BY_DIMENSIONS,
   extractorFor, registerExtractor, SCHEMA_VERSION as USAGE_SCHEMA_VERSION,
+  coverageFor, zeroMeansUnused, renderCount, eligibleForBulkUnused, explainCoverage,
+  buildUsageReport,
 } from "./usage/index.js";
 export type {
   Invocation, SourceKind, Watermark, ScanResult, ScanOptions,
   UsageQuery, UsageFilter, UsageRow, GroupBy, CoverageReport, Extractor,
+  CoverageState, InstallationCoverage, UsageReport, BlindSpot, PartialCoverage, AdapterWindow,
 } from "./usage/index.js";
 export { toRaw, toStructured, toBrief, toHandoff, toSummary } from "./core/snapshot.js";
 export {

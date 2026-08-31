@@ -59,6 +59,21 @@ export interface ResolvedAgent extends Omit<Agent, "roots"> {
   observes: InvocationKind[];
   /** observes.length > 0 — usage is knowable at all. */
   observable: boolean;
+  /**
+   * Invocation kinds peek can attribute **to a named skill**, which is a strictly
+   * stronger capability than observing them. Codex is the case that forces the
+   * distinction: peek indexes 8,237 codex invocations and can name a skill in zero of
+   * them, because a codex skill invocation is an `exec` like any other. Seeing a tool
+   * call is not the same as knowing which skill it was.
+   *
+   * This describes what the **shipped extractor** attributes, not what the agent
+   * records. Codex transcripts do carry slash commands, but until an extractor reads
+   * them this must stay empty: claiming attribution peek does not have turns "peek
+   * cannot see this" into "you never used this", which is the destructive direction.
+   */
+  attributes: InvocationKind[];
+  /** attributes.length > 0 — a zero count for this agent means something. */
+  attributable: boolean;
   /** At least one present, mutable root — skills here may be archived. */
   manageable: boolean;
 }

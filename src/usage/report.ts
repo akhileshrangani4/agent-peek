@@ -6,6 +6,8 @@
 // that will present partial counts as complete.
 
 import { listAgents } from "../agents/index.js";
+import { coverageFor, explainCoverage } from "./coverage.js";
+import type { InstallationCoverage } from "./coverage.js";
 import type { InvocationKind } from "../agents/index.js";
 import { coverage, queryUsage } from "./query.js";
 import type { UsageQuery, UsageRow } from "./query.js";
@@ -72,6 +74,12 @@ export interface UsageReport {
   observedAdapters: string[];
   blindSpots: BlindSpot[];
   partial: PartialCoverage[];
+  /**
+   * Ticket 06: per-agent coverage for every agent installed on this machine, so a
+   * consumer can tell a zero that means "not used" from a zero that means "peek could
+   * not see". Keyed by agent slug; the unit is the installation, not the skill.
+   */
+  coverage: (InstallationCoverage & { displayName: string; explanation: string })[];
   /** True when nothing has ever been scanned. */
   empty: boolean;
 }
@@ -109,12 +117,13 @@ export async function buildUsageReport(
   const cov = coverage(store);
   const agents = await listAgents(opts.home ? { home: opts.home } : {});
 
+  // An agent with no roots present on this machine is not installed; saying peek
+  // cannot observe it would be noise, not honesty.
+  const installed = agents.filter((agent) => agent.roots.some((root) => root.present));
+
   const blindSpots: BlindSpot[] = [];
   const partial: PartialCoverage[] = [];
-  for (const agent of agents) {
-    // An agent with no roots present on this machine is not installed; saying peek
-    // cannot observe it would be noise, not honesty.
-    if (!agent.roots.some((root) => root.present)) continue;
+  for (const agent of installed) {
     if (!agent.observable) {
       blindSpots.push({
         agent: agent.slug,
@@ -156,6 +165,10 @@ export async function buildUsageReport(
     observedAdapters: cov.observedAdapters,
     blindSpots,
     partial,
+    coverage: installed.map((agent) => {
+      const c = coverageFor(agent);
+      return { ...c, displayName: agent.displayName, explanation: explainCoverage(c, agent.displayName) };
+    }),
     empty: cov.liveSources + cov.tombstonedSources === 0,
   };
 }

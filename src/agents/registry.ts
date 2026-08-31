@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { adapterObserves, builtinAgents, type HomeEnv } from "./builtin.js";
+import { adapterAttributes, adapterObserves, builtinAgents, type HomeEnv } from "./builtin.js";
 import type { Agent, ResolvedAgent, ResolvedSkillRoot, SkillRoot } from "./types.js";
 
 interface AgentsFile {
@@ -99,11 +99,14 @@ export async function resolveAgent(agent: Agent): Promise<ResolvedAgent> {
     roots.push({ ...root, present: await isDir(root.path) });
   }
   const observes = adapterObserves(agent.adapter);
+  const attributes = adapterAttributes(agent.adapter);
   return {
     ...agent,
     roots,
     observes,
     observable: observes.length > 0,
+    attributes,
+    attributable: attributes.length > 0,
     manageable: roots.some((r) => r.present && r.mutable),
   };
 }

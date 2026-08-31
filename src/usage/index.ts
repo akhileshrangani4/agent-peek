@@ -8,3 +8,9 @@ export { queryUsage, coverage, GROUP_BY_DIMENSIONS } from "./query.js";
 export type { UsageQuery, UsageFilter, UsageRow, GroupBy, CoverageReport } from "./query.js";
 export { extractorFor, registerExtractor, whitelistedArgument, claudeCodeExtractor, defaultExtractor } from "./extract.js";
 export type { Extractor, ExtractContext } from "./extract.js";
+export {
+  coverageFor, zeroMeansUnused, renderCount, eligibleForBulkUnused, explainCoverage,
+} from "./coverage.js";
+export type { CoverageState, InstallationCoverage } from "./coverage.js";
+export { buildUsageReport } from "./report.js";
+export type { UsageReport, BlindSpot, PartialCoverage, AdapterWindow, UsageWindow } from "./report.js";
