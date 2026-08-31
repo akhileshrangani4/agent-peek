@@ -1787,16 +1787,25 @@ function fail(opts: {
   hint?: string;
   next?: string[];
 }): never {
-  const lines = [
-    `error: ${opts.error}`,
-    `message: ${opts.message}`,
-  ];
-  if (opts.hint) lines.push(`hint: ${opts.hint}`);
+  // Errors read as a sentence first and a machine record second. The previous format led
+  // with `error: unknown_command`, which is the least useful line for the person reading
+  // it and the most useful for a script — so the slug stays, at the bottom, dim.
+  //
+  // Colour goes through the same gate as every report: off when piped, off under
+  // NO_COLOR. Tests assert the `error: <slug>` line, and several verification steps in
+  // this effort grep stderr, so that line stays plain and on its own.
+  const colour = Boolean(process.stderr.isTTY) && !process.env.NO_COLOR;
+  const red = (t: string) => (colour ? `\u001b[31m${t}\u001b[39m` : t);
+  const dim = (t: string) => (colour ? `\u001b[2m${t}\u001b[22m` : t);
+
+  const lines: string[] = ["", `  ${red("error")}  ${opts.error.replace(/_/g, " ")}`, ""];
+  lines.push(`     ${opts.message}`);
+  if (opts.hint) lines.push("", `     ${opts.hint}`);
   if (opts.next?.length) {
-    lines.push("next:");
-    for (const item of opts.next) lines.push(`  - ${item}`);
+    lines.push("", `     ${dim("try")}   ${opts.next[0]}`);
+    for (const item of opts.next.slice(1)) lines.push(`           ${item}`);
   }
-  lines.push(`exitCode: ${opts.code}`);
+  lines.push("", `     ${dim(`error: ${opts.error} · exit ${opts.code}`)}`, "");
   console.error(lines.join("\n"));
   process.exit(opts.code);
 }
@@ -1865,16 +1874,29 @@ function printFocusedHelp(command?: string): void {
   }
 
   console.log("agent-peek");
-  console.log("Read-only visibility and coordination for local AI agent sessions.");
+  // "Read-only" stopped being true when `skills archive` landed: everything reads except
+  // that one command, which is dry-run by default and needs --yes. Claiming read-only in
+  // the first line a user sees would be the wrong kind of reassurance.
+  console.log("Visibility and coordination for local AI agent sessions, and the skills they load.");
   console.log("");
-  console.log("Common commands:");
+  console.log("Sessions:");
   console.log("  peek list                         show active sessions");
   console.log("  peek at <selector> --mode brief   read one session without touching it");
+  console.log("  peek ui                           browse sessions interactively");
+  console.log("");
+  console.log("Coordination:");
   console.log("  peek coord . --writing            see active writers in this repo");
   console.log("  peek check <file>                 exit 1 if another agent is writing it");
   console.log("  peek claim <file> --ttl 2m        broadcast temporary write intent");
   console.log("  peek release <claim-id> --claim-id");
-  console.log("  peek ui                           browse sessions interactively");
+  console.log("");
+  console.log("Skills:");
+  console.log("  peek usage                        which skills you actually invoke");
+  console.log("  peek skills                       inventory, cost, and what is safe to archive");
+  console.log("  peek skills --interactive         browse and mark skills for archiving");
+  console.log("  peek agents                       agents peek knows, and what it can observe");
+  console.log("");
+  console.log("Diagnostics:");
   console.log("  peek doctor                       diagnose adapter availability");
   console.log("  peek version                      show installed version");
   console.log("  peek update                       install the latest npm version globally");

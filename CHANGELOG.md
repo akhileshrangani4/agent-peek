@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.1
+
+`node:sqlite` emits an `ExperimentalWarning` on import, and the usage index uses it, so
+every command that touched the index printed two lines of Node internals above its own
+output. Filtered in the bin shims — that one warning only. Removing the default listener
+would have silenced all of them, so the replacement re-prints anything else exactly as
+Node would.
+
+`peek help` listed none of the commands this release added and called peek "read-only",
+which stopped being true when `skills archive` landed. Commands are grouped now —
+sessions, coordination, skills, diagnostics — and the summary says what peek does.
+
+Errors read as a sentence first and a machine record second. They led with
+`error: unknown_command`, the least useful line for a person and the most useful for a
+script; the slug now sits at the bottom, dim, so both readers get what they need.
+Colour goes through the same gate as every report: off when piped, off under NO_COLOR.
+
 ## 0.5.0
 
 Skill usage analytics: `peek usage` and `peek skills`, backed by a durable index,

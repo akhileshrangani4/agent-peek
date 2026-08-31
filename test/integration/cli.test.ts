@@ -34,7 +34,11 @@ describe("CLI integration", () => {
   it("help command prints focused agent help", async () => {
     const overview = await runCli(["help"]);
     expect(overview.code).toBe(0);
-    expect(overview.stdout).toMatch(/Common commands:/);
+    // "Common commands:" was a single flat list; help is now grouped. Assert that the
+    // commands are offered, not the heading they sit under.
+    expect(overview.stdout).toMatch(/peek usage/);
+    expect(overview.stdout).toMatch(/peek skills/);
+    expect(overview.stdout).toMatch(/peek agents/);
     expect(overview.stdout).toMatch(/peek coord \. --writing/);
 
     const coord = await runCli(["help", "coord"]);
@@ -86,7 +90,10 @@ describe("CLI integration", () => {
     const r = await runCli(["nope"]);
     expect(r.code).toBe(5);
     expect(r.stderr).toMatch(/error: unknown_command/);
-    expect(r.stderr).toMatch(/next:/);
+    // `next:` became a `try` block. What must hold is that the machine-readable slug
+    // survives for scripts and that at least one suggested command is offered.
+    expect(r.stderr).toMatch(/error: unknown_command/);
+    expect(r.stderr).toMatch(/peek help/);
   });
 
   it("list returns (no sessions) under empty fake home", async () => {
