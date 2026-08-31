@@ -162,14 +162,26 @@ function classify(input: ReportInput, skill: Skill): { id: SegmentId; reason: st
   if (!installs.some((i) => i.mutable)) {
     return { id: "read-only", reason: "plugin installation, reported but never mutated" };
   }
+  // Discounting an unconfirmed agent's *unobservability* is right; offering a destructive
+  // action against one is not. If every mutable installation belongs to an agent peek
+  // cannot confirm is installed, archiving would unlink from a directory the installer
+  // made for a product that may not exist — no confirmed agent's context gets smaller.
+  // That is unactionable, which is a different thing from safe to archive.
+  const unconfirmedAgents = input.unconfirmedAgents ?? new Set<string>();
+  if (!installs.some((i) => i.mutable && !unconfirmedAgents.has(i.agent!))) {
+    return {
+      id: "read-only",
+      reason: `installed only for ${installs.map((i) => i.agent).join(", ")}, `
+        + "which peek cannot confirm are installed",
+    };
+  }
   const blind = installs.filter((i) => coverageOf(input, i.agent!).state !== "attributed");
   // "Every installation must be attributable" exists to stop peek recommending deletion
   // of a skill whose usage it cannot see. That rationale depends on the agent existing:
   // if peek cannot confirm the product is installed, its silence is evidence about peek,
   // not about the user, and withholding on that basis is being conservative about
   // nothing. The discount is disclosed in the row and again at the confirm step.
-  const unconfirmed = input.unconfirmedAgents ?? new Set<string>();
-  const blocking = blind.filter((i) => !unconfirmed.has(i.agent!));
+  const blocking = blind.filter((i) => !unconfirmedAgents.has(i.agent!));
   if (blocking.length > 0) {
     return {
       id: "unknown-usage",
@@ -192,8 +204,13 @@ function rowFor(input: ReportInput, skill: Skill, reason: string): SkillRow {
   // ALL, not some: zero observed on an attributable agent plus unknown on another sums
   // to unknown, not to zero. Requiring only "some" reproduced the false zero in a
   // subtler place — `find-skills` rendered "0" inside the usage-unknown segment.
-  const fullyAttributed = installs.length > 0
-    && installs.every((i) => coverageOf(input, i.agent!).state === "attributed");
+  // Installations on agents peek cannot confirm are discounted here for the same reason
+  // the verdict discounts them: their silence is evidence about peek, not about the user.
+  // Counting them would print `unknown` on a row the verdict just called attributable.
+  const unconfirmedAgents = input.unconfirmedAgents ?? new Set<string>();
+  const judged = installs.filter((i) => !unconfirmedAgents.has(i.agent!));
+  const fullyAttributed = judged.length > 0
+    && judged.every((i) => coverageOf(input, i.agent!).state === "attributed");
   const usesLabel = input.ambiguousKeys.has(skill.key)
     ? "ambiguous"
     : uses > 0
