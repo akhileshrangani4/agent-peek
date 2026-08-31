@@ -1313,7 +1313,7 @@ function coverageWarnings(report: UsageReport): string[] {
       : `${spot.adapter} adapter extracts no invocations`;
     out.push(`  usage unknown for ${spot.displayName}: ${why}`);
   }
-  for (const p of report.partial) {
+  for (const p of report.partiallyObserved) {
     out.push(`  ${p.agent}: ${p.missing.join(", ")} invocations not observable`);
   }
   return out;

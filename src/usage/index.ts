@@ -13,4 +13,4 @@ export {
 } from "./coverage.js";
 export type { CoverageState, InstallationCoverage } from "./coverage.js";
 export { buildUsageReport } from "./report.js";
-export type { UsageReport, BlindSpot, PartialCoverage, AdapterWindow, UsageWindow } from "./report.js";
+export type { UsageReport, BlindSpot, PartiallyObserved, AdapterWindow, UsageWindow } from "./report.js";

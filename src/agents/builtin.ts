@@ -26,7 +26,11 @@ function resolveHome(env: HomeEnv): { home: string; config: string } {
  */
 const ADAPTER_OBSERVES: Record<string, InvocationKind[]> = {
   "claude-code": ["tool_call", "slash_command"],
-  codex: ["tool_call"],
+  // slash_command since ticket 13: the codex extractor reads slash invocations from
+  // `response_item/message` records. This table and ADAPTER_ATTRIBUTES must move
+  // together — attribution is strictly downstream of seeing, and a test asserts the
+  // relationship rather than relying on both being remembered.
+  codex: ["tool_call", "slash_command"],
   gemini: ["tool_call"],
   // goose's adapter surfaces role, text, and timestamp only: no toolCalls, so a skill
   // invocation is unattributable there. Claiming tool_call here would render every

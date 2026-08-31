@@ -66,7 +66,7 @@ export type { SkillsReport, Segment, SkillRow, InstallationRow } from "./skills/
 export type {
   Invocation, SourceKind, Watermark, ScanResult, ScanOptions,
   UsageQuery, UsageFilter, UsageRow, GroupBy, CoverageReport, Extractor,
-  CoverageState, InstallationCoverage, UsageReport, BlindSpot, PartialCoverage, AdapterWindow,
+  CoverageState, InstallationCoverage, UsageReport, BlindSpot, PartiallyObserved, AdapterWindow,
 } from "./usage/index.js";
 export { toRaw, toStructured, toBrief, toHandoff, toSummary } from "./core/snapshot.js";
 export {
