@@ -179,3 +179,25 @@ export function colorEnabled(): boolean {
   if (process.env.FORCE_COLOR) return true;
   return Boolean(process.stdout.isTTY);
 }
+
+/**
+ * A run of rows with a resting point every `groupSize`.
+ *
+ * Vertical rhythm is what makes a terminal report skimmable; dense output reads as a
+ * log dump however well the columns align. Breaking the run beats adding air only at
+ * the section edges (which leaves the block itself solid) and beats showing fewer rows
+ * (which pays for whitespace with information, the wrong trade when the point of the
+ * section is to show what is there).
+ *
+ * The break is a blank line between runs, never a separator character: it is rhythm,
+ * not structure, and structure is what the rule above the section is for.
+ */
+export function Rows(
+  props: { children: React.JSX.Element[]; groupSize?: number; marginTop?: number },
+): React.JSX.Element {
+  const { children, groupSize = 4, marginTop = 1 } = props;
+  const runs: React.JSX.Element[][] = [];
+  for (let i = 0; i < children.length; i += groupSize) runs.push(children.slice(i, i + groupSize));
+  return h(Box, { flexDirection: "column", marginTop },
+    ...runs.map((run, i) => h(Box, { key: i, flexDirection: "column", marginTop: i === 0 ? 0 : 1 }, ...run)));
+}

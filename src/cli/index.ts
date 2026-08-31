@@ -28,6 +28,7 @@ import {
   manifestDivergence, ArchiveRefusedError,
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
+import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
 import type { Inventory } from "../skills/types.js";
 import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS } from "../usage/index.js";
 import { buildUsageReport } from "../usage/report.js";
@@ -524,6 +525,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--limit <n>", "Maximum rows (default: 20)")
     .option("--no-scan", "Report from the index without scanning for new transcripts first")
     .option("--verbose", "List every agent whose usage cannot be attributed, instead of a count")
+    .option("--width <n>", "Render at this width instead of the detected terminal width")
+    .option("--color", "Force colour even when output is piped")
     .option("--json", "Output the full report envelope as JSON")
     .action(async (dimension, opts) => {
       await runUsage(dimension, opts);
@@ -546,6 +549,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--yes", "Execute. Without it, archive and restore only describe what they would do.")
     .option("--skill <name>", "Show every installation of one skill and what archiving each would do")
     .option("--interactive", "Browse and mark skills to archive in a terminal picker")
+    .option("--width <n>", "Render at this width instead of the detected terminal width")
+    .option("--color", "Force colour even when output is piped")
+    .option("--segment <id>", "Show every row of one segment (archivable|unknown-usage|read-only|in-use)")
     .action(async (action, selector, opts) => {
       if (action === "archive" || action === "restore" || action === "archives") {
         await skillsMutationCommand(action, selector, opts);
@@ -1474,55 +1480,18 @@ async function runSkillsReport(opts: Record<string, unknown>): Promise<void> {
   }
 
   const rowLimit = opts.limit === undefined ? undefined : parseRequiredPositive(opts.limit, "--limit");
-  console.log(`${report.totalSkills} skills, ~${report.totalTokens.toLocaleString()} tokens charged`);
-  console.log(`cost basis: ${report.costBasis}`);
-  for (const segment of report.segments) {
-    if (segment.rows.length === 0) continue;
-    console.log("");
-    console.log(`${segment.title.toUpperCase()} — ${segment.rows.length} skills, ~${segment.tokens.toLocaleString()} tokens`);
-    console.log(`  ${segment.note}`);
-    console.log("");
-    const limit = rowLimit ?? (segment.id === "archivable" ? 20 : 8);
-    // One name can be several distinct skills: ticket 04 keeps divergent copies apart
-    // on purpose, and the installer copies rather than links, so `cloudflare-email-service`
-    // exists as 27 real directories and 15 of them land in this one segment. Counted
-    // across the whole segment rather than the visible slice — the name is ambiguous
-    // whether or not its twin fits on screen, and a user who cannot see the collision is
-    // exactly the one who would resolve it by guessing.
-    const nameCounts = new Map<string, number>();
-    for (const row of segment.rows) nameCounts.set(row.name, (nameCounts.get(row.name) ?? 0) + 1);
-    const rows = segment.rows.slice(0, limit).map((row) => [
-      (nameCounts.get(row.name) ?? 0) > 1
-        ? `${row.name} (${row.rootHint})`.slice(0, 54)
-        : row.name.slice(0, 36),
-      row.agents.join(",").slice(0, 28) || "-",
-      row.usesLabel,
-      String(row.tokens),
-      segment.id === "archivable" ? "" : row.reason.slice(0, 46),
-    ]);
-    const headers = ["SKILL", "AGENTS", "USED", "TOKENS", segment.id === "archivable" ? "" : "WHY"];
-    const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-    const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ").trimEnd();
-    console.log(fmt(headers));
-    for (const row of rows) console.log(fmt(row));
-    if (segment.rows.length > limit) {
-      console.log(`  ... and ${segment.rows.length - limit} more`);
-    }
+  const blindAgents = agents.filter((a) => a.roots.some((r) => r.present) && !a.attributable).length;
+  const view = {
+    ...(opts.width ? { width: Number(opts.width) } : {}),
+    ...(opts.color ? { color: true } : {}),
+    ...(rowLimit === undefined ? {} : { limit: rowLimit }),
+    blindAgents,
+  };
+  if (typeof opts.segment === "string") {
+    await renderSkillsSegment(report, opts.segment, view);
+    return;
   }
-
-  if (report.unmatched.length > 0) {
-    console.log("");
-    console.log(`INVOKED BUT NOT INSTALLED — ${report.unmatched.length} names`);
-    console.log("  recorded usage naming no skill in any scanned root: uninstalled since, or");
-    console.log("  living in a project-local root peek has not surveyed. Not archivable.");
-    console.log("");
-    for (const row of report.unmatched.slice(0, 6)) {
-      console.log(`  ${row.name.padEnd(36)}  ${row.uses}`);
-    }
-  }
-
-  console.log("");
-  console.log("`peek skills --skill <name>` shows every installation and what archiving each would do.");
+  await renderSkillsReport(report, view);
 }
 
 /**
