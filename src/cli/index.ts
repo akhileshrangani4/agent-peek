@@ -16,7 +16,7 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { displayWidth, fit, shortenPath } from "./paths.js";
+import { displayWidth, fit, shortenPath, wrapList } from "./paths.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
@@ -2214,14 +2214,7 @@ function printDoctor(rows: DoctorRow[], agents?: ResolvedAgent[]): void {
     // Lists of agent slugs run past 80 columns as soon as there are more than a handful,
     // so they wrap rather than being truncated: the names are the content.
     const listLine = (label: string, slugs: string[]) => {
-      if (!slugs.length) return;
-      let line = `  ${label}:`;
-      for (const slug of slugs) {
-        const next = `${line} ${slug},`;
-        if (displayWidth(next) > 78) { console.log(line); line = `    ${slug},`; }
-        else line = next;
-      }
-      console.log(line.replace(/,$/, ""));
+      for (const line of wrapList(label, slugs, 78)) console.log(line);
     };
     listLine("usage not observable (no adapter)", agents.filter((a) => !a.adapter).map((a) => a.slug));
     listLine("usage not observable (adapter parses no tool calls)",

@@ -4,7 +4,7 @@
 // doctor). They are tests rather than conventions because both of the state-drift bugs
 // in this effort came from two places agreeing only by convention.
 import { describe, it, expect } from "vitest";
-import { displayWidth, fit, shortenPath } from "../../src/cli/paths.js";
+import { displayWidth, fit, shortenPath, wrap, wrapList } from "../../src/cli/paths.js";
 
 describe("displayWidth", () => {
   it("counts characters, not bytes", () => {
@@ -48,5 +48,26 @@ describe("fit", () => {
     expect(fit("abcdefghij", 5)).toBe("abcd…");
     expect(displayWidth(fit("abcdefghij", 5))).toBe(5);
     expect(fit("abc", 5)).toBe("abc");
+  });
+});
+
+describe("wrap and wrapList", () => {
+  it("keeps every wrapped line within the budget", () => {
+    const lines = wrap("a ".repeat(60).trim(), 40);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) expect(displayWidth(line)).toBeLessThanOrEqual(40);
+  });
+
+  it("never truncates list items, because the names are the content", () => {
+    const items = ["amp", "antigravity", "cline", "cursor", "droid", "grok", "kimi-code-cli"];
+    const lines = wrapList("usage not observable", items, 40);
+    for (const line of lines) expect(displayWidth(line)).toBeLessThanOrEqual(40);
+    // Every name survives the wrap; none is elided away.
+    for (const item of items) expect(lines.join(" ")).toContain(item);
+  });
+
+  it("returns nothing for an empty list", () => {
+    expect(wrapList("label", [], 40)).toEqual([]);
+    expect(wrap("", 40)).toEqual([]);
   });
 });
