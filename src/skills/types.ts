@@ -10,11 +10,11 @@ export type SkillFlag =
   | "no-description"        // no description frontmatter: nearly unpickable by a model
   | "immutable"             // every installation sits in a read-only root
   | "not-model-invocable"   // disable-model-invocation: only a human can reach it
-  | "unreferenced";         // in the shared library root, linked by no agent
+  | "unreferenced";         // no agent peek has verified links to it
 
 /** One agent's access to one skill. */
 export interface SkillInstallation {
-  /** Agent slug, or undefined for the shared library root, which is not an agent. */
+  /** Agent slug, or undefined for a shared tree scanned in its own right. */
   agent?: string;
   rootPath: string;
   rootKind: SkillRootKind;

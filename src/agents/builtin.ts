@@ -39,7 +39,7 @@ export function adapterObserves(adapter: string | undefined): InvocationKind[] {
 }
 
 /**
- * The shared library root: skill directories that per-agent roots symlink into. No
+ * The primary shared tree: skill directories that per-agent roots symlink into. No
  * agent's system prompt reads it, so it is not an agent. A foreign installer owns its
  * `.skill-lock.json` manifest; peek reads this tree and does not write it.
  */

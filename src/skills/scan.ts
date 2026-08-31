@@ -5,7 +5,7 @@ import type { SkillRootKind } from "../agents/types.js";
 
 export interface ScanRoot {
   path: string;
-  /** Undefined for the shared library root, which belongs to no agent. */
+  /** Undefined for a shared tree, which belongs to no agent. */
   agent?: string;
   kind: SkillRootKind;
   mutable: boolean;

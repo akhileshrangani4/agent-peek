@@ -15,7 +15,7 @@ export const COST_BASIS =
 export interface InventoryOptions extends AgentRegistryOptions {
   /** Project directories to check for project-local roots, e.g. session cwds. */
   projects?: string[];
-  /** Skip the shared library root. Tests only. */
+  /** Skip the shared trees. Tests only. */
   includeShared?: boolean;
 }
 
@@ -28,7 +28,7 @@ async function isDir(path: string): Promise<boolean> {
 }
 
 /**
- * Roots to walk: every present root of every agent, the shared library root, and any
+ * Roots to walk: every present root of every agent, the shared trees, and any
  * project-local root under a known project directory. Project roots are read-only here:
  * a repo file belongs to git and its collaborators, not to peek.
  */
@@ -195,7 +195,7 @@ export async function buildInventory(opts: InventoryOptions = {}): Promise<Inven
     skill.installations = dedupeInstallations(skill.installations);
     skill.chargedTokens = skill.installations.reduce((sum, i) => sum + i.chargedTokens, 0);
   }
-  applyFlags(all);
+  applyFlags(all, new Set(agents.filter((a) => a.tier === "verified").map((a) => a.slug)));
   all.sort((a, b) => b.chargedTokens - a.chargedTokens || a.name.localeCompare(b.name));
   return {
     skills: all,
@@ -204,8 +204,15 @@ export async function buildInventory(opts: InventoryOptions = {}): Promise<Inven
   };
 }
 
-/** Conditions the report and the MCP surface both read, rather than re-deriving. */
-export function applyFlags(skills: Skill[]): void {
+/**
+ * Conditions the report and the MCP surface both read, rather than re-deriving.
+ *
+ * `verifiedAgents` gates `unreferenced`: several sourced-tier agents are rooted in the
+ * shared tree, so counting their installations as references would let a third-party
+ * table's claim suppress a real finding. "Nothing links to this" stays true until an
+ * agent peek has actually verified reads it.
+ */
+export function applyFlags(skills: Skill[], verifiedAgents: Set<string> = new Set()): void {
   const byName = new Map<string, number>();
   for (const skill of skills) byName.set(skill.name, (byName.get(skill.name) ?? 0) + 1);
   for (const skill of skills) {
@@ -214,7 +221,9 @@ export function applyFlags(skills: Skill[]): void {
     if (!skill.description) flags.push("no-description");
     if (skill.installations.every((i) => !i.mutable)) flags.push("immutable");
     if (!skill.modelInvocable) flags.push("not-model-invocable");
-    if (skill.installations.every((i) => i.agent === undefined)) flags.push("unreferenced");
+    if (skill.installations.every((i) => i.agent === undefined || !verifiedAgents.has(i.agent))) {
+      flags.push("unreferenced");
+    }
     skill.flags = flags;
   }
 }
