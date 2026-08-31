@@ -20,6 +20,33 @@ export {
   PostRejectedError, PostNotFoundError, NotAProjectError,
 } from "./core/errors.js";
 
+export {
+  addAgent, adapterObserves, builtinAgents, isPresent, listAgents, mergeAgents,
+  readUserAgents, removeAgent, resolveAgent, sharedLibraryRoot,
+} from "./agents/index.js";
+export type {
+  Agent, InvocationKind, ResolvedAgent, ResolvedSkillRoot, SkillRoot, SkillRootKind,
+} from "./agents/index.js";
+
+export {
+  buildInventory, inventoryRoots, applyFlags, pluginKeyFor, compareVersions,
+  dedupeInstallations, COST_BASIS,
+  buildNameIndex, resolveName, resolveNames, invocationName, CLI_BUILTINS,
+  parseFrontmatter, estimateListingTokens, scanRoot,
+} from "./skills/index.js";
+export type {
+  Inventory, InventoryOptions, NameIndex, NameResolution, NameResolutionOutcome,
+  Skill, SkillFlag, SkillInstallation, SkillFrontmatter, ScanRoot, FoundSkill,
+} from "./skills/index.js";
+export {
+  planArchive, executeArchive, executeRestore, readArchiveLog, findArchive, selectSkill,
+  archiveDir, manifestDivergence, ArchiveRefusedError,
+} from "./skills/index.js";
+export type {
+  ArchiveAction, ArchiveActionKind, ArchiveOptions, ArchivePlan, ArchiveRecord,
+  ManifestDivergence, PlanArchiveOptions,
+} from "./skills/index.js";
+
 export { Registry } from "./core/registry.js";
 export { ClaimsStore } from "./core/claims.js";
 export { Engine } from "./core/engine.js";
