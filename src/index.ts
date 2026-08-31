@@ -125,3 +125,5 @@ export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine>
   if (opts.withExternal) await discoverExternal(loader);
   return new Engine({ registry, loader, claims });
 }
+export { Row, Rule, state, num, overflow, padEnd, padStart, terminalWidth, colorEnabled, renderStatic } from "./cli/render.js";
+export type { Role, Cell } from "./cli/render.js";
