@@ -1,6 +1,7 @@
 import type { Registry } from "./registry.js";
 import type { ClaimsStore } from "./claims.js";
 import type { AdapterLoader } from "../adapters/loader.js";
+import type { Adapter } from "../adapters/types.js";
 import type {
   CoordinationDigest, CoordinationCursor,
   RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor,
@@ -59,6 +60,14 @@ export class Engine {
 
   adapterNames(): string[] {
     return this.deps.loader.names().sort();
+  }
+
+  /**
+   * Every loaded adapter. The usage index scans all of them, and reaching through
+   * `deps.loader` from outside would mean widening private state to do it.
+   */
+  adapters(): Adapter[] {
+    return this.deps.loader.all();
   }
 
   async list(filter?: ListFilter): Promise<SessionEntry[]> {

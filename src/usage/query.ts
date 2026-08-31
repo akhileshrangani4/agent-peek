@@ -17,9 +17,19 @@ import type { SourceKind } from "./schema.js";
  * `source_kind` is accepted as an alias for `sourceKind` so a caller writing the column
  * name gets the dimension rather than a throw.
  */
-export type GroupBy = "tool" | "skill" | "agent" | "adapter" | "day" | "cwd" | "sourceKind" | "source_kind";
+export type GroupBy =
+  | "tool" | "skill" | "agent" | "adapter" | "day" | "cwd"
+  | "sourceKind" | "sidechain" | "attributionAgent"
+  | "source_kind";
 
 export interface UsageFilter {
+  /**
+   * Skill invocations only, by either path: a `Skill` tool call or a slash command.
+   * NOT the same as `tool: "Skill"` — a slash invocation stores the command name in
+   * `tool`, so filtering on the tool name silently drops every slash-only skill, which
+   * is the blindness the source_kind split exists to prevent.
+   */
+  skillsOnly?: boolean;
   tool?: string;
   skill?: string;
   agent?: string;
@@ -52,7 +62,21 @@ export interface UsageRow {
   day?: string;
   cwd?: string | null;
   sourceKind?: SourceKind;
+  sidechain?: boolean;
+  /** Subagent type that made the call, where the adapter records one. */
+  attributionAgent?: string | null;
 }
+
+/**
+ * Every discrete filter dimension is also groupable. A filter without a matching
+ * grouping can only answer questions whose answer you already know — you must name the
+ * value to ask about it — so `attributionAgent` as a filter alone could not produce
+ * "which subagent types reach for this skill", the question the column exists for.
+ */
+export const GROUP_BY_DIMENSIONS: readonly GroupBy[] = [
+  "tool", "skill", "agent", "adapter", "day", "cwd",
+  "sourceKind", "sidechain", "attributionAgent",
+];
 
 const COLUMNS: Record<Exclude<GroupBy, "day">, string> = {
   tool: "tool",
@@ -61,12 +85,22 @@ const COLUMNS: Record<Exclude<GroupBy, "day">, string> = {
   adapter: "adapter",
   cwd: "cwd",
   sourceKind: "source_kind",
+  sidechain: "sidechain",
+  attributionAgent: "attribution_agent",
   source_kind: "source_kind",
 };
 
 /** Alias resolution, so both spellings name the same dimension and the same output key. */
 function canonicalGroup(g: GroupBy): Exclude<GroupBy, "source_kind"> {
   return g === "source_kind" ? "sourceKind" : g;
+}
+
+/** Column alias used in SELECT ... AS, since SQLite results are keyed by it. */
+function selectAlias(g: GroupBy): string {
+  const key = canonicalGroup(g);
+  if (key === "sourceKind") return "source_kind";
+  if (key === "attributionAgent") return "attribution_agent";
+  return key;
 }
 
 const OFFSET_RE = /^[+-]\d{2}:\d{2}$/;
@@ -100,6 +134,7 @@ function whereClause(filter: UsageFilter): { sql: string; params: (string | numb
   eq("source_kind", filter.sourceKind);
   eq("attribution_agent", filter.attributionAgent);
   eq("cwd", filter.cwd);
+  if (filter.skillsOnly) clauses.push("skill IS NOT NULL");
   if (filter.sidechain !== undefined) {
     clauses.push("sidechain = ?");
     params.push(filter.sidechain ? 1 : 0);
@@ -117,7 +152,7 @@ export function queryUsage(store: UsageStore, query: UsageQuery = {}): UsageRow[
   for (const g of groupBy) {
     const expr = g === "day" ? dayExpr(query.tzOffset) : COLUMNS[g];
     if (!expr) throw new Error(`invalid groupBy: ${g}`);
-    selects.push(`${expr} AS ${canonicalGroup(g) === "sourceKind" ? "source_kind" : g}`);
+    selects.push(`${expr} AS ${selectAlias(g)}`);
     groups.push(expr);
   }
   const where = whereClause(query);
@@ -141,10 +176,12 @@ export function queryUsage(store: UsageStore, query: UsageQuery = {}): UsageRow[
     };
     for (const g of groupBy) {
       const key = canonicalGroup(g);
-      const value = (row[key === "sourceKind" ? "source_kind" : key] ?? null) as string | null;
+      const value = row[selectAlias(g)] ?? null;
       if (key === "sourceKind") out.sourceKind = (value ?? undefined) as SourceKind | undefined;
-      else if (key === "day") out.day = value ?? undefined;
-      else if (key === "tool") out.tool = value ?? undefined;
+      else if (key === "day") out.day = (value as string | null) ?? undefined;
+      else if (key === "tool") out.tool = (value as string | null) ?? undefined;
+      // SQLite has no boolean type: the column round-trips as 0/1.
+      else if (key === "sidechain") out.sidechain = value === 1 || value === true;
       else (out as unknown as Record<string, unknown>)[key] = value;
     }
     return out;

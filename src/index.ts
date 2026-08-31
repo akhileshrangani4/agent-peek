@@ -56,7 +56,7 @@ export { encodeCursor, decodeCursor, cursorAdapter } from "./core/cursor.js";
 // that keeps the schema an implementation detail, and the single enforcement point for
 // the ADR 0001 retention boundary.
 export {
-  UsageStore, usageDbPath, scanAdapter, scanAll, queryUsage, coverage,
+  UsageStore, usageDbPath, scanAdapter, scanAll, queryUsage, coverage, GROUP_BY_DIMENSIONS,
   extractorFor, registerExtractor, SCHEMA_VERSION as USAGE_SCHEMA_VERSION,
 } from "./usage/index.js";
 export type {

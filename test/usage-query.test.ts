@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { UsageStore } from "../src/usage/store.js";
-import { queryUsage, coverage } from "../src/usage/query.js";
+import { queryUsage, coverage, GROUP_BY_DIMENSIONS } from "../src/usage/query.js";
 import type { Invocation, Watermark } from "../src/usage/schema.js";
 
 let home: string | undefined;
@@ -171,6 +171,39 @@ describe("queryUsage", () => {
     const snake = queryUsage(store, { groupBy: ["source_kind"] });
     expect(camel).toEqual(snake);
     expect(camel.map((r) => r.sourceKind).sort()).toEqual(["slash_command", "tool_call"]);
+    store.close();
+  });
+
+  it("groups by attributionAgent, the question the column exists to answer", () => {
+    const store = seeded([
+      inv({ skill: "research", sidechain: true, attributionAgent: "general-purpose" }),
+      inv({ skill: "research", sidechain: true, attributionAgent: "general-purpose" }),
+      inv({ skill: "research", sidechain: true, attributionAgent: "Explore" }),
+      inv({ skill: "research" }),
+    ]);
+    const rows = queryUsage(store, { skill: "research", sidechain: true, groupBy: ["attributionAgent"] });
+    expect(rows.map((r) => [r.attributionAgent, r.count])).toEqual([["general-purpose", 2], ["Explore", 1]]);
+    store.close();
+  });
+
+  it("groups by sidechain, round-tripping SQLite's 0/1 as a boolean", () => {
+    const store = seeded([inv({ sidechain: true }), inv({ sidechain: false }), inv({ sidechain: false })]);
+    const rows = queryUsage(store, { groupBy: ["sidechain"] });
+    expect(rows.map((r) => [r.sidechain, r.count])).toEqual([[false, 2], [true, 1]]);
+    store.close();
+  });
+
+  it("makes every discrete filter dimension groupable", () => {
+    // A filter without a matching grouping can only answer questions whose answer you
+    // already know, because you have to name the value to ask. attributionAgent was
+    // filterable but not groupable, so "which subagent types reach for this skill"
+    // could not be asked through the public API at all.
+    const store = seeded([inv()]);
+    const filterOnly = ["tool", "skill", "agent", "adapter", "sourceKind", "sidechain", "attributionAgent", "cwd"];
+    for (const dim of filterOnly) {
+      expect(GROUP_BY_DIMENSIONS).toContain(dim);
+      expect(() => queryUsage(store, { groupBy: [dim as never] })).not.toThrow();
+    }
     store.close();
   });
 
