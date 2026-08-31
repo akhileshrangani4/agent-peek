@@ -6,6 +6,7 @@ import { UsageStore } from "../src/usage/store.js";
 import { buildUsageReport } from "../src/usage/report.js";
 import { queryUsage } from "../src/usage/query.js";
 import type { Invocation, Watermark } from "../src/usage/schema.js";
+import type { UsageRow } from "../src/usage/query.js";
 
 let home: string | undefined;
 function makeStore(): UsageStore {
@@ -80,6 +81,33 @@ describe("buildUsageReport", () => {
     expect(limited.groupsReturned).toBe(2);
     const full = await buildUsageReport(store, { groupBy: ["skill"], limit: 10 }, { home });
     expect(full.truncated).toBe(false);
+    store.close();
+  });
+
+  it("returns exactly N rows for --limit N when N rows qualify, after filtering", async () => {
+    // Limiting in SQL and filtering afterwards trims the tail twice: a request for 8
+    // came back with 5 plus a claim that more existed, which is the exact ambiguity
+    // `truncated` exists to remove.
+    const store = makeStore();
+    const rows = Array.from({ length: 10 }, (_, i) => inv({ skill: `s${i}` }));
+    store.recordSource(rows, wm());
+    // Drop half the rows, as builtin resolution does.
+    const keepRow = (row: UsageRow) => Number((row.skill ?? "s0").slice(1)) % 2 === 0;
+    const report = await buildUsageReport(store, { groupBy: ["skill"], limit: 3 }, { home, keepRow });
+    expect(report.rows).toHaveLength(3);
+    expect(report.groupsReturned).toBe(3);
+    expect(report.truncated).toBe(true);
+    expect(report.rows.every((r) => keepRow(r))).toBe(true);
+    store.close();
+  });
+
+  it("is not truncated once the filtered set is exhausted", async () => {
+    const store = makeStore();
+    store.recordSource(Array.from({ length: 4 }, (_, i) => inv({ skill: `s${i}` })), wm());
+    const keepRow = (row: UsageRow) => row.skill === "s0" || row.skill === "s1";
+    const report = await buildUsageReport(store, { groupBy: ["skill"], limit: 10 }, { home, keepRow });
+    expect(report.rows).toHaveLength(2);
+    expect(report.truncated).toBe(false);
     store.close();
   });
 

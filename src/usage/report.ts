@@ -93,13 +93,18 @@ function dayCount(earliest?: string, latest?: string): number {
 export async function buildUsageReport(
   store: UsageStore,
   query: UsageQuery = {},
-  opts: { home?: string } = {},
+  opts: { home?: string; keepRow?: (row: UsageRow) => boolean } = {},
 ): Promise<UsageReport> {
   const limit = query.limit;
-  // Fetch one past the limit so `truncated` is a fact rather than a guess.
-  const rows = queryUsage(store, { ...query, limit: limit === undefined ? undefined : limit + 1 });
-  const truncated = limit !== undefined && rows.length > limit;
-  const visible = truncated ? rows.slice(0, limit) : rows;
+  // The limit is applied AFTER `keepRow`, never in SQL alongside it. Limiting first and
+  // filtering second trims the tail twice: a request for the top 8 came back with 5 and
+  // a claim that more existed, which is exactly the ambiguity `truncated` exists to
+  // remove. Aggregate row counts are small (skills, tools, days), so fetching the full
+  // grouped set and slicing here is cheap.
+  const all = queryUsage(store, { ...query, limit: undefined });
+  const kept = opts.keepRow ? all.filter(opts.keepRow) : all;
+  const truncated = limit !== undefined && kept.length > limit;
+  const visible = truncated ? kept.slice(0, limit) : kept;
 
   const cov = coverage(store);
   const agents = await listAgents(opts.home ? { home: opts.home } : {});

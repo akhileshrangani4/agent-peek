@@ -67,7 +67,7 @@ describe("claudeCodeExtractor", () => {
   it("extracts a slash command from a user message", () => {
     const rows = claudeCodeExtractor([{
       role: "user",
-      raw: { message: { content: "<command-name>/skill-creator</command-name>" } },
+      raw: { type: "user", message: { content: "<command-name>/skill-creator</command-name>" } },
       timestamp: "2026-08-30T12:00:00.000Z",
     }], ctx);
     expect(rows).toHaveLength(1);
@@ -80,7 +80,7 @@ describe("claudeCodeExtractor", () => {
     // Skills carrying disable-model-invocation can *only* be slash-invoked.
     const rows = claudeCodeExtractor([{
       role: "user",
-      raw: { message: { content: [{ type: "text", text: "<command-name>/mattpocock-skills:wayfinder</command-name>" }] } },
+      raw: { type: "user", message: { content: "<command-name>/mattpocock-skills:wayfinder</command-name>" } },
       timestamp: "2026-08-30T12:00:00.000Z",
     }], ctx);
     expect(rows[0]?.skill).toBe("mattpocock-skills:wayfinder");
@@ -90,10 +90,10 @@ describe("claudeCodeExtractor", () => {
     // Two plugins can ship the same bare name, so stripping the prefix merges distinct
     // skills. Reconciliation is the inventory's job (ticket 04), not the index's.
     const bare = claudeCodeExtractor([{
-      role: "user", raw: { message: { content: "<command-name>/wayfinder</command-name>" } },
+      role: "user", raw: { type: "user", message: { content: "<command-name>/wayfinder</command-name>" } },
     }], ctx);
     const qualified = claudeCodeExtractor([{
-      role: "user", raw: { message: { content: "<command-name>/mattpocock-skills:wayfinder</command-name>" } },
+      role: "user", raw: { type: "user", message: { content: "<command-name>/mattpocock-skills:wayfinder</command-name>" } },
     }], ctx);
     expect(bare[0]?.tool).toBe("wayfinder");
     expect(qualified[0]?.tool).toBe("mattpocock-skills:wayfinder");
@@ -103,9 +103,42 @@ describe("claudeCodeExtractor", () => {
     // /clear and /model are 117 of 239 command occurrences. Filtering to skills is a
     // query-time WHERE; dropping at write time is permanent under the 30-day rule.
     const rows = claudeCodeExtractor([{
-      role: "user", raw: { message: { content: "<command-name>/clear</command-name>" } },
+      role: "user", raw: { type: "user", message: { content: "<command-name>/clear</command-name>" } },
     }], ctx);
     expect(rows[0]?.tool).toBe("clear");
+  });
+
+  it("counts one invocation however many times the tag appears in the record", () => {
+    const rows = claudeCodeExtractor([{
+      role: "user",
+      raw: { type: "user", message: { content: "<command-name>/review</command-name> then <command-name>/review</command-name>" } },
+    }], ctx);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("does not count an assistant message that merely quotes a command tag", () => {
+    // Measured across the corpus: all 79 genuine invocations are type:"user" with
+    // string content. The only record breaking that shape is an assistant discussing
+    // the tag — counting it would let writing about a command inflate its usage.
+    const rows = claudeCodeExtractor([{
+      role: "assistant",
+      raw: {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "you can run <command-name>/skill-creator</command-name>" }] },
+      },
+    }], ctx);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("does not count a command tag echoed inside structured user content", () => {
+    const rows = claudeCodeExtractor([{
+      role: "user",
+      raw: {
+        type: "user",
+        message: { content: [{ type: "text", text: "<command-name>/clear</command-name>" }] },
+      },
+    }], ctx);
+    expect(rows).toHaveLength(0);
   });
 
   it("ignores a command-name-shaped string that is not in a message", () => {
@@ -145,7 +178,7 @@ describe("claudeCodeExtractor", () => {
   it("emits a tool call and a slash command from one message without colliding", () => {
     const rows = claudeCodeExtractor([{
       role: "user",
-      raw: { message: { content: "<command-name>/review</command-name>" } },
+      raw: { type: "user", message: { content: "<command-name>/review</command-name>" } },
       toolCalls: [{ name: "Bash" }],
     }], ctx);
     expect(rows).toHaveLength(2);
@@ -167,7 +200,7 @@ describe("extractor registry", () => {
     // Codex has no Skill tool at all; its extractor is a separate future function.
     expect(extractorFor("codex")).toBe(defaultExtractor);
     const rows = defaultExtractor([{
-      role: "user", raw: { message: { content: "<command-name>/clear</command-name>" } },
+      role: "user", raw: { type: "user", message: { content: "<command-name>/clear</command-name>" } },
       toolCalls: [{ name: "exec" }],
     }], { ...ctx, adapter: "codex" });
     expect(rows.map((r) => r.tool)).toEqual(["exec"]);

@@ -43,6 +43,7 @@ const SLASH_CALL_INDEX = 0;
 const COMMAND_NAME_RE = /<command-name>\s*\/?([^<\s][^<]*?)\s*<\/command-name>/;
 
 interface ClaudeRecord {
+  type?: unknown;
   isSidechain?: unknown;
   attributionAgent?: unknown;
   sessionId?: unknown;
@@ -96,7 +97,7 @@ export const claudeCodeExtractor: Extractor = (messages, ctx) => {
       });
     });
 
-    const command = commandName(rec.message?.content);
+    const command = userCommandName(rec);
     if (command !== null) {
       out.push({
         ...base,
@@ -114,20 +115,25 @@ export const claudeCodeExtractor: Extractor = (messages, ctx) => {
   return out;
 };
 
-function commandName(content: unknown): string | null {
-  const text = typeof content === "string"
-    ? content
-    : Array.isArray(content)
-      ? content
-          .filter((b): b is { type: string; text: string } =>
-            !!b && typeof b === "object"
-            && (b as { type?: unknown }).type === "text"
-            && typeof (b as { text?: unknown }).text === "string")
-          .map((b) => b.text)
-          .join("\n")
-      : null;
-  if (text === null) return null;
-  const m = COMMAND_NAME_RE.exec(text);
+/**
+ * A slash invocation is a *user* message whose content is the command block. Measured
+ * across the whole corpus: all 79 genuine invocations are `type: "user"` with string
+ * content and exactly one tag. The only record that breaks that shape is an assistant
+ * message quoting the tag while discussing it — which must not count as an invocation,
+ * or writing about a command inflates its usage.
+ *
+ * Only the first tag in a message is taken, so a record echoing the tag many times
+ * still yields one invocation.
+ *
+ * If Claude Code ever moves user messages to structured content this stops matching;
+ * that shows up as slash_command counts collapsing in `peek usage sourceKind`, which is
+ * the reason that breakdown is worth having.
+ */
+function userCommandName(rec: ClaudeRecord): string | null {
+  if (rec.type !== "user") return null;
+  const content = rec.message?.content;
+  if (typeof content !== "string") return null;
+  const m = COMMAND_NAME_RE.exec(content);
   return m && m[1] !== undefined ? m[1] : null;
 }
 

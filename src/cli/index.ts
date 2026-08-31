@@ -1132,6 +1132,11 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
     // the command name in `tool`, so filtering by tool name drops every slash-only
     // skill — 14 of them on the machine this was built against.
     const skillsOnly = !opts.allTools && explicitTool === undefined;
+    // Built-in resolution is a row predicate handed to the report, not a pass over its
+    // output: filtering after the limit would silently trim the tail a second time.
+    const keepRow = skillsOnly && !opts.includeBuiltins
+      ? await builtinRowFilter(groupBy)
+      : undefined;
     const report = await buildUsageReport(store, {
       ...(skillsOnly ? { skillsOnly: true } : {}),
       ...(explicitTool ? { tool: explicitTool } : {}),
@@ -1146,44 +1151,40 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
       ...(opts.attributionAgent ? { attributionAgent: String(opts.attributionAgent) } : {}),
       groupBy,
       limit: parseLimit(opts.limit),
-    });
-
-    // The index records every slash command verbatim, built-ins included — ticket 01
-    // deliberately left "is this a skill" to the inventory rather than freezing an
-    // answer into the schema. This is where that resolution happens.
-    const filtered = skillsOnly && !opts.includeBuiltins
-      ? await withoutBuiltins(report, groupBy)
-      : report;
+    }, keepRow ? { keepRow } : {});
 
     if (opts.json) {
-      console.log(JSON.stringify(filtered, null, 2));
+      console.log(JSON.stringify(report, null, 2));
       return;
     }
-    printUsage(filtered, groupBy, skillsOnly ? undefined : explicitTool, skillsOnly);
+    printUsage(report, groupBy, skillsOnly ? undefined : explicitTool, skillsOnly);
   } finally {
     store.close();
   }
 }
 
 /**
- * Drop rows whose name resolves to a CLI built-in. Only rows that name something —
- * grouped by skill or tool — can be resolved; any other grouping passes through
- * untouched rather than being filtered on a name it does not carry.
+ * A row predicate dropping names that resolve to a CLI built-in. The index records
+ * every slash command verbatim, built-ins included — ticket 01 deliberately left "is
+ * this a skill" to the inventory rather than freezing an answer into the schema, and
+ * this is where that resolution happens.
+ *
+ * Only a grouping that names something can be resolved; any other passes everything
+ * through rather than filtering on a name its rows do not carry.
  */
-async function withoutBuiltins(report: UsageReport, groupBy: GroupBy[]): Promise<UsageReport> {
-  const named = groupBy.length === 1 && (groupBy[0] === "skill" || groupBy[0] === "tool");
-  if (!named) return report;
+async function builtinRowFilter(groupBy: GroupBy[]): Promise<((row: UsageRow) => boolean) | undefined> {
+  const dim = groupBy.length === 1 ? groupBy[0] : undefined;
+  if (dim !== "skill" && dim !== "tool") return undefined;
   const index = buildNameIndex(await buildInventory({}));
-  const rows = report.rows.filter((row) => {
-    const raw = groupBy[0] === "skill" ? row.skill : row.tool;
+  return (row: UsageRow) => {
+    const raw = dim === "skill" ? row.skill : row.tool;
     if (!raw) return true;
     // resolveName classifies a built-in only when the name carries its leading slash,
     // and the index stores it stripped. Testing the slash spelling unconditionally is
     // safe because resolveName matches the inventory first: a real skill named `clear`
     // still resolves to itself rather than to the built-in.
     return resolveName(index, `/${raw}`).outcome !== "not-a-skill";
-  });
-  return { ...report, rows, groupsReturned: rows.length };
+  };
 }
 
 function parseDimensions(dimension: unknown, by: unknown): GroupBy[] {
