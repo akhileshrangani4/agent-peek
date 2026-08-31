@@ -22,6 +22,10 @@ export interface SkillInstallation {
   /** Path as it appears inside the root, before symlink resolution. */
   path: string;
   symlink: boolean;
+  /** Version segment, for a plugin installation. The agent loads the newest only. */
+  version?: string;
+  /** Directory mtime, used to pick the current version when the segment is a hash. */
+  mtimeMs?: number;
   /**
    * Tokens this installation is estimated to add to its agent's system prompt. Zero
    * when the agent honours `disable-model-invocation` and the skill sets it.

@@ -29,7 +29,8 @@ export type {
 } from "./agents/index.js";
 
 export {
-  buildInventory, inventoryRoots, applyFlags, pluginKeyFor, COST_BASIS,
+  buildInventory, inventoryRoots, applyFlags, pluginKeyFor, compareVersions,
+  dedupeInstallations, COST_BASIS,
   buildNameIndex, resolveName, resolveNames, invocationName, CLI_BUILTINS,
   parseFrontmatter, estimateListingTokens, scanRoot,
 } from "./skills/index.js";

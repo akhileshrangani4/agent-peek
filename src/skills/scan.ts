@@ -22,6 +22,8 @@ export interface FoundSkill {
   relPath: string;
   name: string;
   symlink: boolean;
+  /** Directory mtime. Breaks ties between plugin version dirs that are content hashes. */
+  mtimeMs: number;
   text: string;
 }
 
@@ -83,6 +85,10 @@ async function describe(root: ScanRoot, dir: string): Promise<FoundSkill | undef
     realDir = await realpath(dir);
   } catch { /* a link we cannot resolve is still an installation */ }
   const rel = relative(root.path, dir);
+  let mtimeMs = 0;
+  try {
+    mtimeMs = (await stat(dir)).mtimeMs;
+  } catch { /* an unstattable dir simply loses every tie */ }
   return {
     root,
     dir,
@@ -90,6 +96,7 @@ async function describe(root: ScanRoot, dir: string): Promise<FoundSkill | undef
     relPath: rel,
     name: basename(dir),
     symlink: await isSymlinkedPath(root.path, rel),
+    mtimeMs,
     text,
   };
 }

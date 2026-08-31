@@ -9,9 +9,11 @@ import { join } from "node:path";
 
 import { parseFrontmatter, estimateListingTokens } from "../../src/skills/parse.js";
 import { scanRoot } from "../../src/skills/scan.js";
-import { buildInventory, pluginKeyFor, applyFlags } from "../../src/skills/inventory.js";
+import {
+  buildInventory, pluginKeyFor, applyFlags, compareVersions, dedupeInstallations,
+} from "../../src/skills/inventory.js";
 import { buildNameIndex, resolveName, invocationName } from "../../src/skills/resolve.js";
-import type { Inventory, Skill } from "../../src/skills/types.js";
+import type { Inventory, Skill, SkillInstallation } from "../../src/skills/types.js";
 import type { FoundSkill } from "../../src/skills/scan.js";
 
 function skillMd(name: string, description?: string, extra = ""): string {
@@ -115,6 +117,7 @@ describe("plugin identity", () => {
     relPath,
     name,
     symlink: false,
+    mtimeMs: 0,
     text: "",
   });
 
@@ -277,5 +280,91 @@ describe("applyFlags", () => {
     }];
     applyFlags(skills);
     expect(skills[0]!.flags).toEqual(["immutable"]);
+  });
+});
+
+describe("plugin version dedupe", () => {
+  const install = (version: string, mtimeMs = 0): SkillInstallation => ({
+    agent: "claude-code", rootPath: "/cache", rootKind: "plugin", mutable: false,
+    path: `/cache/p/${version}`, symlink: false, version, mtimeMs, chargedTokens: 10,
+  });
+
+  it("orders dotted versions numerically", () => {
+    expect(compareVersions("1.10.0", "1.9.0")).toBeGreaterThan(0);
+    expect(compareVersions("2.0", "2.0.0")).toBe(0);
+  });
+
+  it("refuses to order names that are not versions", () => {
+    // Real cache directories include content hashes and the literal "unknown".
+    expect(compareVersions("ed404106fcd8", "unknown")).toBe(0);
+    expect(compareVersions("1.0.0", "unknown")).toBe(0);
+  });
+
+  it("keeps one installation per agent and root, preferring the higher version", () => {
+    const kept = dedupeInstallations([install("1.1.57"), install("1.1.58")]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.version).toBe("1.1.58");
+  });
+
+  it("falls back to mtime when the version segments cannot be ordered", () => {
+    const kept = dedupeInstallations([install("unknown", 100), install("ed404106fcd8", 500)]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.version).toBe("ed404106fcd8");
+  });
+
+  it("leaves non-plugin installations alone", () => {
+    const plain: SkillInstallation = {
+      agent: "codex", rootPath: "/r", rootKind: "user", mutable: true, path: "/r/a",
+      symlink: false, chargedTokens: 5,
+    };
+    expect(dedupeInstallations([plain, plain])).toHaveLength(2);
+  });
+
+  it("charges a multi-version plugin skill once per agent, end to end", async () => {
+    const home = await mkdtemp(join(tmpdir(), "peek-skills-versions-"));
+    const cache = join(home, ".claude", "plugins", "cache", "acme", "toolkit");
+    await writeSkill(join(cache, "1.0.0", "skills", "tool"), "tool", "a plugin skill");
+    await writeSkill(join(cache, "1.1.0", "skills", "tool"), "tool", "a plugin skill");
+    const inv = await buildInventory({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+    });
+    const tool = inv.skills.filter((s) => s.name === "tool");
+    expect(tool).toHaveLength(1);
+    // The agent loads one version; charging both would overstate cost by 100%.
+    expect(tool[0]!.installations).toHaveLength(1);
+    expect(tool[0]!.installations[0]!.version).toBe("1.1.0");
+    expect(tool[0]!.chargedTokens).toBe(tool[0]!.estimatedTokens);
+  });
+});
+
+describe("project-local roots", () => {
+  it("inventories a project root as read-only and never mutable", async () => {
+    const home = await mkdtemp(join(tmpdir(), "peek-skills-proj-home-"));
+    const project = await mkdtemp(join(tmpdir(), "peek-skills-proj-"));
+    await mkdir(join(home, ".claude", "skills"), { recursive: true });
+    await writeSkill(join(project, ".claude", "skills", "repo-skill"), "repo-skill", "lives in the repo");
+
+    const inv = await buildInventory({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+      projects: [project],
+    });
+    const repo = inv.skills.find((s) => s.name === "repo-skill");
+    expect(repo).toBeDefined();
+    const install = repo!.installations[0]!;
+    expect(install.rootKind).toBe("project");
+    expect(install.agent).toBe("claude-code");
+    // A repo file belongs to git and its collaborators, not to peek.
+    expect(install.mutable).toBe(false);
+    expect(repo!.flags).toContain("immutable");
+  });
+
+  it("ignores a project directory with no skill root", async () => {
+    const home = await mkdtemp(join(tmpdir(), "peek-skills-proj2-"));
+    await mkdir(join(home, ".claude", "skills"), { recursive: true });
+    const inv = await buildInventory({
+      home, xdgConfigHome: join(home, ".config"), stateDir: join(home, ".agent-peek"),
+      projects: [await mkdtemp(join(tmpdir(), "peek-empty-project-"))],
+    });
+    expect(inv.rootsScanned.every((r) => r.kind !== "project")).toBe(true);
   });
 });
