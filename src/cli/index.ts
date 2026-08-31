@@ -16,6 +16,7 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
+import { displayWidth, fit, shortenPath } from "./paths.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
@@ -794,20 +795,33 @@ function printAgents(agents: ResolvedAgent[]): void {
   const table = agents.map((agent) => {
     const present = agent.roots.filter((r) => r.present);
     return [
-      agent.slug,
+      fit(agent.slug, 15),
+      // The four states are the point of the agent model, so they stay whole words:
+      // legible in monochrome, in a pipe, and to a reader who does not know the palette.
       agent.presence,
       agent.tier ?? "user",
       agent.adapter ?? "-",
-      agent.observable ? agent.observes.join(",") : "none",
+      // "tool_call,slash_command" is 23 characters of mostly-repeated text.
+      usageLabel(agent),
       agent.manageable ? "yes" : "no",
-      (present.length ? present : agent.roots).map((r) => formatPath(r.path)).join(" ") || "-",
+      // A path list per row is detail, not orientation: the count answers "does peek see
+      // anything here", and --json carries the paths.
+      String((present.length ? present : agent.roots).length),
     ];
   });
-  const headers = ["AGENT", "PRESENCE", "SOURCE", "ADAPTER", "OBSERVES", "MANAGEABLE", "SKILL ROOTS"];
-  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  const headers = ["AGENT", "PRESENCE", "SOURCE", "ADAPTER", "USAGE", "MANAGE", "ROOTS"];
+  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => displayWidth(r[i]!))));
+  const fmt = (r: string[]) => r.map((v, i) => v + " ".repeat(Math.max(0, cols[i]! - displayWidth(v)))).join("  ").trimEnd();
   console.log(fmt(headers));
   for (const row of table) console.log(fmt(row));
+}
+
+/** What peek can see of this agent's usage, in one short token rather than a kind list. */
+function usageLabel(agent: ResolvedAgent): string {
+  if (!agent.observable) return "none";
+  const tool = agent.observes.includes("tool_call");
+  const slash = agent.observes.includes("slash_command");
+  return tool && slash ? "tool+slash" : slash ? "slash" : "tool";
 }
 
 async function skillsMutationCommand(
@@ -896,12 +910,15 @@ function printArchivePlan(plan: ArchivePlan): void {
 
 function printAgentsSummary(all: ResolvedAgent[], present: ResolvedAgent[]): void {
   const verified = all.filter((a) => a.tier === "verified").length;
+  const unconfirmed = all.filter((a) => a.presence === "unconfirmed").length;
   console.log("");
+  console.log(`${present.length} present, ${unconfirmed} unconfirmed, ${all.length} known to peek.`);
   console.log(
-    `${present.length} on this machine, ${all.length} known to peek `
-    + `(${verified} verified by peek, ${all.length - verified} sourced from `
-    + `${AGENT_TABLE_SOURCE.package}@${AGENT_TABLE_SOURCE.version}). Use --all to list them.`,
+    `  ${verified} verified by peek, ${all.length - verified} sourced from `
+    + `${AGENT_TABLE_SOURCE.package}@${AGENT_TABLE_SOURCE.version}.`,
   );
+  console.log("  unconfirmed: a skill root exists, but nothing else does — the installer");
+  console.log("  creates those directories, so peek will not claim the agent is installed.");
 }
 
 async function printManifestDivergence(): Promise<void> {
@@ -910,7 +927,8 @@ async function printManifestDivergence(): Promise<void> {
   const { presentButUnlisted, listedButMissing } = divergence;
   if (!presentButUnlisted.length && !listedButMissing.length) return;
   console.log("");
-  console.log(`shared library manifest (${formatPath(divergence.manifestPath)}) is out of step; peek never writes it:`);
+  console.log(`shared library manifest ${formatPath(divergence.manifestPath)} is out of step.`);
+  console.log("  peek reads it and never writes it.");
   if (presentButUnlisted.length) console.log(`  on disk but unlisted: ${presentButUnlisted.length}`);
   if (listedButMissing.length) console.log(`  listed but missing: ${listedButMissing.length}`);
 }
@@ -1040,20 +1058,25 @@ function printList(
   if (list.length === 0) { console.log("(no sessions)"); return; }
   const rows = withDisplayNames(list).map((e) => {
     const row = [
-      e.displayName,
+      fit(e.displayName, 22),
       e.adapter,
       e.status,
       relativeTime(e.lastSeen),
-      sourceLabel(e),
-      e.cwd ? formatPath(e.cwd) : "-",
+      // 90 characters of worktree path pushed every other column off screen. The UUID
+      // segment identifies nothing a reader uses; the last two segments are the answer.
+      e.cwd ? shortenPath(e.cwd, 20) : "-",
     ];
     if (opts.showIds) row.push(e.id);
     return row;
   });
-  const headers = ["NAME", "ADAPTER", "STATUS", "UPDATED", "SOURCE", "CWD"];
+  // SOURCE dropped from the default view: it repeats what ADAPTER already says in the
+  // only case it differs (tmux/screen), and it survives in --json.
+  const headers = ["NAME", "ADAPTER", "STATUS", "UPDATED", "CWD"];
   if (opts.showIds) headers.push("ID");
-  const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  // Widths in characters, not bytes: an elided path carries a multi-byte ellipsis, and
+  // a byte count would over-measure the column it appears in.
+  const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => displayWidth(r[i]!))));
+  const fmt = (r: string[]) => r.map((v, i) => v + " ".repeat(Math.max(0, cols[i]! - displayWidth(v)))).join("  ").trimEnd();
   console.log(fmt(headers));
   for (const r of rows) console.log(fmt(r));
 }
@@ -2162,32 +2185,49 @@ function printDoctor(rows: DoctorRow[], agents?: ResolvedAgent[]): void {
   const ready = rows.filter((row) => row.status === "ready").length;
   const optIn = rows.filter((row) => row.status === "opt-in").length;
   const blocked = rows.filter((row) => row.status === "needs command").length;
+  // The NOTE column ran the table to 158 columns for a sentence repeated per row. Notes
+  // print under the table instead, once per adapter that has one.
   const table = rows.map((row) => [
     row.adapter,
     row.status,
     row.source,
-    row.path ? formatPath(row.path) : row.command ?? "-",
-    row.note ?? "",
+    row.path ? shortenPath(row.path, 34) : row.command ?? "-",
   ]);
-  const headers = ["ADAPTER", "STATUS", "SOURCE", "TARGET", "NOTE"];
-  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  const headers = ["ADAPTER", "STATUS", "SOURCE", "TARGET"];
+  const cols = headers.map((h, i) => Math.max(h.length, ...table.map((r) => displayWidth(r[i]!))));
+  const fmt = (r: string[]) => r.map((v, i) => v + " ".repeat(Math.max(0, cols[i]! - displayWidth(v)))).join("  ").trimEnd();
   console.log(`agent-peek ${VERSION}`);
   console.log(`ready: ${ready}  opt-in: ${optIn}  needs-command: ${blocked}`);
   console.log("");
   console.log(fmt(headers));
   for (const row of table) console.log(fmt(row));
+  const notes = rows.filter((r) => r.note);
+  if (notes.length) {
+    console.log("");
+    for (const row of notes) console.log(`  ${row.adapter}: ${fit(row.note!, 72 - row.adapter.length)}`);
+  }
   if (agents) {
     const observable = agents.filter((a) => a.observable).length;
     const manageable = agents.filter((a) => a.manageable).length;
     console.log("");
     console.log(`agents on this machine: ${agents.length}  observable: ${observable}  manageable: ${manageable}`);
-    const noAdapter = agents.filter((a) => !a.adapter).map((a) => a.slug);
-    if (noAdapter.length) console.log(`  usage not observable (no adapter): ${noAdapter.join(", ")}`);
-    const noKinds = agents.filter((a) => a.adapter && !a.observable).map((a) => a.slug);
-    if (noKinds.length) console.log(`  usage not observable (adapter parses no tool calls): ${noKinds.join(", ")}`);
-    const partial = agents.filter((a) => a.observable && !a.observes.includes("slash_command")).map((a) => a.slug);
-    if (partial.length) console.log(`  slash-command usage not observable: ${partial.join(", ")}`);
+    // Lists of agent slugs run past 80 columns as soon as there are more than a handful,
+    // so they wrap rather than being truncated: the names are the content.
+    const listLine = (label: string, slugs: string[]) => {
+      if (!slugs.length) return;
+      let line = `  ${label}:`;
+      for (const slug of slugs) {
+        const next = `${line} ${slug},`;
+        if (displayWidth(next) > 78) { console.log(line); line = `    ${slug},`; }
+        else line = next;
+      }
+      console.log(line.replace(/,$/, ""));
+    };
+    listLine("usage not observable (no adapter)", agents.filter((a) => !a.adapter).map((a) => a.slug));
+    listLine("usage not observable (adapter parses no tool calls)",
+      agents.filter((a) => a.adapter && !a.observable).map((a) => a.slug));
+    listLine("slash-command usage not observable",
+      agents.filter((a) => a.observable && !a.observes.includes("slash_command")).map((a) => a.slug));
   }
   console.log("");
   console.log("next:");
@@ -2201,13 +2241,6 @@ function isTerminalAdapter(adapter: unknown): boolean {
   return typeof adapter === "string" && TERMINAL_ADAPTERS.has(adapter);
 }
 
-function sourceLabel(entry: { adapter: string; sourceType?: string; transcriptPath: string }): string {
-  if (entry.sourceType) return entry.sourceType;
-  if (entry.transcriptPath.startsWith("tmux://") || entry.transcriptPath.startsWith("screen://")) return "terminal";
-  if (entry.transcriptPath.endsWith(".db")) return "database";
-  if (isTerminalAdapter(entry.adapter)) return "terminal";
-  return "file";
-}
 
 function formatPath(path: string): string {
   const home = process.env.HOME ?? homedir();

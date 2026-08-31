@@ -437,3 +437,44 @@ describe("CLI integration", () => {
     expect(r.stdout).toMatch(/next:/);
   });
 });
+
+describe("presentation invariants (ticket 15)", () => {
+  const commands = [["agents"], ["agents", "--all"], ["list"], ["doctor"]];
+  const ANSI = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*m", "g");
+
+  it("degrades to 80 columns without truncating past it", async () => {
+    // 80 is the floor to degrade to, not the target: a reader on a 120-column terminal
+    // should get the width they have. This pins the narrow end.
+    for (const argv of commands) {
+      const out = await runCli(argv, { COLUMNS: "80" });
+      for (const line of out.stdout.split("\n")) {
+        // Characters, not bytes: an elided path carries a multi-byte ellipsis, and a
+        // byte count would condemn a line that fits.
+        expect([...line.replace(ANSI, "")].length, `${argv.join(" ")}: ${line}`)
+          .toBeLessThanOrEqual(80);
+      }
+    }
+  }, 60000);
+
+  it("emits no escape codes when stdout is not a TTY", async () => {
+    // Piping into grep and awk is how several verification steps in this effort work; a
+    // colour code landing mid-token breaks them silently.
+    for (const argv of commands) {
+      const out = await runCli(argv);
+      expect(out.stdout.includes(String.fromCharCode(27)), argv.join(" ")).toBe(false);
+    }
+  }, 60000);
+
+  it("keeps every presence state distinguishable without colour", async () => {
+    // The four states are the substance of the agent model. If styling ever carries that
+    // distinction alone, it vanishes in monochrome and in a pipe.
+    const out = await runCli(["agents", "--all"]);
+    const states = new Set<string>();
+    for (const line of out.stdout.split("\n")) {
+      const match = line.match(/^\S+\s+(present|unconfirmed|absent|no-convention)\b/);
+      if (match) states.add(match[1]!);
+    }
+    expect(states.size).toBeGreaterThanOrEqual(3);
+    expect(states.has("unconfirmed")).toBe(true);
+  }, 60000);
+});
