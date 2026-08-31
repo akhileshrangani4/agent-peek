@@ -9,6 +9,24 @@ The features are easy to describe. What makes them trustworthy is a set of findi
 about *when a usage number lies*, and those are the substance of this release — a tool
 that confidently recommends deleting a skill you rely on is worse than no tool.
 
+### Terminal output
+
+Every static report — `skills`, `usage`, `agents`, `list`, `doctor` — renders through one
+module. Status is structure rather than a repeated column: usage segments, agent presence,
+session status and adapter readiness each group under a rule, so the shape is visible
+without counting rows.
+
+Colour carries meaning and is never the only thing that does: the four coverage states
+stay legible in monochrome, in a pipe, and to a reader who has not learned a palette.
+No escape codes are emitted off a TTY, `--color` forces them through a pipe for a pager,
+`NO_COLOR` is honoured, and every command accepts `--width`. Output fills the terminal
+and degrades at 80 columns rather than targeting it.
+
+Sparklines in `skills` and `usage` show the shape of use over time, which is the
+keep-or-delete judgement a bare count cannot convey — a skill invoked once in a burst
+looks nothing like one invoked steadily. `usage --by day` renders the corpus as a single
+shape, since that is the one view where time is the answer rather than a decoration.
+
 ### What the numbers cannot tell you, and how peek says so
 
 **Usage history is a rolling window, and its length differs per agent.** Claude Code
