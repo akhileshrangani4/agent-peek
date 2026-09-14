@@ -42,7 +42,7 @@ describe("gitRootFor", () => {
   it("resolves a linked worktree to its main checkout, not to itself", async () => {
     // A worktree's .git is a file pointing at <main>/.git/worktrees/<name>. Stopping at
     // the first .git presents every worktree of one repo as a separate project: five
-    // worktrees of buildy counted its skill root five times over.
+    // worktrees of one project counted its skill root five times over.
     const main = await repo();
     const wt = await mkdtemp(join(tmpdir(), "peek-linked-"));
     await writeFile(join(wt, ".git"), `gitdir: ${join(main, ".git", "worktrees", "wt1")}\n`, "utf8");

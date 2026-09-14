@@ -227,9 +227,9 @@ different agent, `--mode handoff` writes the document the next session needs so
 it does not have to re-explore:
 
 ```bash
-peek at buildy-claude --mode handoff --out handoff.md          # then: "read handoff.md and continue"
-peek at buildy-claude --mode handoff --for chatgpt             # paste into a chat with no filesystem
-peek at buildy-claude --mode handoff --for codex --out h.md    # switch harness, keep the state
+peek at researcher-claude --mode handoff --out handoff.md          # then: "read handoff.md and continue"
+peek at researcher-claude --mode handoff --for chatgpt             # paste into a chat with no filesystem
+peek at researcher-claude --mode handoff --for codex --out h.md    # switch harness, keep the state
 ```
 
 No API key is involved. peek compresses the whole transcript (user and assistant
