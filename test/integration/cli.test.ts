@@ -20,9 +20,40 @@ function runCli(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ code: nu
   });
 }
 
+function runCliWithStdin(args: string[], stdin: string, env: NodeJS.ProcessEnv = {}): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((res) => {
+    const p = spawn("node", [BIN, ...args], { env: { ...process.env, ...env } });
+    let out = "", err = "";
+    p.stdout.on("data", (d) => { out += d.toString(); });
+    p.stderr.on("data", (d) => { err += d.toString(); });
+    p.on("close", (code) => res({ code: code ?? 0, stdout: out, stderr: err }));
+    p.stdin.end(stdin);
+  });
+}
+
 beforeAll(() => assertDistFresh());
 
 describe("CLI integration", () => {
+  it("bare peek prints the overview and exits 0", async () => {
+    const r = await runCli([]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/^agent-peek/m);
+    expect(r.stdout).toMatch(/Exit codes:/);
+    expect(r.stdout).toMatch(/agent-peek-mcp/);
+    expect(r.stderr).toBe("");
+  });
+
+  it("errors under --json are a JSON record on stdout with the slug line on stderr", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const r = await runCli(["at", "nosuchsession", "--json"], { HOME: home });
+    expect(r.code).toBe(2);
+    const record = JSON.parse(r.stdout);
+    expect(record.error).toBe("session_not_found");
+    expect(record.exit).toBe(2);
+    expect(record.next.length).toBeGreaterThan(0);
+    expect(r.stderr.trim()).toBe("error: session_not_found · exit 2");
+  });
+
   it("--help prints usage", async () => {
     const r = await runCli(["--help"]);
     expect(r.code).toBe(0);
@@ -428,6 +459,12 @@ describe("CLI integration", () => {
     // Without identifying itself, the same call still reports the conflict.
     const other = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "someone-else" });
     expect(other.code).toBe(1);
+
+    // `--files-from -` with a space, as the help text shows it, reads stdin.
+    const viaStdin = await runCliWithStdin(["check", "--files-from", "-", "--cwd", "/tmp/check"], "src/core/engine.ts\nREADME.md\n", { HOME: home });
+    expect(viaStdin.code).toBe(1);
+    expect(viaStdin.stdout).toMatch(/conflict: 1 active file conflict/);
+    expect(viaStdin.stdout).toMatch(/src\/core\/engine.ts/);
 
     const files = await runCli(["list", "--files", "--adapter", "claude-code"], { HOME: home });
     expect(files.code).toBe(0);

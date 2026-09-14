@@ -349,7 +349,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek at codex:abc123 --mode raw --first 20")
     .example("peek at codex:abc123 --mode raw --around 100 --limit 30")
     .example("peek at researcher-claude --since <nextCursor>")
-    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary", { default: "raw" })
+    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary. handoff runs the installed agent CLI (claude, codex, ...) headless for up to a minute unless --local; AGENT_PEEK_HANDOFF_RUNNER=\"<bin> <args>\" overrides it", { default: "raw" })
     .option("--for <agent>", "handoff: who it is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat)", { default: "generic" })
     .option("--out <file>", "handoff: also write the document to this file")
     .option("--local", "handoff: skip the agent CLI and use the regex fallback")
@@ -794,7 +794,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.version(VERSION);
 
   try {
-    cli.parse(argv, { run: false });
+    // A bare `peek` is a request for orientation, not a mistake.
+    if (argv.length <= 2) {
+      printFocusedHelp(undefined);
+      return 0;
+    }
+    cli.parse(normalizeStdinDash(argv), { run: false });
     if (!(cli as unknown as { matchedCommand?: unknown }).matchedCommand && !isGlobalInfoRequest(argv)) {
       fail({
         code: 5,
@@ -809,6 +814,25 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   } catch (e) {
     return handleError(e);
   }
+}
+
+/**
+ * cac reads a lone `-` as a flag, so `--files-from -` failed with "value is missing"
+ * while the help text advertised `-` for stdin. Join the pair so the parser sees a value.
+ */
+const STDIN_DASH_OPTIONS = new Set(["--files-from"]);
+function normalizeStdinDash(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (STDIN_DASH_OPTIONS.has(arg) && argv[i + 1] === "-") {
+      out.push(`${arg}=-`);
+      i++;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
 }
 
 function isGlobalInfoRequest(argv: string[]): boolean {
@@ -1842,6 +1866,14 @@ function fail(opts: {
   const red = (t: string) => (colour ? `\u001b[31m${t}\u001b[39m` : t);
   const dim = (t: string) => (colour ? `\u001b[2m${t}\u001b[22m` : t);
 
+  // Under --json a caller is parsing stdout; give it the record there and keep the
+  // plain slug line on stderr so greps and scripts keep working.
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({ error: opts.error, message: opts.message, hint: opts.hint, next: opts.next, exit: opts.code }, null, 2));
+    console.error(`error: ${opts.error} · exit ${opts.code}`);
+    process.exit(opts.code);
+  }
+
   const lines: string[] = ["", `  ${red("error")}  ${opts.error.replace(/_/g, " ")}`, ""];
   lines.push(`     ${opts.message}`);
   if (opts.hint) lines.push("", `     ${opts.hint}`);
@@ -1924,8 +1956,11 @@ function printFocusedHelp(command?: string): void {
   console.log("Visibility and coordination for local AI agent sessions, and the skills they load.");
   console.log("");
   console.log("Sessions:");
-  console.log("  peek list                         show active sessions");
+  console.log("  peek list                         show active sessions (NAME is the selector for peek at)");
   console.log("  peek at <selector> --mode brief   read one session without touching it");
+  console.log("  peek at <selector> --mode handoff --out h.md");
+  console.log("                                    document a new session can start from; runs the");
+  console.log("                                    installed agent CLI for up to a minute, --local skips it");
   console.log("  peek ui                           browse sessions interactively");
   console.log("");
   console.log("Coordination:");
@@ -1944,6 +1979,19 @@ function printFocusedHelp(command?: string): void {
   console.log("  peek doctor                       diagnose adapter availability");
   console.log("  peek version                      show installed version");
   console.log("  peek update                       install the latest npm version globally");
+  console.log("");
+  console.log("For agents:");
+  console.log("  agent-peek-mcp                    the same as an MCP stdio server (peek_session, coordination_digest, read_feed)");
+  console.log("  --json                            machine-readable output everywhere, errors included");
+  console.log("  raw mode hides tool-only messages; pass --tools to see them");
+  console.log("");
+  console.log("Words:");
+  console.log("  status (list)     how recently the transcript changed: active, idle, ended");
+  console.log("  activity (at)     what the agent is doing now: tool-running, thinking, idle");
+  console.log("");
+  console.log("Exit codes:");
+  console.log("  0 ok   1 conflict or internal error   2 not found   3 ambiguous selector");
+  console.log("  4 adapter or skill error   5 usage: bad command, option, mode, or cursor");
   console.log("");
   console.log("Focused help:");
   console.log("  peek help coord");
