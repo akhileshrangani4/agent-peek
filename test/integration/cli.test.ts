@@ -227,10 +227,34 @@ describe("CLI integration", () => {
     expect(brief.code).toBe(0);
     expect(brief.stdout).toMatch(/Task: third/);
 
-    const handoff = await runCli(["at", "page-claude", "--mode", "handoff"], { HOME: home });
-    expect(handoff.code).toBe(0);
-    expect(handoff.stdout).toMatch(/session: claude-code:page/);
-    expect(handoff.stdout).toMatch(/activity:/);
+    // --local skips the agent CLI: tests must never spawn a real harness.
+    const local = await runCli(["at", "page-claude", "--mode", "handoff", "--local"], { HOME: home });
+    expect(local.code).toBe(0);
+    expect(local.stdout).toMatch(/^> local fallback/m);
+    expect(local.stdout).toMatch(/^# Handoff$/m);
+    expect(local.stdout).toMatch(/## Next actions/);
+    expect(local.stdout).not.toMatch(/nextCursor/); // stdout is the document; the cursor goes to stderr
+    expect(local.stderr).toMatch(/nextCursor:/);
+    expect(local.stderr).toMatch(/local fallback; for generic; 3 messages/);
+
+    // A runner override stands in for the harness. `cat` echoes the prompt back as the document,
+    // which also proves the prompt carried the transcript and the target framing.
+    const outFile = join(home, "handoff.md");
+    const viaRunner = await runCli(
+      ["at", "page-claude", "--mode", "handoff", "--for", "chatgpt", "--out", outFile],
+      { HOME: home, AGENT_PEEK_HANDOFF_RUNNER: "cat" },
+    );
+    expect(viaRunner.code).toBe(0);
+    expect(viaRunner.stdout).toMatch(/\[user\] first/);
+    expect(viaRunner.stdout).toMatch(/\[assistant\] second/);
+    expect(viaRunner.stdout).toMatch(/NO filesystem/);
+    expect(viaRunner.stderr).toMatch(/written by cat; for chatgpt/);
+    expect(viaRunner.stderr).toMatch(/wrote .*handoff\.md/);
+    expect((await readFile(outFile, "utf8")).trim()).toBe(viaRunner.stdout.trim());
+
+    const badTarget = await runCli(["at", "page-claude", "--mode", "handoff", "--for", "nope", "--local"], { HOME: home });
+    expect(badTarget.code).toBe(5);
+    expect(badTarget.stderr).toMatch(/invalid_handoff_target/);
 
     const first = await runCli(["at", "page-claude", "--first", "1"], { HOME: home });
     expect(first.code).toBe(0);

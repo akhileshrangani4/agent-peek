@@ -92,6 +92,7 @@ coordinate, but do not claim you changed another agent's state.
 - Use `peek at <selector> --mode structured --json` when another script or agent will parse the result.
 - Use `peek at <selector> --mode brief` for a compact human-readable status.
 - Use `peek at <selector> --mode summary` for a sentence-style local summary.
+- Use `peek at <selector> --mode handoff --out <file>` when a session must be continued elsewhere: it writes a document (goal, state, decisions, files, next actions, gotchas) via the installed agent CLI, no API key. Add `--for chatgpt` for a reader with no filesystem. Over MCP, `peek_session` with `mode: "handoff"` returns `material` and you write the document yourself.
 - Use `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` for polling coordination state without inline cursor blobs.
 - Use `peek at <selector> --since <nextCursor> --json` when polling one transcript so you only read new messages.
 - Use `peek tag <selector> as <name>` when the display name is unstable or hard to type.

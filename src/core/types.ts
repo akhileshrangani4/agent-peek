@@ -114,6 +114,10 @@ export interface BriefSnapshot {
   recentTools: string[];
 }
 
+/** Who the handoff document is written for. Only the shape matters:
+ * CLI agents have a filesystem to point at, chat agents need excerpts inline. */
+export type HandoffTarget = "generic" | "claude-code" | "codex" | "gemini" | "copilot" | "opencode" | "chatgpt" | "claude-chat";
+
 export interface HandoffSnapshot {
   mode: "handoff";
   sessionId: string;
@@ -127,6 +131,15 @@ export interface HandoffSnapshot {
   touchedFiles: string[];
   pendingTools: string[];
   recentTools: string[];
+  target: HandoffTarget;
+  /** The handoff a new session can start from, as markdown. */
+  document: string;
+  /** "harness": a local agent CLI wrote `document`. "host": the caller is the
+   * harness and should write it from `material`. "local": heuristic fallback. */
+  provider: "harness" | "host" | "local";
+  runner?: string;
+  /** Full prompt (instructions + compressed transcript) when provider is "host". */
+  material?: string;
 }
 
 export type Snapshot = RawSnapshot | StructuredSnapshot | BriefSnapshot | SummarySnapshot | HandoffSnapshot;

@@ -568,7 +568,8 @@ function collectPathValues(value: unknown, key: string, out: string[]): void {
 }
 
 function isPathKey(key: string): boolean {
-  return /^(path|paths|file|files|filepath|filePath|filename|filenamePattern)$/i.test(key);
+  // file_path and notebook_path are what Claude Code's Read/Edit/Write/NotebookEdit send.
+  return /^(path|paths|file|files|filepath|file_path|notebook_path|filename|filenamePattern)$/i.test(key);
 }
 
 function isCommandKey(key: string): boolean {

@@ -16,6 +16,7 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
+import { HANDOFF_TARGETS, parseHandoffTarget } from "../core/handoff.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
@@ -331,13 +332,18 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     });
 
   cli.command("at <selector>", "Read a session by displayName, id, tag, or cwd.")
-    .usage("at <selector> [--mode raw|structured|brief|summary|handoff] [--since <cursor>] [--limit <n>] [--json]")
+    .usage("at <selector> [--mode raw|structured|brief|summary|handoff] [--for <agent>] [--out <file>] [--since <cursor>] [--limit <n>] [--json]")
     .example("peek at ledgerforge-codex --mode structured")
+    .example("peek at buildy-claude --mode handoff --out handoff.md")
+    .example("peek at buildy-claude --mode handoff --for chatgpt")
     .example("peek at codex:abc123 --mode raw --last 50")
     .example("peek at codex:abc123 --mode raw --first 20")
     .example("peek at codex:abc123 --mode raw --around 100 --limit 30")
     .example("peek at buildy-claude --since <nextCursor>")
     .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary", { default: "raw" })
+    .option("--for <agent>", "handoff: who it is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat)", { default: "generic" })
+    .option("--out <file>", "handoff: also write the document to this file")
+    .option("--local", "handoff: skip the agent CLI and use the regex fallback")
     .option("--since <cursor>", "Only return new messages after a prior nextCursor")
     .option("--limit <n>", "Raw window size. Defaults to 200, or 30 with --around")
     .option("--first <n>", "Show the first N raw messages")
@@ -351,10 +357,23 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--json", "Output the full PeekResult JSON")
     .action(async (selector, opts) => {
       const mode = parseMode(opts.mode);
+      const target = parseHandoffTarget(opts.for);
+      if (!target) {
+        fail({
+          code: 5,
+          error: "invalid_handoff_target",
+          message: `Unknown handoff target: ${String(opts.for)}`,
+          hint: `Use one of: ${HANDOFF_TARGETS.join(", ")}.`,
+          next: ["peek at <selector> --mode handoff --for claude-code", "peek at <selector> --mode handoff --for chatgpt"],
+        });
+      }
       const rawOpts = parseRawOpts(opts);
       const engine = await createEngine({ withExternal: true });
       const r = await engine.peek(selector, {
         mode,
+        target,
+        produce: opts.local ? "local" : "harness",
+        onStatus: (line) => { if (!opts.json) console.error(line); },
         since: opts.since,
         limit: rawOpts.limit,
         offset: rawOpts.offset,
@@ -362,6 +381,10 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         from: rawOpts.from,
         order: rawOpts.order,
       });
+      if (r.snapshot.mode === "handoff" && opts.out) {
+        writeFileSync(resolve(String(opts.out)), `${r.snapshot.document}\n`);
+        if (!opts.json) console.error(`wrote ${resolve(String(opts.out))}`);
+      }
       if (opts.json) { console.log(JSON.stringify(r, null, 2)); return; }
       printSnapshot(r, { showTools: Boolean(opts.tools || opts.verbose) });
     });
@@ -1821,7 +1844,7 @@ function printFocusedHelp(command?: string): void {
     at: [
       "peek at <selector> --mode brief       # compact local status",
       "peek at <selector> --mode structured  # stable fields for agents",
-      "peek at <selector> --mode handoff     # decisions, files, next actions",
+      "peek at <selector> --mode handoff     # document a new session can start from",
       "peek at <selector> --last 50 --tools  # inspect raw transcript details",
     ],
     coord: [
@@ -2174,32 +2197,22 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
     if (s.pendingTools.length) console.log(`pending tools: ${s.pendingTools.join(", ")}`);
     if (s.recentTools.length) console.log(`recent tools: ${s.recentTools.join(", ")}`);
   } else if (s.mode === "handoff") {
-    console.log(`session: ${s.sessionId}`);
-    console.log(`messages: ${s.messageCount}`);
-    console.log(`activity: ${s.activity}`);
-    if (s.currentTask) console.log(`task: ${oneLine(s.currentTask)}`);
-    printListSection("decisions", s.decisions);
-    printListSection("open questions", s.openQuestions);
-    printListSection("next actions", s.nextActions);
-    printListSection("files", s.touchedFiles.map(formatPath));
-    if (s.pendingTools.length) console.log(`pending tools: ${s.pendingTools.join(", ")}`);
-    if (s.recentTools.length) console.log(`recent tools: ${s.recentTools.join(", ")}`);
+    // The document is the deliverable; it goes to stdout so it pipes cleanly.
+    console.log(s.document);
+    const via = s.provider === "harness" ? `written by ${s.runner}` : s.provider === "host" ? "material for the host model" : "local fallback";
+    console.error(`\n(${via}; for ${s.target}; ${s.messageCount} messages; activity: ${s.activity})`);
   } else {
     console.log(s.summary);
     if (s.fallback) console.log(`(fallback: structured returned)`);
   }
-  console.log(`\nnextCursor: ${r.nextCursor}`);
+  // Handoff stdout is the document itself; keep the cursor off it so it pipes cleanly.
+  if (s.mode === "handoff") console.error(`nextCursor: ${r.nextCursor}`);
+  else console.log(`\nnextCursor: ${r.nextCursor}`);
 }
 
 function indent(s: string, n = 2): string {
   const pad = " ".repeat(n);
   return s.split("\n").map((l) => pad + l).join("\n");
-}
-
-function printListSection(label: string, values: string[]): void {
-  if (!values.length) return;
-  console.log(`${label}:`);
-  for (const value of values) console.log(indent(`- ${value}`));
 }
 
 function oneLine(value: string, max = 160): string {

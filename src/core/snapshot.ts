@@ -1,5 +1,5 @@
 import type {
-  BriefSnapshot, HandoffSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
+  BriefSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
   StructuredSnapshot, SummarySnapshot, ToolCall,
 } from "./types.js";
 import { inferTouchedFiles, inferWritingFiles } from "./coordination.js";
@@ -90,31 +90,6 @@ export function toBrief(sessionId: string, messages: RawMessage[]): BriefSnapsho
     brief: parts.join(" "),
     currentTask: structured.currentTask,
     lastAssistantMessage: structured.lastAssistantMessage,
-    pendingTools: toolNames(structured.pendingToolCalls),
-    recentTools: toolNames(structured.lastToolCalls),
-  };
-}
-
-export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: string): HandoffSnapshot {
-  const structured = toStructured(sessionId, messages, cwd);
-  const assistantText = messages
-    .filter((message) => message.role === "assistant" && message.text)
-    .map((message) => message.text!);
-  const allText = messages
-    .filter((message) => message.text && message.role !== "system")
-    .map((message) => message.text!);
-
-  return {
-    mode: "handoff",
-    sessionId,
-    messageCount: messages.length,
-    activity: structured.activity,
-    currentTask: structured.currentTask,
-    lastAssistantMessage: structured.lastAssistantMessage,
-    decisions: extractLines(assistantText, /\b(decided|decision|chose|using|implemented|added|changed|fixed|removed)\b/i, 5),
-    openQuestions: extractQuestions(allText, 5),
-    nextActions: extractLines(assistantText, /\b(next|todo|remaining|follow[- ]?up|need to|will)\b/i, 5),
-    touchedFiles: inferTouchedFiles(messages, cwd),
     pendingTools: toolNames(structured.pendingToolCalls),
     recentTools: toolNames(structured.lastToolCalls),
   };
@@ -361,36 +336,7 @@ function renderSummaryPrompt(messages: RawMessage[]): string {
   return lines.join("\n");
 }
 
-function extractLines(values: string[], pattern: RegExp, max: number): string[] {
-  const lines: string[] = [];
-  for (const value of values) {
-    for (const line of splitCandidateLines(value)) {
-      if (pattern.test(line)) lines.push(oneLine(line, 220));
-    }
-  }
-  return uniqueStrings(lines).slice(-max);
-}
-
-function extractQuestions(values: string[], max: number): string[] {
-  const questions: string[] = [];
-  for (const value of values) {
-    for (const line of splitCandidateLines(value)) {
-      if (line.endsWith("?") || /\b(blocked|unclear|need input|open question)\b/i.test(line)) {
-        questions.push(oneLine(line, 220));
-      }
-    }
-  }
-  return uniqueStrings(questions).slice(-max);
-}
-
-function splitCandidateLines(value: string): string[] {
-  return value
-    .split(/\n|(?<=[.!?])\s+/)
-    .map((line) => line.replace(/^[-*]\s+/, "").trim())
-    .filter((line) => line.length > 0);
-}
-
-function toolNames(tools: ToolCall[]): string[] {
+export function toolNames(tools: ToolCall[]): string[] {
   return [...new Set(tools.map((tool) => tool.name))];
 }
 
@@ -398,11 +344,11 @@ function isNamedToolCall(tool: ToolCall): boolean {
   return tool.name !== "(result)";
 }
 
-function uniqueStrings(values: string[]): string[] {
+export function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function oneLine(value: string, max = 180): string {
+export function oneLine(value: string, max = 180): string {
   const flat = value.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}...` : flat;
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toBrief, toHandoff, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
+import { toBrief, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
+import { toHandoff } from "../../src/core/handoff.js";
 import type { RawMessage } from "../../src/core/types.js";
 import { withEnv } from "../helpers/tmp-home.js";
 
@@ -42,6 +43,15 @@ describe("snapshot.toStructured", () => {
     expect(s.messageCount).toBe(5);
     expect(s.lastUserMessage).toBe("do X");
     expect(s.lastAssistantMessage).toBe("done");
+  });
+
+  it("sees Claude Code's file_path and notebook_path as touched files", () => {
+    const s = toStructured("sid", [
+      { role: "assistant", toolCalls: [{ name: "Read", input: { file_path: "/work/repo/src/a.ts" }, status: "completed" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "NotebookEdit", input: { notebook_path: "/work/repo/nb.ipynb", new_source: "x" }, status: "completed" }], raw: {} },
+    ], "/work/repo");
+    expect(s.touchedFiles).toEqual(["/work/repo/nb.ipynb", "/work/repo/src/a.ts"]);
+    expect(s.writingFiles).toEqual(["/work/repo/nb.ipynb"]);
   });
 
   it("includes touched and writing file context", () => {

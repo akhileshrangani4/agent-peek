@@ -4,12 +4,13 @@ import type { AdapterLoader } from "../adapters/loader.js";
 import type { Adapter } from "../adapters/types.js";
 import type {
   CoordinationDigest, CoordinationCursor,
-  RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor,
+  RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor, HandoffTarget,
 } from "./types.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError, CursorMismatchError,
 } from "./errors.js";
-import { toBrief, toHandoff, toRaw, toStructured, toSummary } from "./snapshot.js";
+import { toBrief, toRaw, toStructured, toSummary } from "./snapshot.js";
+import { buildHandoff, resolveHandoffRunner, type HandoffRunner, type HandoffProduce } from "./handoff.js";
 import { cursorAdapter } from "./cursor.js";
 import { displayNames } from "./names.js";
 import {
@@ -28,6 +29,11 @@ export interface PeekOpts {
   around?: number;
   from?: RawWindowFrom;
   order?: RawOrder;
+  /** handoff mode: who the document is for, and how to produce it. */
+  target?: HandoffTarget;
+  produce?: HandoffProduce;
+  runner?: HandoffRunner;
+  onStatus?: (line: string) => void;
 }
 
 export interface RegisterOpts {
@@ -118,7 +124,19 @@ export class Engine {
     }
     else if (mode === "structured") snapshot = toStructured(entry.id, messages, entry.cwd);
     else if (mode === "brief") snapshot = toBrief(entry.id, messages);
-    else if (mode === "handoff") snapshot = toHandoff(entry.id, messages, entry.cwd);
+    else if (mode === "handoff") {
+      const produce = opts.produce ?? "harness";
+      const runner = produce === "harness"
+        ? (opts.runner ?? resolveHandoffRunner({ adapter: entry.adapter, cwd: entry.cwd }))
+        : opts.runner;
+      snapshot = await buildHandoff(entry.id, messages, {
+        cwd: entry.cwd,
+        target: opts.target,
+        produce,
+        runner,
+        onStatus: opts.onStatus,
+      });
+    }
     else snapshot = await toSummary(entry.id, messages, {
       deltaMessageCount: messages.length,
       cacheKey: result.nextCursor,

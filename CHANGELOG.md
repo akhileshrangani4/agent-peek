@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+`--mode handoff` was five regexes over the transcript tail; it now writes the document a
+new session needs to continue without re-exploring: goal, current state, decisions and
+why, files, open questions, next actions, gotchas, environment. No API key: the whole
+transcript is compressed and handed to whichever agent CLI is installed, headless on its
+own login, the session's own harness first. Hooks, MCP and session persistence are off for
+that child so it cannot recurse into peek or leave a transcript peek would list. `--for`
+picks the reader: CLI agents get paths, chat agents (`chatgpt`, `claude-chat`) get code
+inlined because they cannot open files. `--out` writes the file, `--local` keeps the old
+regex output, and stdout is the document alone so it pipes; the cursor moved to stderr.
+
+Over MCP the caller is already a model, so `peek_session mode=handoff` and the `/handoff`
+resource return `material` (prompt plus compressed transcript) instead of spawning anything,
+and the calling agent writes the document. `HandoffSnapshot` gained `target`, `document`,
+`provider`, `runner` and `material`; the regex fields stay.
+
+`inferTouchedFiles` never saw `file_path` or `notebook_path`, which is what Claude Code's
+Read, Edit, Write and NotebookEdit send, so touched-file lists for Claude Code sessions
+came only from shell commands. Both keys count now.
+
 ## 0.5.1
 
 `node:sqlite` emits an `ExperimentalWarning` on import, and the usage index uses it, so
