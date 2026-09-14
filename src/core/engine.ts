@@ -11,7 +11,7 @@ import {
 } from "./errors.js";
 import { toBrief, toRaw, toStructured, toSummary } from "./snapshot.js";
 import { buildHandoff, resolveHandoffRunner, type HandoffRunner, type HandoffProduce } from "./handoff.js";
-import { cursorAdapter } from "./cursor.js";
+import { cursorAdapter, decodeCursor } from "./cursor.js";
 import { displayNames } from "./names.js";
 import {
   buildCoordinationDigest, buildCoordinationSession, compactCoordinationSessionForCursor, cwdMatches,
@@ -121,6 +121,13 @@ export class Engine {
         from: opts.from,
         order: opts.order,
       });
+      // A cursor read returns only the new messages; number them where they sit in
+      // the transcript so "2-3 of 3" stays "2-3 of 3" instead of becoming "1-2 of 2".
+      if (cursor) {
+        const base = decodeCursor(cursor).msgIndex;
+        snapshot.window = { ...snapshot.window, start: snapshot.window.start + base, end: snapshot.window.end + base };
+        snapshot.totalMessageCount += base;
+      }
     }
     else if (mode === "structured") snapshot = toStructured(entry.id, messages, entry.cwd);
     else if (mode === "brief") snapshot = toBrief(entry.id, messages);

@@ -2189,8 +2189,9 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
   const s = r.snapshot;
   if (s.mode === "raw") {
     console.log(`messages: ${s.window.start + 1}-${s.window.end} of ${s.totalMessageCount} (${s.window.order})`);
+    let hidden = 0;
     for (const m of s.messages) {
-      if (!opts.showTools && !m.text) continue;
+      if (!opts.showTools && !m.text) { hidden++; continue; }
       const head = `[${m.role}]${m.timestamp ? " " + m.timestamp : ""}`;
       console.log(head);
       if (m.text) console.log(indent(m.text));
@@ -2200,6 +2201,8 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
         }
       }
     }
+    // A window that prints nothing looks like an empty transcript; say what was skipped.
+    if (hidden) console.log(`${hidden} tool-only message${hidden === 1 ? "" : "s"} hidden; pass --tools to see ${hidden === 1 ? "it" : "them"}`);
   } else if (s.mode === "structured") {
     console.log(`session: ${s.sessionId}`);
     console.log(`messages: ${s.messageCount}`);

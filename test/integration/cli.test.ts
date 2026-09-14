@@ -265,6 +265,41 @@ describe("CLI integration", () => {
     const newest = await runCli(["at", "page-claude", "--last", "2", "--reverse"], { HOME: home });
     expect(newest.code).toBe(0);
     expect(newest.stdout.indexOf("third")).toBeLessThan(newest.stdout.indexOf("second"));
+
+    // --since keeps absolute numbering: message 2 of 3 stays "2", not "1 of 2".
+    const lines = (await readFile(tx, "utf8")).split("\n");
+    const afterFirst = Buffer.from(JSON.stringify({ adapter: "claude-code", byteOffset: Buffer.byteLength(lines[0]! + "\n"), msgIndex: 1 }), "utf8").toString("base64url");
+    const since = await runCli(["at", "page-claude", "--since", afterFirst], { HOME: home });
+    expect(since.code).toBe(0);
+    expect(since.stdout).toMatch(/messages: 2-3 of 3/);
+    expect(since.stdout).not.toMatch(/^\s+first$/m);
+    const sinceJson = JSON.parse((await runCli(["at", "page-claude", "--since", afterFirst, "--json"], { HOME: home })).stdout);
+    expect(sinceJson.snapshot.window).toEqual({ start: 1, end: 3, order: "oldest-first" });
+    expect(sinceJson.snapshot.totalMessageCount).toBe(3);
+  });
+
+  it("at says when a raw window is all tool-only messages instead of printing nothing", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-tools");
+    await mkdir(projDir, { recursive: true });
+    await writeFile(join(projDir, "tools.jsonl"), [
+      `{"type":"user","sessionId":"tools","cwd":"/tmp/tools","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"read it"}}`,
+      `{"type":"assistant","sessionId":"tools","cwd":"/tmp/tools","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/tools/a.ts"}}]}}`,
+      `{"type":"assistant","sessionId":"tools","cwd":"/tmp/tools","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/tools/b.ts"}}]}}`,
+    ].join("\n") + "\n", "utf8");
+
+    const hidden = await runCli(["at", "tools-claude", "--last", "2"], { HOME: home });
+    expect(hidden.code).toBe(0);
+    expect(hidden.stdout).toMatch(/messages: 2-3 of 3/);
+    expect(hidden.stdout).toMatch(/2 tool-only messages hidden; pass --tools to see them/);
+
+    const shown = await runCli(["at", "tools-claude", "--last", "2", "--tools"], { HOME: home });
+    expect(shown.stdout).toMatch(/tool=Read/);
+    expect(shown.stdout).not.toMatch(/hidden/);
+
+    const mixed = await runCli(["at", "tools-claude", "--last", "3"], { HOME: home });
+    expect(mixed.stdout).toMatch(/read it/);
+    expect(mixed.stdout).toMatch(/2 tool-only messages hidden/);
   });
 
   it("coord summarizes sessions for a cwd and returns a reusable cursor", async () => {
