@@ -376,7 +376,7 @@ function inferWritingFileEvents(
   messages.forEach((message, messageIndex) => {
     for (const tool of message.toolCalls ?? []) {
       if (!isWriteTool(tool)) continue;
-      for (const path of extractPaths(tool)) {
+      for (const path of writePaths(tool)) {
         const normalized = normalizePath(path, cwd);
         if (!isRelevantTouchedPath(normalized, cwd)) continue;
         const lastWritingAt = message.timestamp ?? fallbackTimestamp;
@@ -472,6 +472,68 @@ function extractPaths(tool: ToolCall): string[] {
   const paths: string[] = [];
   collectPathValues(tool.input, "", paths);
   return paths;
+}
+
+/**
+ * The paths a write tool writes. A named editor writes every path it was given;
+ * a shell command writes only its targets. Treating every path in a command as
+ * written made `node bin/peek.js list > out.json` a write to bin/peek.js, so
+ * any agent that ran a repo script showed up as writing it in `check`.
+ */
+function writePaths(tool: ToolCall): string[] {
+  const command = commandInput(tool.input);
+  if (command === undefined) return extractPaths(tool);
+  return writeTargetsOfCommand(command);
+}
+
+const WRITE_OPERAND_TOOLS = /^(tee|touch|mkdir|rm|rmdir|unlink|truncate)$/;
+const WRITE_DEST_TOOLS = /^(mv|cp|install|ln)$/;
+const INPLACE_EDIT_TOOLS = /^(sed|perl)$/;
+
+export function writeTargetsOfCommand(command: string): string[] {
+  const targets: string[] = [];
+  const patchPattern = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
+  for (const match of command.matchAll(patchPattern)) {
+    const path = match[1]?.trim();
+    if (path) targets.push(path);
+  }
+  // Output redirects: `> file`, `>> file`, `2> file`, `&> file`; not `<`, `<<`, `2>&1`.
+  const redirectPattern = /(?:^|[^<>])(?:\d?>>?|&>)\s*(['"]?)([^\s'"|;&<>]+)\1/g;
+  for (const match of command.matchAll(redirectPattern)) {
+    const path = match[2];
+    if (path && !path.startsWith("&") && path !== "/dev/null") targets.push(path);
+  }
+  // Heredoc bodies are data, not commands: strip them before reading operands.
+  const body = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2(?=\n|$)/g, "");
+  for (const segment of body.split(/&&|\|\||[;|\n]/)) {
+    const words = shellWords(segment);
+    if (!words.length) continue;
+    const tool = words[0] === "sudo" ? words[1] : words[0];
+    const rest = (words[0] === "sudo" ? words.slice(2) : words.slice(1));
+    if (!tool) continue;
+    const name = basename(tool);
+    const operands = rest.filter((w) => !w.startsWith("-") && !/^\d?>>?/.test(w));
+    if (WRITE_OPERAND_TOOLS.test(name)) targets.push(...operands);
+    else if (WRITE_DEST_TOOLS.test(name) && operands.length >= 2) targets.push(operands[operands.length - 1]!);
+    else if (INPLACE_EDIT_TOOLS.test(name) && /(^|\s)-i\b/.test(segment)) {
+      // Operands after the script are files; the script is the first operand not consumed by -e/-i.
+      const files = operands.filter((w) => looksLikeCommandPath(w));
+      targets.push(...files);
+    }
+  }
+  return [...new Set(targets.filter((t) => t && !t.includes("://")))];
+}
+
+function shellWords(segment: string): string[] {
+  const out: string[] = [];
+  const pattern = /'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S+)/g;
+  for (const match of segment.matchAll(pattern)) {
+    const word = match[1] ?? match[2] ?? match[3] ?? "";
+    // A redirect glued to its target (`>out`) is not an operand.
+    if (/^\d?>>?/.test(word) || word === ">" || word === ">>") continue;
+    out.push(word);
+  }
+  return out;
 }
 
 function addFileSession(map: Map<string, CoordinationSession[]>, file: string, session: CoordinationSession): void {

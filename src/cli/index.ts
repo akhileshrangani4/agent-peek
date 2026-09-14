@@ -176,7 +176,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--adapter <name>", "Scan only one adapter")
     .option("--as <owner>", "Ignore active claims owned by this agent")
-    .option("--ignore-self", "Ignore active claims owned by the default local owner")
+    .option("--ignore-self", "Ignore your own claims and your own session's writes (identified by CLAUDE_SESSION_ID or cwd)")
+    .option("--ignore-session <name|id>", "Ignore writes from this session, for callers that know their own name")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--json", "Output machine-readable check result")
     .action(async (file, opts) => {
@@ -189,9 +190,17 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         adapter: opts.adapter,
         includeTerminal: Boolean(opts.terminals) || isTerminalAdapter(opts.adapter),
       });
+      // A session's own edits are not a conflict. The reviewer that surfaced this had
+      // only run `node bin/peek.js` and was told it was writing bin/peek.js.
+      const ignoredSessions = new Set<string>();
+      if (opts.ignoreSession) ignoredSessions.add(String(opts.ignoreSession));
+      if (opts.ignoreSelf) {
+        const author = await resolveAuthor({ cwd, engine });
+        if (!author.anonymous) ignoredSessions.add(author.session);
+      }
       const files = targets.map((target) => ({
         file: target,
-        conflicts: activeFileConflicts(digest, target, ignoredOwner),
+        conflicts: activeFileConflicts(digest, target, ignoredOwner, ignoredSessions),
       }));
       const conflictCount = files.reduce((count, item) => count + item.conflicts.length, 0);
       const result = {
@@ -1093,6 +1102,7 @@ function activeFileConflicts(
   digest: CoordinationDigest,
   target: string,
   ignoredOwner?: string,
+  ignoredSessions: Set<string> = new Set(),
 ): {
   id: string;
   displayName: string;
@@ -1104,6 +1114,8 @@ function activeFileConflicts(
   return digest.sessions
     .filter((session) => session.activeWritingFiles.includes(target))
     .filter((session) => !ignoredOwner || session.adapter !== "claim" || session.displayName !== `claim-${ignoredOwner}`)
+    // A subagent's writes count as its parent's: the parent asked for them.
+    .filter((session) => !isIgnoredSession(session, ignoredSessions))
     .map((session) => ({
       id: session.id,
       displayName: session.displayName,
@@ -1112,6 +1124,15 @@ function activeFileConflicts(
       currentTask: session.currentTask,
       lastWritingAt: session.writingFileEvents.find((event) => event.file === target && event.active)?.lastWritingAt,
     }));
+}
+
+function isIgnoredSession(
+  session: { id: string; displayName: string; parentSessionId?: string },
+  ignored: Set<string>,
+): boolean {
+  if (!ignored.size) return false;
+  if (ignored.has(session.id) || ignored.has(session.displayName)) return true;
+  return session.parentSessionId !== undefined && ignored.has(session.parentSessionId);
 }
 
 function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] {

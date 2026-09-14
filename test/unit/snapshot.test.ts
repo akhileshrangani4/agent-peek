@@ -54,6 +54,28 @@ describe("snapshot.toStructured", () => {
     expect(s.writingFiles).toEqual(["/work/repo/nb.ipynb"]);
   });
 
+  it("marks only a shell command's write targets as writing, not every path in it", () => {
+    const run = (command: string) => toStructured("sid", [
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command }, status: "completed" }], raw: {} },
+    ], "/work/repo");
+    // Running a script and redirecting its output writes the target, not the script.
+    let s = run("node bin/peek.js list --json > /work/repo/out.json");
+    expect(s.writingFiles).toEqual(["/work/repo/out.json"]);
+    expect(s.touchedFiles).toContain("/work/repo/bin/peek.js");
+    // Reading a file writes nothing, even when the command mentions words like "add".
+    s = run("cat src/a.ts && git add src/a.ts && git commit -m 'add tests'");
+    expect(s.writingFiles).toEqual([]);
+    // Operand-based writers: the operand is the target; cp/mv write only their destination.
+    s = run("cp src/a.ts src/b.ts && touch src/c.ts && sed -i '' 's/x/y/' src/d.ts && rm src/e.ts");
+    expect(s.writingFiles).toEqual(["/work/repo/src/b.ts", "/work/repo/src/c.ts", "/work/repo/src/d.ts", "/work/repo/src/e.ts"]);
+    // Heredoc into a file writes the file; input redirect does not.
+    s = run("cat <<'EOF' > src/f.ts\nhello\nEOF\nwc -l < src/a.ts");
+    expect(s.writingFiles).toEqual(["/work/repo/src/f.ts"]);
+    // apply_patch headers name their files.
+    s = run("apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: src/g.ts\n*** End Patch\nEOF");
+    expect(s.writingFiles).toEqual(["/work/repo/src/g.ts"]);
+  });
+
   it("includes touched and writing file context", () => {
     const s = toStructured("sid", [
       { role: "user", text: "edit", raw: {} },

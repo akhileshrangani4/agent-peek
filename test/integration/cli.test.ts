@@ -385,6 +385,15 @@ describe("CLI integration", () => {
     expect(ok.code).toBe(0);
     expect(ok.stdout).toMatch(/ok: no active writing conflict/);
 
+    // An agent checking a file it is itself editing is not in conflict with anyone.
+    const self = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "check" });
+    expect(self.code).toBe(0);
+    const named = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-session", "check-claude"], { HOME: home });
+    expect(named.code).toBe(0);
+    // Without identifying itself, the same call still reports the conflict.
+    const other = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "someone-else" });
+    expect(other.code).toBe(1);
+
     const files = await runCli(["list", "--files", "--adapter", "claude-code"], { HOME: home });
     expect(files.code).toBe(0);
     expect(files.stdout).toMatch(/FILES/);
