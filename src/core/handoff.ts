@@ -411,9 +411,17 @@ function spawnWithStdin(command: string[], input: string, opts: { cwd?: string; 
   });
 }
 
+/** Superset installs wrappers ahead of the real binaries. Its codex wrapper, run
+ * headless, re-execs itself forever (observed: ~2,800 bash processes from one
+ * `codex exec --help`), so the runner resolves past those directories the same
+ * way the wrappers themselves do. */
+export function isWrapperDir(dir: string): boolean {
+  return /(^|\/)\.superset(-[^/]*)?\/bin\/?$/.test(dir);
+}
+
 function whichOnPath(bin: string): string | undefined {
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    if (!dir) continue;
+    if (!dir || isWrapperDir(dir)) continue;
     const candidate = join(dir, bin);
     try {
       accessSync(candidate, constants.X_OK);

@@ -5,6 +5,7 @@ import {
   renderHandoffPrompt,
   resolveHandoffRunner,
   parseHandoffTarget,
+  isWrapperDir,
 } from "../../src/core/handoff.js";
 import type { RawMessage } from "../../src/core/types.js";
 
@@ -91,6 +92,16 @@ describe("handoff.resolveHandoffRunner", () => {
     expect(r?.command).toContain("--no-session-persistence");
     expect(r?.command).toContain("--strict-mcp-config");
     expect(r?.command).toContain("--setting-sources");
+  });
+});
+
+describe("handoff.isWrapperDir", () => {
+  it("skips Superset wrapper directories and nothing else", () => {
+    expect(isWrapperDir("/Users/avi/.superset/bin")).toBe(true);
+    expect(isWrapperDir("/Users/avi/.superset-staging/bin/")).toBe(true);
+    expect(isWrapperDir("/Users/avi/.local/bin")).toBe(false);
+    expect(isWrapperDir("/opt/homebrew/bin")).toBe(false);
+    expect(isWrapperDir("/Users/avi/.superset/worktrees/x/bin")).toBe(false);
   });
 });
 

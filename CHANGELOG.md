@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 `--mode handoff` was five regexes over the transcript tail; it now writes the document a
 new session needs to continue without re-exploring: goal, current state, decisions and
@@ -16,6 +16,10 @@ Over MCP the caller is already a model, so `peek_session mode=handoff` and the `
 resource return `material` (prompt plus compressed transcript) instead of spawning anything,
 and the calling agent writes the document. `HandoffSnapshot` gained `target`, `document`,
 `provider`, `runner` and `material`; the regex fields stay.
+
+The handoff runner resolves past `~/.superset/bin` and `~/.superset-*/bin`. Superset's
+codex wrapper, run headless, re-execs itself forever (one `codex exec --help` left about
+2,800 bash processes), and a runner that spawned it would do the same to the user's machine.
 
 `inferTouchedFiles` never saw `file_path` or `notebook_path`, which is what Claude Code's
 Read, Edit, Write and NotebookEdit send, so touched-file lists for Claude Code sessions
