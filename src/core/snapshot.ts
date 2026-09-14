@@ -121,13 +121,23 @@ function computeActivity(messages: RawMessage[], pending: ToolCall[]): "idle" | 
   return "idle";
 }
 
+/**
+ * The task is what the user asked for. The assistant's own "Let me see how..."
+ * lines are steps toward it, and reading them as the task turned every brief,
+ * structured view and handoff Goal into the last thing the agent happened to
+ * be doing. Only when the latest user turn is not actionable ("yes", "go ahead")
+ * does the assistant's stated objective stand in.
+ */
 function inferCurrentTask(messages: RawMessage[], fallback: string | undefined): string | undefined {
+  const asked = objectiveFromUserText(fallback, { actionOnly: true });
+  if (asked) return asked;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
     if (message.role !== "assistant" || !message.text) continue;
     const candidate = objectiveFromAssistantText(message.text);
     if (candidate) return candidate;
   }
+  // Nothing stated an objective; a short user turn is the best remaining guess.
   return objectiveFromUserText(fallback);
 }
 
@@ -141,7 +151,7 @@ function objectiveFromAssistantText(text: string): string | undefined {
   return objective ? oneLine(cleanObjectiveLine(objective)).slice(0, 240) : undefined;
 }
 
-function objectiveFromUserText(text: string | undefined): string | undefined {
+function objectiveFromUserText(text: string | undefined, opts: { actionOnly?: boolean } = {}): string | undefined {
   if (!text) return undefined;
   const lines = candidateLines(text);
   const reviewLine = lines.find((line) => /\breview\b.+\b(diff|changes|code|project|uncommitted)\b/i.test(line));
@@ -150,6 +160,7 @@ function objectiveFromUserText(text: string | undefined): string | undefined {
     !isSystemPromptLine(line) && !isReviewOrStatusLine(line) && /\b(add|build|fix|implement|update|review|inspect|summarize|test|debug|refactor)\b/i.test(line)
   ));
   if (actionLine) return oneLine(cleanObjectiveLine(actionLine)).slice(0, 240);
+  if (opts.actionOnly) return undefined;
   if (text.split(/\r?\n/).filter((line) => line.trim()).length > 2 || text.length > 180) return undefined;
   const simpleLine = lines.find((line) => !isSystemPromptLine(line) && !isReviewOrStatusLine(line));
   return simpleLine ? oneLine(cleanObjectiveLine(simpleLine)).slice(0, 240) : undefined;

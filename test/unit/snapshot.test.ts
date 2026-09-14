@@ -113,6 +113,25 @@ describe("snapshot.toStructured", () => {
     expect(toStructured("s", m).activity).toBe("idle");
   });
 
+  it("currentTask prefers the user's ask over the assistant's narration", () => {
+    const s = toStructured("sid", [
+      { role: "user", text: "Okay now let's fix the 5815 error in the daemon.", raw: {} },
+      { role: "assistant", text: "Let me see how the other daemons in that directory actually get run.", raw: {} },
+      { role: "assistant", text: "Now I'll check the launchd plist.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("Okay now let's fix the 5815 error in the daemon.");
+  });
+
+  it("currentTask falls back to the assistant's objective when the user turn is not actionable", () => {
+    const s = toStructured("sid", [
+      { role: "user", text: "Add a retry to the uploader.", raw: {} },
+      { role: "assistant", text: "I'll add a retry loop to the uploader.", raw: {} },
+      { role: "user", text: "yes", raw: {} },
+      { role: "assistant", text: "Now I need to update the tests for the retry.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("Now I need to update the tests for the retry.");
+  });
+
   it("currentTask comes from last user message (heuristic)", () => {
     const s = toStructured("sid", msgs());
     expect(s.currentTask).toBe("do X");
