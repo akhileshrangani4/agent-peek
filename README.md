@@ -322,17 +322,26 @@ peek at researcher --mode raw --json
 peek at researcher --mode raw --since <nextCursor> --json
 ```
 
-CLI failures are printed to stderr in a stable shape:
+Message numbers stay absolute under `--since`, and a cursor already at the end
+reads `No new messages; cursor is at message N of N.`
+
+CLI failures are a sentence first and a machine record second, on stderr:
 
 ```text
-error: session_not_found
-message: No session matched selector: worker
-hint: Use `peek list` to get the current displayName values.
-next:
-  - peek list
-  - peek list --ids
-exitCode: 2
+  error  session not found
+
+     No session matched selector: worker. Did you mean: worker-claude?
+
+     Use `peek list` to get the current displayName values.
+
+     try   peek list
+           peek list --ids
+
+     error: session_not_found · exit 2
 ```
+
+Under `--json` the record is JSON on stdout; see "For scripts and agents" above
+for the fields and the exit-code table.
 
 ### Terminal UI
 
