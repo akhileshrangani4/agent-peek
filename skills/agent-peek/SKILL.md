@@ -1,6 +1,6 @@
 ---
 name: agent-peek
-description: Use this skill whenever the user wants an AI agent to inspect, monitor, summarize, or coordinate with other local AI agent sessions using agent-peek, peek CLI, or the agent-peek MCP server. This includes requests like "peek at what Codex was doing", "check the other agent", "set up agent-peek MCP", "configure MCP for Cursor/Codex/Claude/Gemini/Windsurf/Cline/VS Code", or "help agents share context without writing into each other's chats." It also answers "which skills do I actually use", "what is costing me context", and "help me prune my skills", via `peek usage` and `peek skills`. The skill installs or verifies agent-peek, configures the right MCP shape for the current client, and uses read-only peek/list/tag commands safely.
+description: Use this skill whenever the user wants an AI agent to inspect, monitor, summarize, or coordinate with other local AI agent sessions using agent-peek, peek CLI, or the agent-peek MCP server. This includes requests like "peek at what Codex was doing", "check the other agent", "set up agent-peek MCP", "configure MCP for Cursor/Codex/Claude/Gemini/Windsurf/Cline/VS Code", or "help agents share context without writing into each other's chats." It also covers handing a session off: "I'm running out of context, write a handoff", "prepare a handoff for Codex/ChatGPT", or continuing another session's work from its handoff. It also answers "which skills do I actually use", "what is costing me context", and "help me prune my skills", via `peek usage` and `peek skills`. The skill installs or verifies agent-peek, configures the right MCP shape for the current client, and uses read-only peek/list/tag commands safely.
 ---
 
 # Agent Peek
@@ -66,18 +66,32 @@ coordinate, but do not claim you changed another agent's state.
 
    `peek check` exits `0` when no active writer is detected and `1` when there
    is a conflict. Use it in shell gates. `peek claim` declares temporary write
-   intent so other agents see the conflict before the first write lands.
+   intent so other agents see the conflict before the first write lands. Your
+   own claims are not conflicts: `check` ignores them by default. Running a
+   script is reading it, not writing it.
 
 6. Read a session with the smallest useful mode:
 
    ```bash
-   peek at <name|id|tag|cwd> --mode structured
-   peek at <name|id|tag|cwd> --mode brief
-   peek at <name|id|tag|cwd> --mode summary
+   peek at <name|id|tag|cwd> --mode brief         # what is it doing, one paragraph
+   peek at <name|id|tag|cwd> --mode structured    # stable fields, --json to parse
+   peek at <name|id|tag|cwd> --mode raw --last 20 # the last 20 visible messages; --tools shows tool calls
    ```
 
-`summary` is local by default when no hosted provider is configured. Use
-`brief` when you need deterministic, compact output with no LLM behavior.
+   `.` is a valid selector for the session whose cwd is the current directory.
+   `task:` is the user's latest ask, not the assistant's last step. Prefer
+   `brief` and `structured`; `summary` is prose and not the agent default.
+
+7. When a session must continue elsewhere (its context is running out, or the
+   work moves to another agent), write the handoff:
+
+   ```bash
+   peek at <selector> --mode handoff --out handoff.md
+   peek at <selector> --mode handoff --for chatgpt     # reader with no filesystem
+   ```
+
+   See "Handing A Session Off" below. Over MCP you write the document yourself
+   from `material`.
 
 ## Choosing Commands
 
@@ -88,11 +102,10 @@ coordinate, but do not claim you changed another agent's state.
 - `peek check` ignores your own claims by default (you are `CLAUDE_SESSION_ID`, else the session whose cwd is this directory). Add `--ignore-self` to also ignore your own session's writes, `--include-self` to see your own claims, or `--as <owner>` if you claimed under another name. If two live sessions share the directory, peek says it cannot tell which is you: set `CLAUDE_SESSION_ID` or pass `--as`.
 - Every command takes `--json`; errors under `--json` are a JSON record on stdout (`error`, `message`, `hint`, `next`, `exit`) with the slug on stderr. Exit codes: 0 ok, 1 conflict or internal, 2 not found, 3 ambiguous, 4 adapter or skill, 5 usage, 6 environment (peek cannot write `~/.agent-peek`, or the registry lock is held: retry).
 - Use `peek check --files-from <path|->` for a planned multi-file edit.
-- Use `peek claim <file> --ttl 2m` before a planned write; add `--files-from <path|->` for bulk claims. Run `peek release <claim-id> --claim-id --json`, optionally with `--files-from <path|->` for partial release, or `peek release <file>` when done.
+- Use `peek claim <file> --ttl 2m` before a planned write. `claim` and `check` take one file per call; for several files use `--files-from <path|->`. Run `peek release <claim-id> --claim-id --json`, optionally with `--files-from <path|->` for partial release, or `peek release <file>` when done.
 - Treat claims as cooperative local coordination, not authentication. `--as` is an unverified owner label for well-behaved agents.
 - Use `peek at <selector> --mode structured --json` when another script or agent will parse the result.
 - Use `peek at <selector> --mode brief` for a compact human-readable status.
-- Use `peek at <selector> --mode summary` for a sentence-style local summary.
 - Use `peek skills --json` for a bounded summary (top rows per segment); `--all` for every skill, `--details` for installations. `peek list --json` rows carry `name` and `displayName`; key on `displayName`.
 - Use `peek at <selector> --mode handoff --out <file>` when a session must be continued elsewhere: it writes a document (goal, state, decisions, files, next actions, gotchas) via the installed agent CLI, no API key. Add `--for chatgpt` for a reader with no filesystem. Over MCP, `peek_session` with `mode: "handoff"` returns `material` and you write the document yourself.
 - Use `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` for polling coordination state without inline cursor blobs.
@@ -108,6 +121,52 @@ peek at <selector> --last 50
 peek at <selector> --around 100 --limit 30
 peek at <selector> --last 50 --reverse
 ```
+
+`--last N` counts the messages you will see: tool-only rows are hidden unless
+`--tools`, and the window widens until N visible rows fit (it says so on
+stderr). `--since <nextCursor>` keeps absolute message numbers; a cursor at the
+end reads "No new messages". Unknown selectors suggest near matches, and an
+adapter name used as a selector (`peek at claude`) is explained.
+
+## Handing A Session Off
+
+`--mode handoff` writes the document a new session needs to continue without
+re-exploring: Goal, Current state, Decisions and why, Files, Open questions /
+blockers, Next actions, Gotchas, Environment.
+
+```bash
+peek at <selector> --mode handoff --out handoff.md          # then tell the next session: read handoff.md and continue
+peek at <selector> --mode handoff --for codex --out h.md    # switch harness, keep the state
+peek at <selector> --mode handoff --for chatgpt             # paste into a chat with no filesystem
+```
+
+How it works, and what to tell the user:
+
+- No API key. peek compresses the whole transcript and hands it to whichever
+  agent CLI is installed (`claude`, `codex`, `gemini`, `opencode`, `copilot`),
+  headless, on that CLI's own login, the session's own harness first. Hooks,
+  MCP servers and session persistence are off for that child. Expect up to a
+  minute; progress goes to stderr.
+- `--for` sets the reader. CLI targets get paths and commands to verify claims;
+  `chatgpt` and `claude-chat` have no filesystem, so code excerpts and error
+  output are inlined (1500 characters per tool result instead of 300).
+- The document is stdout, alone. Status and `nextCursor` go to stderr, so
+  `> file` works as well as `--out`.
+- `--local` skips the model and prints the regex-extracted fallback (also what
+  you get if no agent CLI is found). It carries the branch and recent commands
+  with how their output read, but it is orientation, not a restart document;
+  say so if you hand it over.
+- `AGENT_PEEK_HANDOFF_RUNNER="<bin> <args>"` overrides the runner; it gets the
+  prompt on stdin and must print the document.
+
+Over MCP you are the harness. `peek_session` with `mode: "handoff"` (or the
+`agent-peek://session/<selector>/handoff` resource) spawns nothing and returns
+`material`: a complete prompt with the section headings, heuristic hints and the
+compressed transcript between `--- transcript ---` markers. Answer that prompt;
+the markdown you produce is the handoff. Ignore the `document` field there, it
+is only the regex stub. To hand yourself off before your context runs out, call
+`peek_session` on your own session with `mode: "handoff"`, write the document to
+a file, and tell the user which file the next session should read.
 
 ## Skill Usage And Pruning
 
@@ -206,13 +265,20 @@ agent-peek-mcp
 After adding the server to a client, restart or refresh that client, then ask it
 to list MCP tools. Expected tools:
 
-- `list_sessions`
-- `peek_session`
-- `coordination_digest`
-- `tag_session`
-- `post_to_feed`
-- `read_feed`
-- `expand_post`
+- `list_sessions`, `peek_session` (modes raw, structured, brief, summary,
+  handoff; handoff returns `material` for you to answer), `tag_session`
+- `coordination_digest` (the `coord`/`check` view: active writers, claims, overlap)
+- `post_to_feed`, `read_feed`, `expand_post`
+- `usage_report`, `skills_report`, `skill_detail`, `archive_plan` (returns the
+  plan and the CLI command; there is deliberately no archive tool), `list_agents`
+
+Resources: `agent-peek://sessions`, `agent-peek://feed`, and per session
+`agent-peek://session/{selector}/brief`, `/handoff`, `/tail`. Prompts:
+`coordinate-agents`, `session-handoff`, `avoid-overlap`.
+
+The server writes its registry, claims and usage index under `~/.agent-peek`.
+A client sandbox that forbids that makes every tool fail with
+`state_unwritable`; allow writes to that directory.
 
 ## MCP Configs By Client
 
@@ -336,6 +402,9 @@ Workspace `.vscode/mcp.json` or user-profile `mcp.json`:
 - If names are ambiguous, use `peek list --ids` and select by raw id.
 - If `coord` is noisy, start with `peek coord . --writing` or `peek check <file>`.
 - If a check-then-write race matters, claim the file first with a short TTL and release it when done.
+- If every command exits 6 with `state_unwritable`, peek cannot write `~/.agent-peek` (a read-only sandbox, a missing home). `peek doctor` shows whether the state directory is writable. `registry_locked` is also exit 6 and transient: retry.
+- If `claim` or `check --ignore-self` prints `identity: could not tell which of N live sessions in this directory is you`, set `CLAUDE_SESSION_ID` or pass `--as <name>`; peek will not guess between agents sharing a directory.
+- If `check` reports a conflict on a file you claimed under another name, pass `--as <that name>`; `--include-self` shows your own claims on purpose.
 
 ## Response Pattern
 
@@ -346,5 +415,12 @@ When reporting findings to the user, include:
 - Latest assistant status.
 - Pending or recent tools, if relevant.
 - Whether the session appears idle, thinking, or tool-running.
+
+When the user asked for a handoff, the deliverable is the file: name its path,
+who it is written for (`--for`), which runner wrote it (or that it is the
+`--local` fallback), and the one-line instruction the next session should get
+("read handoff.md and continue"). Do not paraphrase the document back, and do
+not edit it, post it to the feed, or copy it elsewhere unless asked; the user
+decides where it goes.
 
 Keep it short unless the user asks for transcript detail.
