@@ -309,7 +309,14 @@ export class Engine {
     if (cwdPrefix.length > 1) {
       throw new AmbiguousSelectorError(selector, cwdPrefix.map(label));
     }
-    throw new SessionNotFoundError(selector);
+    // A partial name is the usual miss: "deep-slice" for "deep-slice-claude".
+    const needle = selector.toLowerCase();
+    const near = list
+      .map((e, i) => ({ e, name: names[i]! }))
+      .filter(({ e, name }) => e.status !== "ended" && (name.toLowerCase().includes(needle) || (e.tag ?? "").toLowerCase().includes(needle)))
+      .slice(0, 5)
+      .map(({ name }) => name);
+    throw new SessionNotFoundError(selector, near);
   }
 
   private adapterNameFromSelector(selector: string): string | undefined {

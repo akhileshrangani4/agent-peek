@@ -1,7 +1,7 @@
 export class SessionNotFoundError extends Error {
   readonly name = "SessionNotFoundError";
-  constructor(public selector: string) {
-    super(`No session matched selector: ${selector}`);
+  constructor(public selector: string, public suggestions: string[] = []) {
+    super(`No session matched selector: ${selector}${suggestions.length ? `. Did you mean: ${suggestions.join(", ")}?` : ""}`);
   }
 }
 

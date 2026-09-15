@@ -47,6 +47,8 @@ export interface ToolCall {
   input?: unknown;
   output?: unknown;
   status?: "pending" | "completed" | "error";
+  /** The call's id, or for a "(result)" entry the id of the call it answers. */
+  id?: string;
 }
 
 export interface RawMessage {

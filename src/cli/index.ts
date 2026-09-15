@@ -187,7 +187,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--adapter <name>", "Scan only one adapter")
     .option("--as <owner>", "Ignore active claims owned by this agent")
-    .option("--ignore-self", "Ignore your own claims and your own session's writes. You are CLAUDE_SESSION_ID when set, else the session whose cwd is this directory")
+    .option("--ignore-self", "Ignore your own session's writes as well as your own claims (claims are ignored by default; see --include-self). You are CLAUDE_SESSION_ID when set, else the session whose cwd is this directory")
+    .option("--include-self", "Report your own claims as conflicts too")
     .option("--ignore-session <name|id>", "Ignore writes from this session, for callers that know their own name")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--json", "Output machine-readable check result")
@@ -195,11 +196,13 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
       const engine = await createEngine({ withExternal: true });
+      // Your own claim is not a conflict with you. Two reviewers in a row claimed a file,
+      // ran check, and were told to retry with a flag; the default is now the useful one.
       let ignoredOwner: string | undefined = opts.as ? String(opts.as) : undefined;
-      if (!ignoredOwner && opts.ignoreSelf) {
+      if (!ignoredOwner && !opts.includeSelf) {
         const self = await resolveSelf(engine, cwd);
         ignoredOwner = self.owner;
-        if (self.note) console.error(`identity: ${self.note}`);
+        if (self.note && opts.ignoreSelf) console.error(`identity: ${self.note}`);
       }
       const digest = await engine.coordinate({
         cwd,
@@ -230,7 +233,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         console.log(`conflict: ${conflictCount} active file conflict${conflictCount === 1 ? "" : "s"}`);
         for (const item of files) {
           for (const conflict of item.conflicts) {
-            const selfHint = conflict.adapter === "claim" ? ` (yours? --ignore-self, or --as ${conflict.displayName.replace(/^claim-/, "")}${conflict.creator ? `; made by ${conflict.creator}` : ""})` : "";
+            const selfHint = conflict.adapter === "claim" ? ` (yours? --as ${conflict.displayName.replace(/^claim-/, "")}${conflict.creator ? `; made by ${conflict.creator}` : ""})` : "";
             console.log(indent(`${formatPath(item.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}${selfHint}`));
             if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
           }
@@ -430,6 +433,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
           if (r.snapshot.mode !== "raw") break;
           snap = r.snapshot;
         }
+        if (limit !== wanted && !opts.json) console.error(`(window widened to ${snap.messages.length} messages to show ${wanted} visible ones; --tools shows all)`);
       }
       if (r.snapshot.mode === "handoff" && opts.out) {
         writeFileSync(resolve(String(opts.out)), `${r.snapshot.document}\n`);
@@ -1194,13 +1198,14 @@ function printListWithFiles(
 ): void {
   if (sessions.length === 0) { console.log("(no sessions)"); return; }
   const rows = sessions.map((session) => {
-    const files = session.activeWritingFiles.length
+    // The FILES cell is a summary; a session touching forty files made 800-column rows.
+    const files = oneLine(session.activeWritingFiles.length
       ? `writing: ${formatCoordinationFiles(session.activeWritingFiles, { verbose: false })}`
       : session.hotFiles.length
         ? `hot: ${formatCoordinationFiles(session.hotFiles, { verbose: false })}`
         : session.recentFiles.length
           ? `recent: ${formatCoordinationFiles(session.recentFiles, { verbose: false })}`
-          : "-";
+          : "-", 120);
     const row = [
       session.displayName,
       session.adapter,
@@ -2388,6 +2393,8 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
     let shown = 0;
     for (const m of s.messages) {
       if (!opts.showTools && !m.text) { hidden++; continue; }
+      // A record with neither text nor tool calls (a bare system marker) is a blank row.
+      if (!m.text && !m.toolCalls?.length) continue;
       shown++;
       const head = `[${m.role}]${m.timestamp ? " " + m.timestamp : ""}`;
       console.log(head);

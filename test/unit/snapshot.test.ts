@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toBrief, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
+import { settleToolStatuses, toBrief, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
 import { toHandoff } from "../../src/core/handoff.js";
 import type { RawMessage } from "../../src/core/types.js";
 import { withEnv } from "../helpers/tmp-home.js";
@@ -36,6 +36,30 @@ describe("snapshot.toRaw", () => {
     expect(toRaw("sid", msgs(), { limit: 2, offset: 1 }).messages.map((m) => m.text)).toEqual([undefined, undefined]);
     expect(toRaw("sid", msgs(), { limit: 3, around: 2 }).window).toEqual({ start: 0, end: 3, order: "oldest-first" });
     expect(toRaw("sid", msgs(), { limit: 2, order: "newest-first" }).messages.map((m) => m.text)).toEqual(["done", undefined]);
+  });
+});
+
+describe("snapshot.settleToolStatuses", () => {
+  it("marks a call completed or error from the result that answers it, and leaves unanswered calls pending", () => {
+    const out = settleToolStatuses([
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "ls" }, status: "pending", id: "t1" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "a b", status: "completed", id: "t1" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "false" }, status: "pending", id: "t2" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "Exit code 1", status: "error", id: "t2" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Read", input: { file_path: "/x" }, status: "pending", id: "t3" }], raw: {} },
+    ]);
+    expect(out[0]!.toolCalls![0]!.status).toBe("completed");
+    expect(out[2]!.toolCalls![0]!.status).toBe("error");
+    expect(out[4]!.toolCalls![0]!.status).toBe("pending");
+    const s = toStructured("sid", out);
+    expect(s.pendingToolCalls.map((t) => t.name)).toEqual(["Read"]);
+    expect(s.lastToolCalls.map((t) => t.status)).toEqual(["completed", "error", "pending"]);
+  });
+
+  it("a long briefing's first line is the ask, not a verb-bearing sentence from its middle", () => {
+    const briefing = ["Review the peek CLI as a fresh agent.", "", "Setup:", "- run from the repo", "- read-only", "", "Do not review the source code for style; review the experience.", "Then report."].join("\n");
+    const s = toStructured("sid", [{ role: "user", text: briefing, raw: {} }]);
+    expect(s.currentTask).toBe("Review the peek CLI as a fresh agent.");
   });
 });
 

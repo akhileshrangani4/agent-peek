@@ -12,6 +12,29 @@ export interface ToRawOpts {
   order?: RawOrder;
 }
 
+/**
+ * A tool_use starts as "pending" because the record that answers it comes later.
+ * Once the transcript is read, pair each result with its call by id and settle the
+ * call's status, so structured views and the handoff prompt stop reporting every
+ * finished call as pending.
+ */
+export function settleToolStatuses(messages: RawMessage[]): RawMessage[] {
+  const outcome = new Map<string, "completed" | "error">();
+  for (const m of messages) {
+    for (const tc of m.toolCalls ?? []) {
+      if (tc.name === "(result)" && tc.id) outcome.set(tc.id, tc.status === "error" ? "error" : "completed");
+    }
+  }
+  if (!outcome.size) return messages;
+  return messages.map((m) => {
+    if (!m.toolCalls?.some((tc) => tc.name !== "(result)" && tc.id && outcome.has(tc.id))) return m;
+    return {
+      ...m,
+      toolCalls: m.toolCalls.map((tc) => (tc.name !== "(result)" && tc.id && outcome.has(tc.id) ? { ...tc, status: outcome.get(tc.id)! } : tc)),
+    };
+  });
+}
+
 export function toRaw(sessionId: string, messages: RawMessage[], opts: ToRawOpts = {}): RawSnapshot {
   const total = messages.length;
   const order = opts.order ?? "oldest-first";
@@ -156,8 +179,8 @@ function isAcknowledgement(line: string): boolean {
 /** Harness wrappers a user turn can carry that were never the user's words. */
 function stripHarnessWrappers(text: string): string {
   return text
-    .replace(/<(local-command-[a-z]+|system-reminder|task-notification|command-name|command-message|command-args|ide_[a-z_]+)>[\s\S]*?<\/\1>/g, "")
-    .replace(/<\/?(local-command-[a-z]+|system-reminder|task-notification)>/g, "")
+    .replace(/<(local-command-[a-z-]+|system-reminder|task-notification|command-name|command-message|command-args|ide_[a-z_]+)>[\s\S]*?<\/\1>/g, "")
+    .replace(/<\/?(local-command-[a-z-]+|system-reminder|task-notification|command-[a-z]+)>/g, "")
     .trim();
 }
 
@@ -192,6 +215,12 @@ function objectiveFromUserText(text: string | undefined): string | undefined {
   text = humanUserText(text) ?? "";
   if (!text) return undefined;
   const lines = candidateLines(text);
+  // A long briefing (a subagent's prompt, a pasted spec) states its ask up front; a
+  // verb-bearing sentence from its middle is an instruction to the agent, not the task.
+  if (text.split(/\r?\n/).filter((line) => line.trim()).length > 4) {
+    const first = lines.find((line) => !isSystemPromptLine(line));
+    return first ? flat(cleanObjectiveLine(first)) : undefined;
+  }
   const reviewLine = lines.find((line) => /\breview\b.+\b(diff|changes|code|project|uncommitted)\b/i.test(line));
   if (reviewLine) return flat(cleanObjectiveLine(reviewLine));
   const actionLine = lines.find((line) => (

@@ -187,6 +187,32 @@ describe("handoff.buildHandoff", () => {
     expect(s.decisions).toEqual(["Fixed the workflow matrix."]);
   });
 
+  it("a result flagged as an error is failed regardless of wording; chat targets keep longer excerpts", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "<command-name>/clear</command-name><command-message>clear</command-message>", raw: {} },
+      { role: "user", text: "Ship the toast.", raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "sed -n '1,5p' a.test.ts" }, status: "completed", id: "a" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "it('renders Error toast', ...)", status: "completed", id: "a" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "npm test" }, status: "error", id: "b" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "all fine here honestly", status: "error", id: "b" }], raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.document).toMatch(/## Goal\nShip the toast\./);
+    expect(s.document).toMatch(/- `sed -n '1,5p' a\.test\.ts` -> ok/);
+    expect(s.document).toMatch(/- `npm test` -> failed: all fine here honestly/);
+
+    const long = "x".repeat(1200);
+    const msgs2: RawMessage[] = [
+      { role: "user", text: "Explain it.", raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Read", input: { file_path: "/x/a.ts" }, status: "completed", id: "r" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: long, status: "completed", id: "r" }], raw: {} },
+    ];
+    const cli = await buildHandoff("sid", msgs2, { target: "claude-code", produce: "material" });
+    const chat = await buildHandoff("sid", msgs2, { target: "chatgpt", produce: "material" });
+    expect(cli.material).toMatch(/x{300}\.\.\. \(\+900 chars\)/);
+    expect(chat.material).toMatch(/x{1200}/);
+    expect(chat.material).toMatch(/cut to about 1500 characters/);
+  });
+
   it("a commit title containing the word error is not a failed command", async () => {
     const s = await buildHandoff("sid", [
       { role: "user", text: "Commit it.", raw: {} },

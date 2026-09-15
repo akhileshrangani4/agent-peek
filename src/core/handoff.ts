@@ -112,7 +112,10 @@ export async function buildHandoff(sessionId: string, messages: RawMessage[], op
     return { ...base, document: base.document.replace(/^> local fallback[^\n]*/, "> regex handoff (--local): fields below are pattern-extracted, not model-written.") };
   }
 
-  const transcript = compressTranscript(messages, { budgetChars: opts.budgetChars });
+  // A chat reader cannot open files, so the prompt tells the model to inline excerpts;
+  // that only works if the excerpts survive compression.
+  const resultChars = CHAT_TARGETS.has(target) ? CHAT_RESULT_CHARS : DEFAULT_RESULT_CHARS;
+  const transcript = compressTranscript(messages, { budgetChars: opts.budgetChars, resultChars });
   const prompt = renderHandoffPrompt(transcript, {
     target,
     cwd: opts.cwd,
@@ -156,6 +159,7 @@ export interface CompressOpts {
 
 const DEFAULT_BUDGET_CHARS = 150_000;
 const DEFAULT_RESULT_CHARS = 300;
+const CHAT_RESULT_CHARS = 1500;
 const HEAD_SHARE = 0.2;
 
 /**
@@ -303,7 +307,11 @@ export function renderHandoffPrompt(transcript: string, opts: HandoffPromptOpts)
     if (hints.nextActions?.length) lines.push(`- next-action-like lines: ${hints.nextActions.join(" | ")}`);
     if (hints.openQuestions?.length) lines.push(`- question-like lines: ${hints.openQuestions.join(" | ")}`);
   }
-  lines.push("", "--- transcript ---", transcript, "--- end transcript ---");
+  lines.push(
+    "",
+    `Tool results in the transcript are cut to about ${CHAT_TARGETS.has(opts.target) ? CHAT_RESULT_CHARS : DEFAULT_RESULT_CHARS} characters each (a "(+N chars)" marker shows where). Do not present a cut excerpt as complete.`,
+    "--- transcript ---", transcript, "--- end transcript ---",
+  );
   return lines.join("\n");
 }
 
@@ -351,8 +359,8 @@ export function localHandoffContext(messages: RawMessage[], cwd?: string): Local
     const raw = m.raw as { gitBranch?: unknown } | undefined;
     if (raw && typeof raw.gitBranch === "string" && raw.gitBranch) gitBranch = raw.gitBranch;
     if (!firstAsk && m.role === "user" && m.text && !m.toolCalls?.length) {
-      const cleaned = m.text.replace(/<(local-command-[a-z]+|system-reminder|task-notification)>[\s\S]*?<\/\1>/g, "").trim();
-      if (cleaned) firstAsk = oneLine(cleaned, 240);
+      const human = humanUserText(m.text);
+      if (human) firstAsk = oneLine(human, 240);
     }
     for (const tc of m.toolCalls ?? []) {
       if (tc.name === "(result)") {

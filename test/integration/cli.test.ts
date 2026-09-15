@@ -566,6 +566,10 @@ describe("CLI integration", () => {
     // An agent checking a file it is itself editing is not in conflict with anyone.
     const self = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "check" });
     expect(self.code).toBe(0);
+    // A partial name gets a suggestion.
+    const near = await runCli(["at", "chec"], { HOME: home });
+    expect(near.code).toBe(2);
+    expect(near.stderr).toMatch(/Did you mean: check-claude/);
     const named = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-session", "check-claude"], { HOME: home });
     expect(named.code).toBe(0);
     // Without identifying itself, the same call still reports the conflict.
@@ -625,7 +629,9 @@ describe("CLI integration", () => {
     expect(claimed.owner).toBe("tester");
     expect(claimed.files).toEqual(["/tmp/claim/README.md", "/tmp/claim/src/core/engine.ts"]);
 
-    const conflict = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    // The claim was made from this same directory by this same anonymous identity, so a
+    // default check treats it as ours; --include-self shows it as another agent would see it.
+    const conflict = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json", "--include-self"], { HOME: home });
     expect(conflict.code).toBe(1);
     const check = JSON.parse(conflict.stdout);
     expect(check.ok).toBe(false);
@@ -638,7 +644,7 @@ describe("CLI integration", () => {
 
     const filesList = join(home, "files.txt");
     await writeFile(filesList, "README.md\nsrc/other.ts\n", "utf8");
-    const bulk = await runCli(["check", "--files-from", filesList, "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    const bulk = await runCli(["check", "--files-from", filesList, "--cwd", "/tmp/claim", "--json", "--include-self"], { HOME: home });
     expect(bulk.code).toBe(1);
     expect(JSON.parse(bulk.stdout).conflictCount).toBe(1);
 
@@ -653,7 +659,7 @@ describe("CLI integration", () => {
     const partial = JSON.parse(partialRelease.stdout);
     expect(partial.files).toEqual(["/tmp/claim/README.md"]);
 
-    const stillClaimed = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    const stillClaimed = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json", "--include-self"], { HOME: home });
     expect(stillClaimed.code).toBe(1);
     expect(JSON.parse(stillClaimed.stdout).conflictCount).toBe(1);
 
@@ -673,19 +679,27 @@ describe("CLI integration", () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["claim", "test-file.ts", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(r.code).toBe(0);
-    // A later command from the same shell is the same owner: --ignore-self skips the claim,
-    // and without it the conflict line says how to.
-    const own = await runCli(["check", "test-file.ts", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    // Your own claim is not a conflict: check skips it by default, --include-self shows it,
+    // and a repeat claim of the same files renews the first record instead of stacking.
+    const own = await runCli(["check", "test-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(own.code).toBe(0);
-    const shown = await runCli(["check", "test-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    const shown = await runCli(["check", "test-file.ts", "--include-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(shown.code).toBe(1);
-    expect(shown.stdout).toMatch(/\(yours\? --ignore-self, or --as claude-code:sess-42\)/);
+    expect(shown.stdout).toMatch(/conflict: 1 active file conflict/);
+    expect(shown.stdout).toMatch(/\(yours\? --as claude-code:sess-42\)/);
+    const again = await runCli(["claim", "test-file.ts", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(JSON.parse(again.stdout).id).toBe(JSON.parse(r.stdout).id);
+    const still = await runCli(["check", "test-file.ts", "--include-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(still.stdout).toMatch(/conflict: 1 active file conflict/);
+    // Someone else sees it either way.
+    const other = await runCli(["check", "test-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-99" });
+    expect(other.code).toBe(1);
     // A claim given a display owner with --as still belongs to the session that made it.
     const named = await runCli(["claim", "named-file.ts", "--as", "codex-review", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(JSON.parse(named.stdout)).toMatchObject({ owner: "codex-review", creator: "claude-code:sess-42" });
-    const namedSelf = await runCli(["check", "named-file.ts", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    const namedSelf = await runCli(["check", "named-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(namedSelf.code).toBe(0);
-    const namedOther = await runCli(["check", "named-file.ts", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-99" });
+    const namedOther = await runCli(["check", "named-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-99" });
     expect(namedOther.code).toBe(1);
     expect(namedOther.stdout).toMatch(/made by claude-code:sess-42/);
     // Untracked agents are identified by user, host and directory: no pid, so a later
@@ -694,7 +708,7 @@ describe("CLI integration", () => {
     expect(anon.code).toBe(0);
     expect(anon.stdout).toMatch(/owner: \S+@\S+:\//);
     expect(anon.stderr).toMatch(/identity: no tracked session found for this directory/);
-    const anonSelf = await runCli(["check", "other-file.ts", "--ignore-self"], { HOME: home });
+    const anonSelf = await runCli(["check", "other-file.ts"], { HOME: home });
     expect(anonSelf.code).toBe(0);
     const claim = JSON.parse(r.stdout);
     expect(claim.owner).toBe("claude-code:sess-42");
