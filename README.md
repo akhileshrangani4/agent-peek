@@ -267,7 +267,37 @@ peek at researcher --last 50 --reverse
 ```
 
 By default, raw mode hides tool-only messages and tool-call status lines to keep
-the output readable. Add `--tools` or `--verbose` when you need that detail.
+the output readable. Add `--tools` or `--verbose` when you need that detail. `--last N`
+counts the rows you will see: the window widens past hidden tool calls until N visible
+rows fit (exact with `--tools`), and says so on stderr. A window that is all tool calls
+prints how many rows are hidden instead of nothing. `--since` keeps absolute message
+numbers, and a cursor at the end reads "No new messages".
+
+### For scripts and agents
+
+Every command takes `--json`. Errors under `--json` are a JSON record on stdout
+(`error`, `message`, `hint`, `next`, `exit`) with the plain `error: <slug> · exit <n>`
+line on stderr. Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | ok |
+| 1 | `check` found a conflict, or an internal error |
+| 2 | not found (session, post) |
+| 3 | ambiguous selector; the message names each candidate |
+| 4 | adapter or skill error |
+| 5 | usage: bad command, option, mode, or cursor |
+| 6 | environment: peek cannot write `~/.agent-peek`, or the registry lock is held (retry) |
+
+`peek list --json` rows carry `name` and `displayName`; key on `displayName`. `peek list`
+never truncates the NAME column (it is the selector) and shows `--limit <n>` rows per
+status group. `peek skills --json` is the top rows per segment with an omitted count;
+`--all` lists every skill, `--details` adds installations and roots scanned.
+
+Who you are, to `check` and `claim`: `CLAUDE_SESSION_ID` when the harness sets it, else
+the one live session whose cwd is this directory. When several live sessions share the
+directory peek says it cannot tell and uses an anonymous owner; set `CLAUDE_SESSION_ID`
+or pass `--as <name>`. `check` ignores your own claims by default.
 
 `summary` is available for prose summaries, but it is not the recommended
 agent-facing default. Prefer `brief` for low-latency local inspection. Summaries
