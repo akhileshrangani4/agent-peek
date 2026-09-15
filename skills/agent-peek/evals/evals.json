@@ -1,0 +1,48 @@
+{
+  "skill_name": "agent-peek",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "im at like 90% context in this claude code session and need to stop. before i do, write me a handoff so a fresh claude code session can pick up exactly where i am in this repo (the peek/agent-peek one, cwd is /Users/avi/.superset/worktrees/94fce017-5ef7-4a1a-ad79-10405254c6b0/avi/tangy-juniper). put it somewhere the next session can read and tell me the one line i should paste to it.",
+      "expected_output": "Uses peek at <this session> --mode handoff --out <file> (not --mode summary, not a hand-written summary). Reports the file path, who it is for, which runner wrote it, and the one-line instruction for the next session. Does not paraphrase the whole document.",
+      "files": [],
+      "assertions": [
+        "Ran `peek at <session> --mode handoff` (commands.txt contains `--mode handoff`), not `--mode summary` or a hand-written summary",
+        "Wrote the handoff to a file with `--out` (or redirected stdout) and the file exists in outputs with the eight sections (Goal, Current state, Decisions, Files, Open questions, Next actions, Gotchas, Environment)",
+        "Reply names the file path and gives a one-line instruction for the next session to paste",
+        "Reply says who the document is for (`--for` / target) and which runner wrote it, or that it is the `--local` regex fallback",
+        "Reply does not paraphrase the handoff document back at length (under ~25 lines of summary)"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "there's a codex session running in this same repo (/Users/avi/.superset/worktrees/94fce017-5ef7-4a1a-ad79-10405254c6b0/avi/tangy-juniper). what is it working on right now, and is it safe for me to edit src/core/engine.ts and src/cli/index.ts or would i step on it? don't touch its session.",
+      "expected_output": "Uses peek list then peek at <codex session> --mode brief or structured (not raw dumps), and peek check on both files (or --files-from). Reports the task, activity, and a clear safe/not-safe per file with the exit code meaning. Interprets any conflict with its own session correctly (own claims/writes are not conflicts). Mentions claim --ttl before editing as the safe pattern.",
+      "files": [],
+      "assertions": [
+        "Ran `peek list` (or `list --json`) before selecting the codex session",
+        "Read the codex session with `--mode brief` or `--mode structured`, not a raw transcript dump as the primary read",
+        "Ran `peek check` on both files (two calls, or one `--files-from`)",
+        "Reply gives a per-file safe / not-safe verdict and explains exit 0 vs exit 1",
+        "Reply does not report the agent's own session or own claims as a conflict, and does not recommend `--as`/`--ignore-self` as a workaround for its own reads",
+        "Reply recommends `peek claim <file> --ttl <duration>` before editing (the check-then-claim pattern)",
+        "No `peek ui`, no unreleased claim, no `--mode handoff` without `--local` in commands.txt"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "i want the agent-peek mcp server available in codex on this machine. show me exactly what to add to my codex config (don't edit any config file yourself, i'll paste it), then explain to me (i'm going to paste this into codex) exactly which mcp tool codex should call to hand its session off to a chatgpt conversation, and what it does with the result. keep it short.",
+      "expected_output": "Gives the ~/.codex/config.toml [mcp_servers.agent-peek] block. Names peek_session with mode handoff and target chatgpt, explains that it returns material (a prompt with the transcript) that Codex answers itself to produce the document, that nothing is spawned, and that the document field is only a stub. Mentions the server needs ~/.agent-peek writable.",
+      "files": [],
+      "assertions": [
+        "Reply contains the Codex TOML block `[mcp_servers.agent-peek]` with `command = \"agent-peek-mcp\"` for ~/.codex/config.toml",
+        "Reply names `peek_session` with `mode: handoff` (and `target: chatgpt`) as the tool to call",
+        "Reply explains that the result's `material` is a prompt (instructions plus compressed transcript) that Codex answers itself to produce the handoff document, and that nothing is spawned",
+        "Reply says the `document` field in that result is only a regex stub, or otherwise warns not to use it as the deliverable",
+        "Reply mentions the server needs `~/.agent-peek` writable, or the `state_unwritable` failure mode",
+        "Did not edit any config file (commands.txt has no write to ~/.codex or ~/.claude)",
+        "Reply is short: under ~40 lines"
+      ]
+    }
+  ]
+}

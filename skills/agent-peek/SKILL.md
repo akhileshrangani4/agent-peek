@@ -102,7 +102,7 @@ coordinate, but do not claim you changed another agent's state.
 - `peek check` ignores your own claims by default (you are `CLAUDE_SESSION_ID`, else the session whose cwd is this directory). Add `--ignore-self` to also ignore your own session's writes, `--include-self` to see your own claims, or `--as <owner>` if you claimed under another name. If two live sessions share the directory, peek says it cannot tell which is you: set `CLAUDE_SESSION_ID` or pass `--as`.
 - Every command takes `--json`; errors under `--json` are a JSON record on stdout (`error`, `message`, `hint`, `next`, `exit`) with the slug on stderr. Exit codes: 0 ok, 1 conflict or internal, 2 not found, 3 ambiguous, 4 adapter or skill, 5 usage, 6 environment (peek cannot write `~/.agent-peek`, or the registry lock is held: retry).
 - Use `peek check --files-from <path|->` for a planned multi-file edit.
-- Use `peek claim <file> --ttl 2m` before a planned write; add `--files-from <path|->` for bulk claims. Run `peek release <claim-id> --claim-id --json`, optionally with `--files-from <path|->` for partial release, or `peek release <file>` when done.
+- Use `peek claim <file> --ttl 2m` before a planned write. `claim` and `check` take one file per call; for several files use `--files-from <path|->`. Run `peek release <claim-id> --claim-id --json`, optionally with `--files-from <path|->` for partial release, or `peek release <file>` when done.
 - Treat claims as cooperative local coordination, not authentication. `--as` is an unverified owner label for well-behaved agents.
 - Use `peek at <selector> --mode structured --json` when another script or agent will parse the result.
 - Use `peek at <selector> --mode brief` for a compact human-readable status.
@@ -419,6 +419,8 @@ When reporting findings to the user, include:
 When the user asked for a handoff, the deliverable is the file: name its path,
 who it is written for (`--for`), which runner wrote it (or that it is the
 `--local` fallback), and the one-line instruction the next session should get
-("read handoff.md and continue"). Do not paraphrase the document back.
+("read handoff.md and continue"). Do not paraphrase the document back, and do
+not edit it, post it to the feed, or copy it elsewhere unless asked; the user
+decides where it goes.
 
 Keep it short unless the user asks for transcript detail.
