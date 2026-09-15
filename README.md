@@ -429,7 +429,7 @@ Useful details:
 - `peek list --files` gives the same file-context view as part of a regular session list.
 - `peek check <file>` exits `0` when clear and `1` on conflict.
 - `peek check --files-from changed-files.txt` bulk-checks a planned edit.
-- `peek check <file> --as <owner>` ignores your own claims in claim-then-check loops.
+- `peek check <file>` ignores your own claims by default; `--include-self` shows them, `--as <owner>` covers a claim made under another name, and `--ignore-self` also drops your own session's writes.
 - `peek claim <file> --ttl 2m` broadcasts temporary write intent (2m is the default TTL if you omit `--ttl`).
 - `peek release <claim-id> --claim-id --files-from done-files.txt` partially releases a claim.
 - `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` is the polling-friendly JSON path.
