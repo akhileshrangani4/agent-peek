@@ -176,6 +176,29 @@ describe("handoff.buildHandoff", () => {
     expect(s.document).not.toMatch(/word error in prose/);
   });
 
+  it("next actions and decisions come from the current ask, not from finished tasks", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Add the retry loop.", raw: {} },
+      { role: "assistant", text: "Implemented the retry loop. Next I will add jitter.", raw: {} },
+      { role: "user", text: "Now fix the failing CI job.", raw: {} },
+      { role: "assistant", text: "Fixed the workflow matrix. Next I need to rerun CI.", raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.nextActions).toEqual(["Next I need to rerun CI."]);
+    expect(s.decisions).toEqual(["Fixed the workflow matrix."]);
+  });
+
+  it("a commit title containing the word error is not a failed command", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Commit it.", raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "git commit -m 'fix(cli): errors under --json are JSON'" }, status: "completed" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "[main abc123] fix(cli): errors under --json are JSON\n 2 files changed", status: "completed" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "npm run build" }, status: "completed" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "src/x.ts(3,1): error TS2322: Type 'a' is not assignable", status: "completed" }], raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.document).toMatch(/- `git commit -m 'fix\(cli\): errors under --json are JSON'` -> ok/);
+    expect(s.document).toMatch(/- `npm run build` -> failed: src\/x\.ts\(3,1\): error TS2322/);
+  });
+
   it("labels a deliberately local handoff as such instead of as a fallback", async () => {
     const s = await buildHandoff("sid", msgs(), { cwd: "/work/repo", target: "generic", produce: "local" });
     expect(s.provider).toBe("local");

@@ -58,6 +58,8 @@ export interface CoordinationOpts {
   adapter?: string;
   status?: SessionEntry["status"];
   includeEnded?: boolean;
+  /** Keep sessions with no task and no files, which coord hides as low-signal. */
+  includeLowSignal?: boolean;
   includeTerminal?: boolean;
   writingOnly?: boolean;
   since?: CoordinationCursor;
@@ -207,7 +209,7 @@ export class Engine {
       const state = nextCursors[session.id];
       if (state) state.session = compactCoordinationSessionForCursor(session);
     }
-    let sessions = opts.includeEnded === true
+    let sessions = opts.includeEnded === true || opts.includeLowSignal === true
       ? normalizedSessions
       : normalizedSessions.filter((session) => !isTrivialCoordinationSession(session));
     const hiddenLowSignalSessionCount = normalizedSessions.length - sessions.length;

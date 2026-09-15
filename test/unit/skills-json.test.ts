@@ -15,7 +15,7 @@ describe("compactSkillsJson", () => {
         flags: [{ kind: "duplicate-name", evidence: "...".repeat(100) }],
       }],
     };
-    const out = compactSkillsJson(full) as Record<string, unknown>;
+    const out = compactSkillsJson(full, { all: true }) as Record<string, unknown>;
     expect(out.skills).toEqual([{
       key: "/k", name: "s", segment: "archivable", reason: "no recorded use", tokens: 10,
       agents: ["claude-code", "codex"], installations: 3, modelInvocable: true, flags: ["duplicate-name"],
@@ -26,5 +26,22 @@ describe("compactSkillsJson", () => {
     expect(out.projects).toEqual(full.projects);
     expect(JSON.stringify(out)).not.toContain("/p1");
     expect(String(out.details)).toMatch(/--details/);
+  });
+
+  it("bounds the default to the top rows per segment and counts the rest", () => {
+    const skill = (i: number, segment: string) => ({ key: `/k${i}`, name: `s${i}`, chargedTokens: i, modelInvocable: true, segment, reason: "r", installations: [], flags: [] });
+    const full = {
+      segments: [],
+      unmatched: [],
+      skills: [...Array.from({ length: 30 }, (_, i) => skill(i, "archivable")), ...Array.from({ length: 12 }, (_, i) => skill(100 + i, "in-use"))],
+    };
+    const out = compactSkillsJson(full) as { skills: { key: string; segment: string; tokens: number }[]; omittedSkills: number; totalSkills: number; more: string };
+    expect(out.totalSkills).toBe(42);
+    expect(out.skills.filter((s) => s.segment === "archivable")).toHaveLength(20);
+    expect(out.skills.filter((s) => s.segment === "in-use")).toHaveLength(8);
+    expect(out.skills.filter((s) => s.segment === "archivable")[0]!.tokens).toBe(29); // largest first within a segment
+    expect(out.omittedSkills).toBe(14);
+    expect(out.more).toMatch(/--all/);
+    expect((compactSkillsJson(full, { limit: 5 }) as { skills: unknown[] }).skills).toHaveLength(10);
   });
 });

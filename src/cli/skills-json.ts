@@ -19,7 +19,14 @@ export interface CompactSkillRecord {
   flags: string[];
 }
 
-export function compactSkillsJson(full: Record<string, unknown>): Record<string, unknown> {
+export interface CompactOptions {
+  /** Every skill, not just the top rows per segment. */
+  all?: boolean;
+  /** Rows per segment when not --all. Defaults match the printed report: 20 archivable, 8 elsewhere. */
+  limit?: number;
+}
+
+export function compactSkillsJson(full: Record<string, unknown>, opts: CompactOptions = {}): Record<string, unknown> {
   const skills = (full.skills as Record<string, unknown>[] | undefined) ?? [];
   const compact: CompactSkillRecord[] = skills.map((skill) => {
     const installations = (skill.installations as { agent?: string }[] | undefined) ?? [];
@@ -38,10 +45,30 @@ export function compactSkillsJson(full: Record<string, unknown>): Record<string,
       flags: ((skill.flags as { kind?: string }[] | string[] | undefined) ?? []).map((f) => (typeof f === "string" ? f : String(f.kind ?? f))),
     };
   });
+  // A thousand compact records is still half a megabyte. Default to what the printed
+  // report shows: the top rows of each segment, by tokens, with the count of the rest.
+  let shown = compact;
+  let omitted = 0;
+  if (!opts.all) {
+    const perSegment = new Map<string, CompactSkillRecord[]>();
+    for (const record of [...compact].sort((a, b) => b.tokens - a.tokens)) {
+      const list = perSegment.get(record.segment) ?? [];
+      list.push(record);
+      perSegment.set(record.segment, list);
+    }
+    shown = [];
+    for (const [segment, list] of perSegment) {
+      const limit = opts.limit ?? (segment === "archivable" ? 20 : 8);
+      shown.push(...list.slice(0, limit));
+      omitted += Math.max(0, list.length - limit);
+    }
+  }
   const { rootsScanned, skills: _skills, ...rest } = full;
   return {
     ...rest,
-    skills: compact,
+    totalSkills: compact.length,
+    skills: shown,
+    ...(omitted ? { omittedSkills: omitted, more: "run with --all for every skill, or --limit <n> for more rows per segment" } : {}),
     rootsScanned: Array.isArray(rootsScanned) ? rootsScanned.length : undefined,
     details: "run with --details for installations, flags with evidence, and roots scanned",
   };

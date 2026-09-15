@@ -90,6 +90,30 @@ describe("projectIdentity", () => {
   });
 });
 
+describe("resolveAuthor with several live sessions in one directory", () => {
+  it("does not pick one of them as us", async () => {
+    const cwd = "/work/shared";
+    const engine = { list: async () => [
+      { id: "claude-code:a", adapter: "claude-code", cwd, status: "active", transcriptPath: "/x", lastSeen: "2026-01-01T00:00:00Z" },
+      { id: "codex:b", adapter: "codex", cwd, status: "idle", transcriptPath: "/y", lastSeen: "2026-01-01T00:00:00Z" },
+      { id: "claude-code:sub", adapter: "claude-code", cwd, status: "active", parentSessionId: "a", transcriptPath: "/z", lastSeen: "2026-01-01T00:00:00Z" },
+    ] } as never;
+    const saved = process.env.CLAUDE_SESSION_ID;
+    delete process.env.CLAUDE_SESSION_ID;
+    try {
+      const author = await resolveAuthor({ cwd, engine });
+      expect(author.anonymous).toBe(true);
+      expect(author.ambiguousSessions).toEqual(["claude-code:a", "codex:b"]);
+      const one = await resolveAuthor({ cwd, engine: { list: async () => [
+        { id: "codex:b", adapter: "codex", cwd, status: "idle", transcriptPath: "/y", lastSeen: "2026-01-01T00:00:00Z" },
+      ] } as never });
+      expect(one.session).toBe("codex:b");
+    } finally {
+      if (saved !== undefined) process.env.CLAUDE_SESSION_ID = saved;
+    }
+  });
+});
+
 describe("resolveAuthor", () => {
   it("uses --as verbatim as an explicit session name", async () => {
     const author = await resolveAuthor({ as: "researcher", cwd: process.cwd() });
@@ -149,14 +173,17 @@ describe("resolveAuthor", () => {
       });
     });
 
-    it("picks the first matching session in list order (most recent first)", async () => {
+    it("refuses to guess between two live sessions in the same directory", async () => {
+      // Picking the newest claimed to be whichever agent last wrote, which in a repo two
+      // agents share is the other agent half the time. Say we cannot tell instead.
       await withoutClaudeSessionId(async () => {
         const engine = fakeEngine([
           fakeEntry({ id: "newest", adapter: "codex", cwd: "/repo", tag: "newest-tag" }),
           fakeEntry({ id: "older", adapter: "claude-code", cwd: "/repo", tag: "older-tag" }),
         ]);
         const author = await resolveAuthor({ cwd: "/repo/sub", engine });
-        expect(author).toEqual({ session: "newest", adapter: "codex", name: "newest-tag" });
+        expect(author.anonymous).toBe(true);
+        expect(author.ambiguousSessions).toEqual(["newest", "older"]);
       });
     });
 

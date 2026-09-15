@@ -155,6 +155,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
           adapter: opts.adapter,
           status,
           includeEnded: Boolean(opts.all),
+          // Same rows as plain list, plus columns: a session with no task or files yet
+          // is still a session, so it shows with "-" rather than vanishing.
+          includeLowSignal: true,
           includeTerminal: opts.terminals || isTerminalAdapter(opts.adapter),
         });
         // The same default as plain list: subagents are hidden unless asked for.
@@ -192,7 +195,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
       const engine = await createEngine({ withExternal: true });
-      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? await defaultClaimOwner(engine, cwd) : undefined;
+      let ignoredOwner: string | undefined = opts.as ? String(opts.as) : undefined;
+      if (!ignoredOwner && opts.ignoreSelf) {
+        const self = await resolveSelf(engine, cwd);
+        ignoredOwner = self.owner;
+        if (self.note) console.error(`identity: ${self.note}`);
+      }
       const digest = await engine.coordinate({
         cwd,
         adapter: opts.adapter,
@@ -246,16 +254,17 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
       const claims = new ClaimsStore();
-      const self = await defaultClaimOwner(await createEngine({ withExternal: true }), cwd);
+      const self = await resolveSelf(await createEngine({ withExternal: true }), cwd);
+      if (self.note && !opts.as) console.error(`identity: ${self.note}`);
       const claim = await claims.claim({
         files: targets,
         cwd,
-        owner: opts.as ? String(opts.as) : self,
-        creator: self,
+        owner: opts.as ? String(opts.as) : self.owner,
+        creator: self.owner,
         ttlMs: parseDurationMs(opts.ttl, "--ttl"),
       });
       if (opts.json) {
-        console.log(JSON.stringify(claim, null, 2));
+        console.log(JSON.stringify(self.note ? { ...claim, identityNote: self.note } : claim, null, 2));
         return;
       }
       console.log(`claimed ${claim.files.length} file${claim.files.length === 1 ? "" : "s"} until ${claim.expiresAt}`);
@@ -616,7 +625,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek skills archive my-skill --all-agents --yes")
     .example("peek skills restore my-skill --yes")
     .example("peek skills archives")
-    .option("--json", "Output JSON: one compact record per skill plus segment totals. Add --details for every installation and scanned root")
+    .option("--json", "Output JSON: segment totals plus the top rows per segment (--limit). Add --all for every skill, --details for every installation and scanned root")
+    .option("--all", "With --json, include every skill instead of the top rows per segment")
     .option("--details", "With --json, include installations, flags, and roots scanned (large)")
     .option("--projects <dirs>", "Comma-separated project directories to scan for project-local roots")
     .option("--limit <n>", "Rows per segment (default: 20 archivable, 8 elsewhere)")
@@ -656,7 +666,11 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const { projects, discovery } = await resolveProjectSurvey(opts.projects);
       const inventory = await buildInventory({ projects, projectDiscovery: discovery });
       const full = await skillsJson(inventory);
-      console.log(JSON.stringify(opts.details ? full : compactSkillsJson(full), null, 2));
+      const compact = compactSkillsJson(full, {
+        all: Boolean(opts.all),
+        limit: opts.limit === undefined ? undefined : parsePositiveInt(opts.limit, "--limit"),
+      });
+      console.log(JSON.stringify(opts.details ? full : compact, null, 2));
     });
 
   cli.command("adapters", "Print installed adapter names, one per line.")
@@ -1201,7 +1215,8 @@ function printListWithFiles(
   const headers = ["NAME", "ADAPTER", "STATUS", "INTENT", "UPDATED", "FILES"];
   if (opts.showIds) headers.push("ID");
   const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  // No padding after the last cell: a wide FILES column otherwise trails hundreds of spaces.
+  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ").trimEnd();
   console.log(fmt(headers));
   for (const row of rows) console.log(fmt(row));
 }
@@ -1604,10 +1619,19 @@ function parseEvidence(value: unknown): { kind: "file" | "commit" | "session"; p
  * pid ever matched again and --ignore-self could not recognise a claim made a second
  * earlier. Untracked agents fall back to user, host and directory.
  */
-async function defaultClaimOwner(engine?: Engine, cwd: string = process.cwd()): Promise<string> {
+/** The owner string plus, when peek had to fall back, why: printed so the caller can
+ * pass --as or set CLAUDE_SESSION_ID instead of trusting a guess. */
+async function resolveSelf(engine: Engine | undefined, cwd: string): Promise<{ owner: string; note?: string }> {
   const author = await resolveAuthor({ cwd, engine });
-  if (!author.anonymous) return author.session;
-  return `${userInfo().username || "agent"}@${hostname()}:${cwd}`;
+  if (!author.anonymous) return { owner: author.session };
+  const owner = `${userInfo().username || "agent"}@${hostname()}:${cwd}`;
+  if (author.ambiguousSessions?.length) {
+    return {
+      owner,
+      note: `could not tell which of ${author.ambiguousSessions.length} live sessions in this directory is you (${author.ambiguousSessions.join(", ")}); using ${owner}. Set CLAUDE_SESSION_ID or pass --as <name> for a stable identity.`,
+    };
+  }
+  return { owner, note: `no tracked session found for this directory; using ${owner}.` };
 }
 
 function printCoordinationDigest(

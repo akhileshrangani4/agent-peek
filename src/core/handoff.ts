@@ -3,7 +3,7 @@ import { accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { HandoffSnapshot, HandoffTarget, RawMessage } from "./types.js";
-import { oneLine, toStructured, toolNames, uniqueStrings } from "./snapshot.js";
+import { humanUserText, oneLine, toStructured, toolNames, uniqueStrings } from "./snapshot.js";
 import { inferTouchedFiles } from "./coordination.js";
 
 // A handoff is what a fresh session needs to continue this one without
@@ -56,9 +56,17 @@ export const HANDOFF_TARGETS: readonly HandoffTarget[] = uniqueStrings(Object.va
 /** Heuristic handoff: regex over the transcript, no model. Kept as the fallback. */
 export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: string, target: HandoffTarget = "generic"): HandoffSnapshot {
   const structured = toStructured(sessionId, messages, cwd);
-  const assistantText = messages
+  // Decisions and next actions belong to the current ask. Harvested over the whole
+  // transcript they resurface steps from tasks that finished hours ago as if they were
+  // still open, so extraction starts at the latest human turn and widens only when
+  // that slice says nothing.
+  const since = lastHumanTurnIndex(messages);
+  const recent = since > 0 ? messages.slice(since) : messages;
+  const assistantTextOf = (list: RawMessage[]) => list
     .filter((message) => message.role === "assistant" && message.text)
     .map((message) => message.text!);
+  const assistantRecent = assistantTextOf(recent);
+  const assistantText = assistantRecent.length ? assistantRecent : assistantTextOf(messages);
   const allText = messages
     .filter((message) => message.text && message.role !== "system")
     .map((message) => message.text!);
@@ -82,6 +90,14 @@ export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: strin
   };
   snapshot.document = renderLocalHandoff(snapshot, localHandoffContext(messages, cwd));
   return snapshot;
+}
+
+function lastHumanTurnIndex(messages: RawMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role === "user" && m.text && !m.toolCalls?.length && humanUserText(m.text)) return i;
+  }
+  return 0;
 }
 
 export async function buildHandoff(sessionId: string, messages: RawMessage[], opts: BuildHandoffOpts = {}): Promise<HandoffSnapshot> {
@@ -308,11 +324,12 @@ export interface LocalHandoffContext {
   recentCommands?: CommandOutcome[];
 }
 
-const FAILURE_LINE = /\b(error|errors|failed|failure|FAIL|exception|traceback|not found|denied|exit(?:ed)?(?: code)? [1-9]\d*|ENOENT|EACCES|panic|✗|×)\b/i;
+// A failure is the tool saying so (an error flag on the result) or output in a shape
+// that only failures print. "error" as a word in prose, a commit title or test code is
+// not one; keyword matching on it produced Gotchas that never happened.
+const FAILURE_LINE = /^(error|fatal|ERR!?|FAIL|FAILED|Traceback|panic|npm ERR!)\b|\bError TS\d+|\berror TS\d+|\bExit code [1-9]\d*\b|\bexit(?:ed with)?(?: code| status)? [1-9]\d*\b|\bTests?\s+\d+ failed\b|\b\d+ (tests? )?failed\b|\bcommand not found\b|\bNo such file or directory\b|\bE(NOENT|ACCES|PERM|ROFS)\b|\bSyntaxError\b|\bTypeError\b|\bReferenceError\b|\bAssertionError\b/;
 const FAILURE_NEGATED = /\b(0 (errors?|failed|failures?)|no errors?|errors?: 0|failed: 0|without errors?)\b/i;
 
-/** Did a command's result read as a failure? Cheap and wrong sometimes, so it says "ok"
- * or "failed" only when the text is clear and "unknown" otherwise. */
 export function classifyCommandResult(status: string | undefined, output: unknown): { outcome: CommandOutcome["outcome"]; detail?: string } {
   if (status === "error") return { outcome: "failed", detail: oneLine(stringify(output), 120) || undefined };
   const text = stringify(output);

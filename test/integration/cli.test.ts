@@ -410,6 +410,23 @@ describe("CLI integration", () => {
     expect(r.stdout).toMatch(/Task: look here/);
   });
 
+  it("claiming from a directory shared by two live sessions does not impersonate either", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-shared");
+    await mkdir(projDir, { recursive: true });
+    const cwd = process.cwd();
+    for (const id of ["agent-a", "agent-b"]) {
+      await writeFile(join(projDir, `${id}.jsonl`), `{"type":"user","sessionId":"${id}","cwd":${JSON.stringify(cwd)},"timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"working"}}\n`, "utf8");
+    }
+    const r = await runCli(["claim", "shared-probe.ts", "--json"], { HOME: home });
+    expect(r.code).toBe(0);
+    const claim = JSON.parse(r.stdout);
+    expect(claim.owner).not.toMatch(/^claude-code:agent-/);
+    expect(claim.identityNote).toMatch(/could not tell which of 2 live sessions in this directory is you/);
+    expect(r.stderr).toMatch(/identity: could not tell/);
+    await runCli(["release", "shared-probe.ts"], { HOME: home });
+  });
+
   it("ambiguous selectors name the candidate sessions, and bare claim/release point at their own help", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const projDir = join(home, ".claude", "projects", "-tmp-amb");
@@ -575,9 +592,14 @@ describe("CLI integration", () => {
       `{"type":"assistant","sessionId":"check","agentId":"sub1","isSidechain":true,"cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/check/src/sub.ts"}}]}}`,
     ].join("\n") + "\n", "utf8");
 
+    // A session with no task and no files yet is still a row here, as it is in plain list.
+    await writeFile(join(projDir, "quiet.jsonl"), `{"type":"user","sessionId":"quiet","cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"hi"}}\n`, "utf8");
+
     const files = await runCli(["list", "--files", "--adapter", "claude-code"], { HOME: home });
     expect(files.code).toBe(0);
     expect(files.stdout).toMatch(/FILES/);
+    expect(files.stdout).toMatch(/check-claude-2/); // the quiet session, named from its cwd
+    expect(files.stdout).not.toMatch(/ {20,}$/m);
     expect(files.stdout).toMatch(/writing: .*src\/core\/engine.ts/);
     expect(files.stdout).not.toMatch(/-sub\b/);
     const filesJson = JSON.parse((await runCli(["list", "--files", "--adapter", "claude-code", "--json"], { HOME: home })).stdout);
@@ -667,10 +689,11 @@ describe("CLI integration", () => {
     expect(namedOther.code).toBe(1);
     expect(namedOther.stdout).toMatch(/made by claude-code:sess-42/);
     // Untracked agents are identified by user, host and directory: no pid, so a later
-    // process in the same directory is still "you".
+    // process in the same directory is still "you". peek says it fell back.
     const anon = await runCli(["claim", "other-file.ts"], { HOME: home });
     expect(anon.code).toBe(0);
     expect(anon.stdout).toMatch(/owner: \S+@\S+:\//);
+    expect(anon.stderr).toMatch(/identity: no tracked session found for this directory/);
     const anonSelf = await runCli(["check", "other-file.ts", "--ignore-self"], { HOME: home });
     expect(anonSelf.code).toBe(0);
     const claim = JSON.parse(r.stdout);
