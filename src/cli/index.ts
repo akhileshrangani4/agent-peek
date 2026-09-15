@@ -1,7 +1,7 @@
 // src/cli/index.ts
 import { cac } from "cac";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -10,7 +10,7 @@ import type { Engine } from "../core/engine.js";
 import { ClaimsStore } from "../core/claims.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError,
-  AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
+  AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError, StateUnwritableError,
   PostRejectedError, PostNotFoundError, NotAProjectError,
 } from "../core/errors.js";
 import type {
@@ -30,6 +30,7 @@ import {
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
 import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
+import { compactSkillsJson } from "./skills-json.js";
 import { renderUsageReport } from "./usage-report.js";
 import { renderAgents } from "./agents-report.js";
 import { renderList } from "./list-report.js";
@@ -611,7 +612,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek skills archive my-skill --all-agents --yes")
     .example("peek skills restore my-skill --yes")
     .example("peek skills archives")
-    .option("--json", "Output JSON")
+    .option("--json", "Output JSON: one compact record per skill plus segment totals. Add --details for every installation and scanned root")
+    .option("--details", "With --json, include installations, flags, and roots scanned (large)")
     .option("--projects <dirs>", "Comma-separated project directories to scan for project-local roots")
     .option("--limit <n>", "Rows per segment (default: 20 archivable, 8 elsewhere)")
     .option("--agent <slug>", "Limit an archive to one agent's installation")
@@ -649,7 +651,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       }
       const { projects, discovery } = await resolveProjectSurvey(opts.projects);
       const inventory = await buildInventory({ projects, projectDiscovery: discovery });
-      console.log(JSON.stringify(await skillsJson(inventory), null, 2));
+      const full = await skillsJson(inventory);
+      console.log(JSON.stringify(opts.details ? full : compactSkillsJson(full), null, 2));
     });
 
   cli.command("adapters", "Print installed adapter names, one per line.")
@@ -808,12 +811,17 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const seen = await adaptersWithSessions();
       const agents = (await listAgents()).filter((a) => isPresent(a, seen));
       const divergence = await manifestDivergence(sharedLibraryRoot());
-      if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents, divergence }, null, 2)); return; }
+      const state = probeStateDir();
+      if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents, divergence, state }, null, 2)); return; }
       await renderDoctor(rows, agents, {
         version: VERSION,
         color: Boolean(opts.color),
         width: opts.width === undefined ? undefined : Number(opts.width),
       });
+      // Every command writes here; a sandbox that forbids it fails all of them.
+      console.log(state.writable
+        ? `\nstate: ${formatPath(state.path)} writable`
+        : `\nstate: ${formatPath(state.path)} NOT writable (${state.error}); every peek command needs it. Exit 6 until fixed.`);
       await printManifestDivergence();
     });
 
@@ -1081,11 +1089,20 @@ function handleError(e: unknown): number {
   }
   if (e instanceof RegistryLockTimeoutError) {
     fail({
-      code: 5,
+      code: 6,
       error: "registry_locked",
       message: e.message,
-      hint: "Another peek process is writing the registry. Retry the command.",
-      next: ["peek list"],
+      hint: "Another peek process holds the registry lock. This is transient: retry the command.",
+      next: ["peek list", "peek doctor"],
+    });
+  }
+  if (e instanceof StateUnwritableError) {
+    fail({
+      code: 6,
+      error: "state_unwritable",
+      message: e.message,
+      hint: "peek keeps its registry, claims and usage index under ~/.agent-peek and needs to write there. In a read-only sandbox, allow writes to that directory (or set HOME to a writable one).",
+      next: ["peek doctor", "ls -ld ~/.agent-peek"],
     });
   }
   if (e instanceof InvalidCursorError || e instanceof CursorMismatchError) {
@@ -1125,6 +1142,13 @@ function handleError(e: unknown): number {
     });
   }
   const err = e as Error;
+  // Any other store (claims, feed) that trips over an unwritable ~/.agent-peek lands
+  // here as a bare fs error; it is the same environment problem, so say so.
+  const fsCode = (e as { code?: string; path?: string } | undefined)?.code;
+  const fsPath = (e as { path?: string } | undefined)?.path ?? /'([^']*\.agent-peek[^']*)'/.exec(err?.message ?? "")?.[1];
+  if (fsCode && ["EACCES", "EROFS", "EPERM", "ENOTDIR", "EEXIST"].includes(fsCode) && fsPath?.includes(".agent-peek")) {
+    return handleError(new StateUnwritableError(fsPath, e));
+  }
   if (err?.name === "CACError") {
     const command = /command `([a-z-]+)/.exec(err.message)?.[1] ?? process.argv[2];
     const known = command && /^[a-z][a-z-]*$/.test(command) ? command : undefined;
@@ -2067,6 +2091,7 @@ function printFocusedHelp(command?: string): void {
   console.log("Exit codes:");
   console.log("  0 ok   1 conflict or internal error   2 not found   3 ambiguous selector");
   console.log("  4 adapter or skill error   5 usage: bad command, option, mode, or cursor");
+  console.log("  6 environment: peek cannot write ~/.agent-peek, or the registry lock is held (retry)");
   console.log("");
   console.log("Focused help:");
   console.log("  peek help coord");
@@ -2203,6 +2228,19 @@ interface DoctorRow {
   path?: string;
   command?: string;
   note?: string;
+}
+
+function probeStateDir(): { path: string; writable: boolean; error?: string } {
+  const dir = join(process.env.HOME ?? homedir(), ".agent-peek");
+  const probe = join(dir, `.write-probe-${process.pid}`);
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(probe, "");
+    unlinkSync(probe);
+    return { path: dir, writable: true };
+  } catch (e) {
+    return { path: dir, writable: false, error: (e as { code?: string }).code ?? (e as Error).message };
+  }
 }
 
 async function doctorRows(): Promise<DoctorRow[]> {

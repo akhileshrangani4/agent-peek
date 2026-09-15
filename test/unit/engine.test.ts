@@ -37,6 +37,23 @@ const makeFakeAdapter = (rows: Record<string, RawMessage[]>): Adapter => ({
   },
 });
 
+
+describe("Registry write failures", () => {
+  it("reports an unwritable state directory as such, not as lock contention", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { Registry } = await import("../../src/core/registry.js");
+    const { StateUnwritableError } = await import("../../src/core/errors.js");
+    // A regular file where the state directory should be: mkdir cannot succeed.
+    const home = mkdtempSync(join(tmpdir(), "ap-ro-"));
+    writeFileSync(join(home, ".agent-peek"), "not a directory");
+    const registry = new Registry({ home });
+    await expect(registry.upsert({ id: "fake:1", adapter: "fake", transcriptPath: "/x", lastSeen: new Date().toISOString(), status: "active" } as never))
+      .rejects.toBeInstanceOf(StateUnwritableError);
+  });
+});
+
 describe("Engine", () => {
   let home: string, cleanup: () => Promise<void>;
   let engine: Engine;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import lockfile from "proper-lockfile";
 import type { SessionEntry } from "./types.js";
-import { RegistryLockTimeoutError } from "./errors.js";
+import { RegistryLockTimeoutError, StateUnwritableError, isLockContention } from "./errors.js";
 
 export interface RegistryOptions {
   home?: string;
@@ -90,7 +90,11 @@ export class Registry {
   }
 
   private async read(): Promise<RegistryFile> {
-    await mkdir(this.dir, { recursive: true });
+    try {
+      await mkdir(this.dir, { recursive: true });
+    } catch (e) {
+      throw new StateUnwritableError(this.dir, e);
+    }
     let raw: string;
     try {
       raw = await readFile(this.path, "utf8");
@@ -116,7 +120,11 @@ export class Registry {
   }
 
   private async write(mutator: (f: RegistryFile) => void): Promise<void> {
-    await mkdir(this.dir, { recursive: true });
+    try {
+      await mkdir(this.dir, { recursive: true });
+    } catch (e) {
+      throw new StateUnwritableError(this.dir, e);
+    }
     let release: () => Promise<void>;
     try {
       release = await lockfile.lock(this.path, {
@@ -125,7 +133,10 @@ export class Registry {
         realpath: false,
       });
     } catch (e) {
-      throw new RegistryLockTimeoutError(e);
+      // Only a held lock is contention. EACCES, EROFS or a missing directory mean
+      // the state cannot be written at all, and "retry" would be the wrong advice.
+      if (isLockContention(e)) throw new RegistryLockTimeoutError(e);
+      throw new StateUnwritableError(this.path, e);
     }
     try {
       const f = await this.read();

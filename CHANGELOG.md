@@ -49,6 +49,24 @@ name, and an all-tool-only window says "0 shown" with a way out. The `--local` h
 the git branch, the original ask beside the latest, and the last eight shell commands, and
 keeps questions out of Next actions.
 
+A third pass ran two reviewers, one of them Codex in a read-only sandbox, which failed every
+command with "registry locked, retry" and exit 5 (the usage code). That was a misdiagnosis:
+any error acquiring the lock was reported as contention. A held lock is contention; EACCES,
+EROFS or a missing directory are `state_unwritable`, exit 6, naming the path and the fix, and
+`doctor` now probes the state directory. The same pass showed that no pid is a stable
+identity for an agent, whose every shell command is a new shell: the claim owner is your
+session (CLAUDE_SESSION_ID, else the session whose cwd is this directory), a claim made with
+`--as` records its creator, and `--ignore-self` matches either. A user-role record can be a
+task notification or a skill body the harness injected; task inference skips those and
+reaches the human turn, and `currentTask` is no longer cut with an ellipsis. A path scraped
+from a shell command counts only when it is on disk, which removes import specifiers and
+quoted fixtures from touched files. `--last 20` means twenty visible rows. `list` never cuts
+the NAME column and validates `--limit`. An exhausted cursor reads "No new messages" instead
+of an inverted range. `at .` resolves the current directory. Ambiguous selectors name their
+candidates. `skills --json` is one compact record per skill; `--details` restores the
+~400k-token inventory it used to be. Open questions must address someone or ask for a
+decision, so rhetorical questions and code fragments ending in `?` drop out.
+
 `inferTouchedFiles` never saw `file_path` or `notebook_path`, which is what Claude Code's
 Read, Edit, Write and NotebookEdit send, so touched-file lists for Claude Code sessions
 came only from shell commands. Both keys count now.

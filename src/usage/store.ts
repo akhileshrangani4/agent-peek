@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync } from "node:sqlite";
 import { BASE_SCHEMA, MIGRATIONS, SCHEMA_VERSION } from "./schema.js";
 import type { Invocation, Watermark } from "./schema.js";
+import { StateUnwritableError } from "../core/errors.js";
 
 const CORRUPTION_PATTERN = /SQLITE_CORRUPT|SQLITE_NOTADB|malformed|not a database/i;
 
@@ -74,7 +75,11 @@ export class UsageStore {
 
   constructor(opts: { home?: string; path?: string } = {}) {
     this.path = opts.path ?? usageDbPath(opts.home);
-    mkdirSync(dirname(this.path), { recursive: true });
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+    } catch (err) {
+      throw new StateUnwritableError(dirname(this.path), err);
+    }
     this.open();
   }
 
@@ -84,7 +89,13 @@ export class UsageStore {
     } catch (err) {
       // Rename-and-restart is reserved for genuine corruption. A version mismatch
       // never lands here: that path is forward migrations only.
-      if (!isCorruptionError(err)) throw err;
+      if (!isCorruptionError(err)) {
+        // "unable to open database file" names neither the file nor the reason.
+        if (/unable to open database|readonly database|SQLITE_CANTOPEN|SQLITE_READONLY/i.test(String((err as Error)?.message))) {
+          throw new StateUnwritableError(this.path, err);
+        }
+        throw err;
+      }
       if (existsSync(this.path)) {
         renameSync(this.path, `${this.path}.corrupt-${Date.now()}`);
         this.recovered = true;

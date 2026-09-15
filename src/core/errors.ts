@@ -47,6 +47,23 @@ export class RegistryLockTimeoutError extends Error {
   }
 }
 
+/**
+ * peek could not write its own state (registry, usage index, claims). This is the
+ * environment, not the caller: a read-only sandbox, a missing home, bad permissions.
+ * It used to be reported as a lock timeout, which told the reader to retry.
+ */
+export class StateUnwritableError extends Error {
+  readonly name = "StateUnwritableError";
+  constructor(public path: string, cause?: unknown) {
+    const code = (cause as { code?: string } | undefined)?.code;
+    super(`peek cannot write its state at ${path}${code ? ` (${code})` : ""}.`, { cause });
+  }
+}
+
+export function isLockContention(error: unknown): boolean {
+  return (error as { code?: string } | undefined)?.code === "ELOCKED";
+}
+
 export class TranscriptUnreadableError extends AdapterError {
   override readonly name = "TranscriptUnreadableError";
 }

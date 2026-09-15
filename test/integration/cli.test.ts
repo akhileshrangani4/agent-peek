@@ -62,6 +62,22 @@ describe("CLI integration", () => {
     expect(r.stderr.trim()).toBe("error: session_not_found · exit 2");
   });
 
+  it("a read-only home is an environment error (exit 6), and doctor says so", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-ro-"));
+    await writeFile(join(home, ".agent-peek"), "a file where the state dir should be", "utf8");
+    const r = await runCli(["list", "--json"], { HOME: home });
+    expect(r.code).toBe(6);
+    const record = JSON.parse(r.stdout);
+    expect(record.error).toBe("state_unwritable");
+    expect(record.message).toMatch(/cannot write its state at .*\.agent-peek/);
+    expect(record.hint).toMatch(/read-only sandbox/);
+    const doctor = await runCli(["doctor", "--json"], { HOME: home });
+    expect(JSON.parse(doctor.stdout).state).toMatchObject({ writable: false });
+    const usage = await runCli(["usage", "--json"], { HOME: home });
+    expect(usage.code).toBe(6);
+    expect(JSON.parse(usage.stdout).error).toBe("state_unwritable");
+  });
+
   it("--help prints usage", async () => {
     const r = await runCli(["--help"]);
     expect(r.code).toBe(0);
@@ -671,7 +687,7 @@ describe("skills --json segmentation", () => {
     // safe to act on: the human report says a skill is archivable and the JSON did not
     // say which bucket anything was in, so verifying "no archivable row lacks a mutable
     // installation" from the outside was impossible.
-    const r = await runCli(["skills", "--json"]);
+    const r = await runCli(["skills", "--json", "--details"]);
     expect(r.code).toBe(0);
     const doc = JSON.parse(r.stdout) as {
       skills: { segment?: string; installations: { mutable: boolean }[] }[];
