@@ -497,12 +497,22 @@ function extractQuestions(values: string[], max: number): string[] {
   const questions: string[] = [];
   for (const value of values) {
     for (const line of splitCandidateLines(value)) {
-      if (line.endsWith("?") || /\b(blocked|unclear|need input|open question)\b/i.test(line)) {
-        questions.push(oneLine(line, 220));
-      }
+      if (isOpenQuestion(line)) questions.push(oneLine(line, 220));
     }
   }
   return uniqueStrings(questions).slice(-max);
+}
+
+/**
+ * A question someone still needs answered, as opposed to a rhetorical one ("Why does
+ * this matter? Because...") or a code fragment that happens to end in "?". It has to
+ * address someone or ask for a decision, and carry no code.
+ */
+function isOpenQuestion(line: string): boolean {
+  if (/\b(blocked|need input|open question)\b/i.test(line)) return true;
+  if (!line.endsWith("?") || line.includes("`") || line.length > 200) return false;
+  if (line.split(/\s+/).length < 4) return false;
+  return /\b(should|shall|want|do you|would you|could you|can you|ok(ay)? to|prefer|which|or)\b/i.test(line);
 }
 
 function splitCandidateLines(value: string): string[] {

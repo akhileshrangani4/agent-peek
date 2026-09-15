@@ -1,4 +1,5 @@
-import { basename, extname, isAbsolute, normalize, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, normalize, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
 import type {
   CoordinationCursor, CoordinationDigest, CoordinationOverlap, CoordinationSession, CoordinationWritingFileEvent,
@@ -353,9 +354,15 @@ export function inferTouchedFiles(messages: RawMessage[], cwd: string | undefine
   const files = new Set<string>();
   for (const message of messages) {
     for (const tool of message.toolCalls ?? []) {
+      const fromCommand = commandInput(tool.input) !== undefined;
       for (const path of extractPaths(tool)) {
         const normalized = normalizePath(path, cwd);
-        if (isRelevantTouchedPath(normalized, cwd)) files.add(normalized);
+        if (!isRelevantTouchedPath(normalized, cwd)) continue;
+        // A path named as a tool argument was acted on. A path scraped out of a shell
+        // command is a guess (an import specifier, a fixture in a heredoc, a quoted
+        // example), so it counts only when the file is really there.
+        if (fromCommand && !existsSync(normalized)) continue;
+        files.add(normalized);
       }
     }
   }
@@ -376,9 +383,13 @@ function inferWritingFileEvents(
   messages.forEach((message, messageIndex) => {
     for (const tool of message.toolCalls ?? []) {
       if (!isWriteTool(tool)) continue;
+      const fromCommand = commandInput(tool.input) !== undefined;
       for (const path of writePaths(tool)) {
         const normalized = normalizePath(path, cwd);
         if (!isRelevantTouchedPath(normalized, cwd)) continue;
+        // Same rule as touched paths, except a command may create or delete the file it
+        // writes, so its parent directory existing is the evidence instead.
+        if (fromCommand && !existsSync(normalized) && !existsSync(dirname(normalized))) continue;
         const lastWritingAt = message.timestamp ?? fallbackTimestamp;
         const previous = events.get(normalized);
         if (previous && previous.lastWritingAt > lastWritingAt) continue;

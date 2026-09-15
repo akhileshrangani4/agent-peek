@@ -147,6 +147,16 @@ describe("handoff.buildHandoff", () => {
     expect(s.document).toMatch(/## Open questions \/ blockers\n(- .*\n)*- Want me to also add jitter\?/);
   });
 
+  it("open questions keep real questions and drop rhetoric and code fragments", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Should we keep the old flag or remove it?", raw: {} },
+      { role: "assistant", text: "A quiet hint under the secondary button when a rare case needs a sentence: `Own this app?", raw: {} },
+      { role: "assistant", text: "Why does this matter? Because the cache is shared.", raw: {} },
+      { role: "assistant", text: "Do you want me to also add jitter?", raw: {} },
+    ], { cwd: "/work/repo", target: "generic", produce: "local" });
+    expect(s.openQuestions).toEqual(["Should we keep the old flag or remove it?", "Do you want me to also add jitter?"]);
+  });
+
   it("labels a deliberately local handoff as such instead of as a fallback", async () => {
     const s = await buildHandoff("sid", msgs(), { cwd: "/work/repo", target: "generic", produce: "local" });
     expect(s.provider).toBe("local");

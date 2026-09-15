@@ -49,7 +49,12 @@ export function toStructured(sessionId: string, messages: RawMessage[], cwd?: st
   let lastAssistantMessage: string | undefined;
   const lastToolCalls: ToolCall[] = [];
   for (const m of messages) {
-    if (m.role === "user" && m.text) lastUserMessage = m.text;
+    // A user-role record is not always the user: harnesses inject notifications, skill
+    // bodies and reminders in that role. Those are never the ask.
+    if (m.role === "user" && m.text && !m.toolCalls?.length) {
+      const human = humanUserText(m.text);
+      if (human) lastUserMessage = human;
+    }
     if (m.role === "assistant" && m.text) lastAssistantMessage = m.text;
     if (m.toolCalls) lastToolCalls.push(...m.toolCalls.filter(isNamedToolCall));
   }
@@ -151,9 +156,18 @@ function isAcknowledgement(line: string): boolean {
 /** Harness wrappers a user turn can carry that were never the user's words. */
 function stripHarnessWrappers(text: string): string {
   return text
-    .replace(/<(local-command-[a-z]+|system-reminder|command-name|command-message|command-args)>[\s\S]*?<\/\1>/g, "")
-    .replace(/<\/?(local-command-[a-z]+|system-reminder)>/g, "")
+    .replace(/<(local-command-[a-z]+|system-reminder|task-notification|command-name|command-message|command-args|ide_[a-z_]+)>[\s\S]*?<\/\1>/g, "")
+    .replace(/<\/?(local-command-[a-z]+|system-reminder|task-notification)>/g, "")
     .trim();
+}
+
+/** The user's own words in a user-role record, or undefined when the record is all harness. */
+export function humanUserText(text: string): string | undefined {
+  const stripped = stripHarnessWrappers(text);
+  if (!stripped) return undefined;
+  // Whole-record injections: a skill body loaded into the user role, a hook's output.
+  if (/^(Base directory for this skill|\[SYSTEM NOTIFICATION|SessionStart:|<command-name>|Launching skill:)/.test(stripped)) return undefined;
+  return stripped;
 }
 
 function objectiveFromAssistantText(text: string): string | undefined {
@@ -163,25 +177,32 @@ function objectiveFromAssistantText(text: string): string | undefined {
   const objective = lines.find((line) => (
     isObjectiveLine(line) && !isReviewOrStatusLine(line)
   ));
-  return objective ? oneLine(cleanObjectiveLine(objective)).slice(0, 240) : undefined;
+  return objective ? flat(cleanObjectiveLine(objective)) : undefined;
+}
+
+// The task is a field, not a cell: renderers shorten it for a terminal, a JSON
+// consumer gets the sentence. A hard cap only guards against a pasted document.
+const TASK_MAX = 1000;
+function flat(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, TASK_MAX);
 }
 
 function objectiveFromUserText(text: string | undefined): string | undefined {
   if (!text) return undefined;
-  text = stripHarnessWrappers(text);
+  text = humanUserText(text) ?? "";
   if (!text) return undefined;
   const lines = candidateLines(text);
   const reviewLine = lines.find((line) => /\breview\b.+\b(diff|changes|code|project|uncommitted)\b/i.test(line));
-  if (reviewLine) return oneLine(cleanObjectiveLine(reviewLine)).slice(0, 240);
+  if (reviewLine) return flat(cleanObjectiveLine(reviewLine));
   const actionLine = lines.find((line) => (
     !isSystemPromptLine(line) && !isReviewOrStatusLine(line) && /\b(add|build|fix|implement|update|review|inspect|summarize|test|debug|refactor)\b/i.test(line)
   ));
-  if (actionLine) return oneLine(cleanObjectiveLine(actionLine)).slice(0, 240);
+  if (actionLine) return flat(cleanObjectiveLine(actionLine));
   // No action verb: the user's first usable sentence is still their ask ("ci is failing
   // on this"). Long pasted blocks are not; their first line is rarely the request.
   if (text.split(/\r?\n/).filter((line) => line.trim()).length > 6 || text.length > 600) return undefined;
   const simpleLine = lines.find((line) => !isSystemPromptLine(line) && !isReviewOrStatusLine(line));
-  return simpleLine ? oneLine(cleanObjectiveLine(simpleLine)).slice(0, 240) : undefined;
+  return simpleLine ? flat(cleanObjectiveLine(simpleLine)) : undefined;
 }
 
 function candidateLines(text: string): string[] {
