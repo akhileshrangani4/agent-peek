@@ -566,10 +566,24 @@ describe("CLI integration", () => {
     expect(JSON.parse(spaced.stdout).files.map((f: { file: string }) => f.file)).toEqual(["/tmp/check/README.md", "/tmp/check/src/core/engine.ts"]);
     expect(spaced.stderr).toMatch(/warning: 2 paths are not on disk/);
 
+    // A subagent sidecar beside the parent: hidden by --files too, unless asked for.
+    const subDir = join(projDir, "check", "subagents");
+    await mkdir(subDir, { recursive: true });
+    // The subagent must be writing something, or coord hides it as low-signal regardless.
+    await writeFile(join(subDir, "agent-sub1.jsonl"), [
+      `{"type":"user","sessionId":"check","agentId":"sub1","isSidechain":true,"cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"edit the sub file"}}`,
+      `{"type":"assistant","sessionId":"check","agentId":"sub1","isSidechain":true,"cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/check/src/sub.ts"}}]}}`,
+    ].join("\n") + "\n", "utf8");
+
     const files = await runCli(["list", "--files", "--adapter", "claude-code"], { HOME: home });
     expect(files.code).toBe(0);
     expect(files.stdout).toMatch(/FILES/);
     expect(files.stdout).toMatch(/writing: .*src\/core\/engine.ts/);
+    expect(files.stdout).not.toMatch(/-sub\b/);
+    const filesJson = JSON.parse((await runCli(["list", "--files", "--adapter", "claude-code", "--json"], { HOME: home })).stdout);
+    expect(filesJson.every((s: { parentSessionId?: string }) => s.parentSessionId === undefined)).toBe(true);
+    const withSubs = JSON.parse((await runCli(["list", "--files", "--adapter", "claude-code", "--json", "--include-subagents"], { HOME: home })).stdout);
+    expect(withSubs.some((s: { parentSessionId?: string }) => s.parentSessionId === "check")).toBe(true);
   });
 
   it("claim adds temporary file ownership that check and coord can see", async () => {

@@ -141,7 +141,7 @@ describe("handoff.buildHandoff", () => {
     ], { cwd: "/work/repo", target: "generic", produce: "local" });
     expect(s.document).toMatch(/## Goal\nOriginal ask: Add retries to the uploader\.\nLatest ask: ci is failing on this/);
     expect(s.document).toMatch(/git branch: avi\/retries/);
-    expect(s.document).toMatch(/Recent commands \(oldest first\):\n- `npm test -- uploader`/);
+    expect(s.document).toMatch(/Recent commands \(oldest first\), with how their output read:\n- `npm test -- uploader` -> unknown/);
     // The question moves to Open questions; it is not an action for the next session.
     expect(s.document).toMatch(/## Next actions\n- Next I will wire the backoff\.\n\n## Gotchas/);
     expect(s.document).toMatch(/## Open questions \/ blockers\n(- .*\n)*- Want me to also add jitter\?/);
@@ -155,6 +155,25 @@ describe("handoff.buildHandoff", () => {
       { role: "assistant", text: "Do you want me to also add jitter?", raw: {} },
     ], { cwd: "/work/repo", target: "generic", produce: "local" });
     expect(s.openQuestions).toEqual(["Should we keep the old flag or remove it?", "Do you want me to also add jitter?"]);
+  });
+
+  it("local handoff says how each recent command's output read, and lists failures as gotchas", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Fix the tests.", raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "npm test" }, status: "completed" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "Tests 2 failed | 40 passed\nFAIL test/a.test.ts > does x", status: "completed" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Read", input: { file_path: "/x/a.ts" }, status: "completed" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "file contents with the word error in prose", status: "completed" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "npm test" }, status: "completed" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "Tests 42 passed (42)\n0 failed", status: "completed" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "git push" }, status: "pending" }], raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.document).toMatch(/- `npm test` -> failed: Tests 2 failed \| 40 passed/);
+    expect(s.document).toMatch(/- `npm test` -> ok\n/);
+    expect(s.document).toMatch(/- `git push` -> unknown/);
+    expect(s.document).toMatch(/## Gotchas\n- `npm test` failed: Tests 2 failed/);
+    // The Read result was not attributed to a shell command.
+    expect(s.document).not.toMatch(/word error in prose/);
   });
 
   it("labels a deliberately local handoff as such instead of as a fallback", async () => {

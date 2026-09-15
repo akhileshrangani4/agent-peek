@@ -157,8 +157,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
           includeEnded: Boolean(opts.all),
           includeTerminal: opts.terminals || isTerminalAdapter(opts.adapter),
         });
-        if (opts.json) { console.log(JSON.stringify(digest.sessions, null, 2)); return; }
-        printListWithFiles(digest.sessions, { showIds: Boolean(opts.ids) });
+        // The same default as plain list: subagents are hidden unless asked for.
+        const sessions = opts.includeSubagents
+          ? digest.sessions
+          : digest.sessions.filter((session) => session.parentSessionId === undefined);
+        if (opts.json) { console.log(JSON.stringify(sessions, null, 2)); return; }
+        printListWithFiles(sessions, { showIds: Boolean(opts.ids) });
         return;
       }
       if (opts.json) { console.log(JSON.stringify(withDisplayNames(list), null, 2)); return; }

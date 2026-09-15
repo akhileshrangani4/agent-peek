@@ -294,29 +294,66 @@ export function renderHandoffPrompt(transcript: string, opts: HandoffPromptOpts)
 // ---------------------------------------------------------------------------
 // Local (heuristic) document
 
+export interface CommandOutcome {
+  command: string;
+  outcome: "ok" | "failed" | "unknown";
+  /** First error-looking line of the result, when it failed. */
+  detail?: string;
+}
+
 export interface LocalHandoffContext {
   cwd?: string;
   gitBranch?: string;
   firstAsk?: string;
-  recentCommands?: string[];
+  recentCommands?: CommandOutcome[];
+}
+
+const FAILURE_LINE = /\b(error|errors|failed|failure|FAIL|exception|traceback|not found|denied|exit(?:ed)?(?: code)? [1-9]\d*|ENOENT|EACCES|panic|✗|×)\b/i;
+const FAILURE_NEGATED = /\b(0 (errors?|failed|failures?)|no errors?|errors?: 0|failed: 0|without errors?)\b/i;
+
+/** Did a command's result read as a failure? Cheap and wrong sometimes, so it says "ok"
+ * or "failed" only when the text is clear and "unknown" otherwise. */
+export function classifyCommandResult(status: string | undefined, output: unknown): { outcome: CommandOutcome["outcome"]; detail?: string } {
+  if (status === "error") return { outcome: "failed", detail: oneLine(stringify(output), 120) || undefined };
+  const text = stringify(output);
+  if (!text.trim()) return { outcome: status === "completed" ? "ok" : "unknown" };
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const bad = lines.find((l) => FAILURE_LINE.test(l) && !FAILURE_NEGATED.test(l));
+  if (bad) return { outcome: "failed", detail: oneLine(bad, 120) };
+  return { outcome: "ok" };
 }
 
 /** What the transcript records about its environment, without a model. */
 export function localHandoffContext(messages: RawMessage[], cwd?: string): LocalHandoffContext {
   let gitBranch: string | undefined;
   let firstAsk: string | undefined;
-  const commands: string[] = [];
+  const commands: CommandOutcome[] = [];
+  // Shell calls waiting for their result; results follow their calls in order.
+  const pending: CommandOutcome[] = [];
   for (const m of messages) {
     const raw = m.raw as { gitBranch?: unknown } | undefined;
     if (raw && typeof raw.gitBranch === "string" && raw.gitBranch) gitBranch = raw.gitBranch;
     if (!firstAsk && m.role === "user" && m.text && !m.toolCalls?.length) {
-      const cleaned = m.text.replace(/<(local-command-[a-z]+|system-reminder)>[\s\S]*?<\/\1>/g, "").trim();
+      const cleaned = m.text.replace(/<(local-command-[a-z]+|system-reminder|task-notification)>[\s\S]*?<\/\1>/g, "").trim();
       if (cleaned) firstAsk = oneLine(cleaned, 240);
     }
     for (const tc of m.toolCalls ?? []) {
+      if (tc.name === "(result)") {
+        const waiting = pending.shift();
+        if (waiting) Object.assign(waiting, classifyCommandResult(tc.status, tc.output));
+        continue;
+      }
       const input = tc.input as Record<string, unknown> | undefined;
       const command = input && typeof input === "object" ? input.command ?? input.cmd : undefined;
-      if (typeof command === "string" && command.trim()) commands.push(oneLine(command, 160));
+      if (typeof command !== "string" || !command.trim()) {
+        // A non-shell tool still consumes the next result.
+        if (tc.output === undefined) pending.push({ command: "", outcome: "unknown" });
+        continue;
+      }
+      const entry: CommandOutcome = { command: oneLine(command, 160), outcome: "unknown" };
+      if (tc.output !== undefined) Object.assign(entry, classifyCommandResult(tc.status, tc.output));
+      else pending.push(entry);
+      commands.push(entry);
     }
   }
   return { cwd, gitBranch, firstAsk, recentCommands: commands.slice(-8) };
@@ -357,13 +394,19 @@ export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext 
     ...bullets(nextActions),
     "",
     "## Gotchas",
-    "Unknown: not extractable without a model. The recent commands below show what was tried.",
+    ...(c.recentCommands?.some((cmd) => cmd.outcome === "failed")
+      ? c.recentCommands.filter((cmd) => cmd.outcome === "failed").map((cmd) => `- \`${cmd.command}\` failed${cmd.detail ? `: ${cmd.detail}` : ""}`)
+      : ["Unknown: not extractable without a model. The recent commands below show what was tried."]),
     "",
     "## Environment",
     cwd ? `cwd: ${cwd}` : "cwd: unknown",
     ...(c.gitBranch ? [`git branch: ${c.gitBranch}`] : []),
     ...(s.recentTools.length ? [`recent tools: ${s.recentTools.join(", ")}`] : []),
-    ...(c.recentCommands?.length ? ["", "Recent commands (oldest first):", ...c.recentCommands.map((cmd) => `- \`${cmd}\``)] : []),
+    ...(c.recentCommands?.length ? [
+      "",
+      "Recent commands (oldest first), with how their output read:",
+      ...c.recentCommands.map((cmd) => `- \`${cmd.command}\` -> ${cmd.outcome}${cmd.detail ? `: ${cmd.detail}` : ""}`),
+    ] : []),
   ];
   return out.join("\n");
 }
