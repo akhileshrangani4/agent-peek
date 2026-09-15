@@ -16,7 +16,7 @@ import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
-import { HANDOFF_TARGETS, parseHandoffTarget } from "../core/handoff.js";
+import { HANDOFF_TARGETS, parseHandoffTarget, renderTranscriptLine } from "../core/handoff.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
@@ -2253,19 +2253,27 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
   if (s.mode === "raw") {
     console.log(`messages: ${s.window.start + 1}-${s.window.end} of ${s.totalMessageCount} (${s.window.order})`);
     let hidden = 0;
+    let shown = 0;
     for (const m of s.messages) {
       if (!opts.showTools && !m.text) { hidden++; continue; }
+      shown++;
       const head = `[${m.role}]${m.timestamp ? " " + m.timestamp : ""}`;
       console.log(head);
       if (m.text) console.log(indent(m.text));
       if (opts.showTools && m.toolCalls?.length) {
-        for (const tc of m.toolCalls) {
-          console.log(indent(`tool=${tc.name} status=${tc.status ?? "?"}`));
-        }
+        // The same collapsed form the handoff prompt uses: the command or path that
+        // identifies the call, and a truncated result. A bare name and status told a
+        // reader nothing about what the agent was doing.
+        const line = renderTranscriptLine({ ...m, text: undefined });
+        if (line) console.log(indent(line));
       }
     }
     // A window that prints nothing looks like an empty transcript; say what was skipped.
-    if (hidden) console.log(`${hidden} tool-only message${hidden === 1 ? "" : "s"} hidden; pass --tools to see ${hidden === 1 ? "it" : "them"}`);
+    if (hidden && !shown) {
+      console.log(`0 shown: all ${hidden} messages in this window are tool-only. Try --tools, or a wider window such as --last ${Math.max(60, hidden * 3)}.`);
+    } else if (hidden) {
+      console.log(`${hidden} tool-only message${hidden === 1 ? "" : "s"} hidden; pass --tools to see ${hidden === 1 ? "it" : "them"}`);
+    }
   } else if (s.mode === "structured") {
     console.log(`session: ${s.sessionId}`);
     console.log(`messages: ${s.messageCount}`);

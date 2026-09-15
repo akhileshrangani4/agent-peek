@@ -337,11 +337,11 @@ describe("CLI integration", () => {
     const hidden = await runCli(["at", "tools-claude", "--last", "2"], { HOME: home });
     expect(hidden.code).toBe(0);
     expect(hidden.stdout).toMatch(/messages: 2-3 of 3/);
-    expect(hidden.stdout).toMatch(/2 tool-only messages hidden; pass --tools to see them/);
+    expect(hidden.stdout).toMatch(/0 shown: all 2 messages in this window are tool-only\. Try --tools, or a wider window such as --last 60/);
 
     const shown = await runCli(["at", "tools-claude", "--last", "2", "--tools"], { HOME: home });
-    expect(shown.stdout).toMatch(/tool=Read/);
-    expect(shown.stdout).not.toMatch(/hidden/);
+    expect(shown.stdout).toMatch(/tool=Read file_path=\/tmp\/tools\/a\.ts/);
+    expect(shown.stdout).not.toMatch(/hidden|0 shown/);
 
     const mixed = await runCli(["at", "tools-claude", "--last", "3"], { HOME: home });
     expect(mixed.stdout).toMatch(/read it/);

@@ -80,7 +80,7 @@ export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: strin
     document: "",
     provider: "local",
   };
-  snapshot.document = renderLocalHandoff(snapshot, cwd);
+  snapshot.document = renderLocalHandoff(snapshot, localHandoffContext(messages, cwd));
   return snapshot;
 }
 
@@ -174,6 +174,12 @@ export function compressTranscript(messages: RawMessage[], opts: CompressOpts = 
   }
   const omitted = lines.length - head.length - tail.length;
   return [...head, `[... ${omitted} messages omitted ...]`, ...tail].join("\n");
+}
+
+/** One transcript message as compact text: role and text, tool calls collapsed to their
+ * identifying arguments, results truncated. Shared by the handoff prompt and `at --tools`. */
+export function renderTranscriptLine(m: RawMessage, resultChars = DEFAULT_RESULT_CHARS): string | undefined {
+  return renderMessage(m, resultChars);
 }
 
 function renderMessage(m: RawMessage, resultChars: number): string | undefined {
@@ -288,14 +294,50 @@ export function renderHandoffPrompt(transcript: string, opts: HandoffPromptOpts)
 // ---------------------------------------------------------------------------
 // Local (heuristic) document
 
-export function renderLocalHandoff(s: HandoffSnapshot, cwd?: string): string {
+export interface LocalHandoffContext {
+  cwd?: string;
+  gitBranch?: string;
+  firstAsk?: string;
+  recentCommands?: string[];
+}
+
+/** What the transcript records about its environment, without a model. */
+export function localHandoffContext(messages: RawMessage[], cwd?: string): LocalHandoffContext {
+  let gitBranch: string | undefined;
+  let firstAsk: string | undefined;
+  const commands: string[] = [];
+  for (const m of messages) {
+    const raw = m.raw as { gitBranch?: unknown } | undefined;
+    if (raw && typeof raw.gitBranch === "string" && raw.gitBranch) gitBranch = raw.gitBranch;
+    if (!firstAsk && m.role === "user" && m.text && !m.toolCalls?.length) {
+      const cleaned = m.text.replace(/<(local-command-[a-z]+|system-reminder)>[\s\S]*?<\/\1>/g, "").trim();
+      if (cleaned) firstAsk = oneLine(cleaned, 240);
+    }
+    for (const tc of m.toolCalls ?? []) {
+      const input = tc.input as Record<string, unknown> | undefined;
+      const command = input && typeof input === "object" ? input.command ?? input.cmd : undefined;
+      if (typeof command === "string" && command.trim()) commands.push(oneLine(command, 160));
+    }
+  }
+  return { cwd, gitBranch, firstAsk, recentCommands: commands.slice(-8) };
+}
+
+export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext | string | undefined): string {
+  const c: LocalHandoffContext = typeof ctx === "string" || ctx === undefined ? { cwd: ctx } : ctx;
+  const cwd = c.cwd;
+  const goal = [
+    ...(c.firstAsk && c.firstAsk !== s.currentTask ? [`Original ask: ${c.firstAsk}`] : []),
+    ...(s.currentTask ? [`${c.firstAsk && c.firstAsk !== s.currentTask ? "Latest ask: " : ""}${s.currentTask}`] : []),
+  ];
+  // A question is something the previous session asked; it is not an action for the next one.
+  const nextActions = s.nextActions.filter((line) => !line.trim().endsWith("?"));
   const out: string[] = [
     "> local fallback: no agent CLI found to write this handoff; fields below are regex-extracted. Install claude or codex, or set AGENT_PEEK_HANDOFF_RUNNER.",
     "",
     "# Handoff",
     "",
     "## Goal",
-    s.currentTask ?? "Unknown: no clear task line found in the transcript.",
+    ...(goal.length ? goal : ["Unknown: no clear task line found in the transcript."]),
     "",
     "## Current state",
     `activity: ${s.activity}; ${s.messageCount} messages.`,
@@ -312,14 +354,16 @@ export function renderLocalHandoff(s: HandoffSnapshot, cwd?: string): string {
     ...bullets(s.openQuestions),
     "",
     "## Next actions",
-    ...bullets(s.nextActions),
+    ...bullets(nextActions),
     "",
     "## Gotchas",
-    "Unknown: not extractable without a model.",
+    "Unknown: not extractable without a model. The recent commands below show what was tried.",
     "",
     "## Environment",
     cwd ? `cwd: ${cwd}` : "cwd: unknown",
+    ...(c.gitBranch ? [`git branch: ${c.gitBranch}`] : []),
     ...(s.recentTools.length ? [`recent tools: ${s.recentTools.join(", ")}`] : []),
+    ...(c.recentCommands?.length ? ["", "Recent commands (oldest first):", ...c.recentCommands.map((cmd) => `- \`${cmd}\``)] : []),
   ];
   return out.join("\n");
 }

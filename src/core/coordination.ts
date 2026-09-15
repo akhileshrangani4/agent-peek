@@ -499,7 +499,7 @@ export function writeTargetsOfCommand(command: string): string[] {
   }
   // Output redirects: `> file`, `>> file`, `2> file`, `&> file`; not `<`, `<<`, `2>&1`,
   // and not the `>` inside `=>` or `->`, which is code quoted in the command, not a redirect.
-  const redirectPattern = /(?:^|[^<>=\-])(?:\d?>>?|&>)\s*(['"]?)([^\s'"|;&<>]+)\1/g;
+  const redirectPattern = /(?:^|[^<>=-])(?:\d?>>?|&>)\s*(['"]?)([^\s'"|;&<>]+)\1/g;
   for (const match of command.matchAll(redirectPattern)) {
     const path = match[2];
     if (path && !path.startsWith("&") && path !== "/dev/null" && isPlausibleWriteTarget(path)) targets.push(path);

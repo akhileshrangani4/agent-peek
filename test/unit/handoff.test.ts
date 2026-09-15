@@ -132,6 +132,21 @@ describe("handoff.buildHandoff", () => {
     expect(s.document).toContain("src/mcp/index.ts");
   });
 
+  it("local handoff carries branch, first ask, recent commands, and no questions as next actions", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "<system-reminder>noise</system-reminder>\nAdd retries to the uploader.", raw: { gitBranch: "avi/retries" } },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "npm test -- uploader" }, status: "completed" }], raw: { gitBranch: "avi/retries" } },
+      { role: "assistant", text: "Next I will wire the backoff. Want me to also add jitter?", raw: {} },
+      { role: "user", text: "ci is failing on this", raw: { gitBranch: "avi/retries" } },
+    ], { cwd: "/work/repo", target: "generic", produce: "local" });
+    expect(s.document).toMatch(/## Goal\nOriginal ask: Add retries to the uploader\.\nLatest ask: ci is failing on this/);
+    expect(s.document).toMatch(/git branch: avi\/retries/);
+    expect(s.document).toMatch(/Recent commands \(oldest first\):\n- `npm test -- uploader`/);
+    // The question moves to Open questions; it is not an action for the next session.
+    expect(s.document).toMatch(/## Next actions\n- Next I will wire the backoff\.\n\n## Gotchas/);
+    expect(s.document).toMatch(/## Open questions \/ blockers\n(- .*\n)*- Want me to also add jitter\?/);
+  });
+
   it("labels a deliberately local handoff as such instead of as a fallback", async () => {
     const s = await buildHandoff("sid", msgs(), { cwd: "/work/repo", target: "generic", produce: "local" });
     expect(s.provider).toBe("local");
