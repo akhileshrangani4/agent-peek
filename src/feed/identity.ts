@@ -59,10 +59,19 @@ export async function resolveAuthor(opts: { as?: string; cwd: string; engine?: E
     try {
       const sessions = await opts.engine.list({ includeTerminal: false });
       const cwd = resolve(opts.cwd);
-      const match = sessions.find((entry) =>
-        entry.status !== "ended" && entry.cwd && (cwd === entry.cwd || cwd.startsWith(`${entry.cwd}/`) || entry.cwd.startsWith(`${cwd}/`)),
+      const inDir = sessions.filter((entry) =>
+        entry.status !== "ended" && entry.parentSessionId === undefined && entry.cwd
+        && (cwd === entry.cwd || cwd.startsWith(`${entry.cwd}/`) || entry.cwd.startsWith(`${cwd}/`)),
       );
-      if (match) return { session: match.id, adapter: match.adapter, name: match.tag };
+      // One live session here is us. Two or more (two agents reviewing the same repo)
+      // and picking the first would claim to be someone else, so say we cannot tell.
+      if (inDir.length === 1) {
+        const match = inDir[0]!;
+        return { session: match.id, adapter: match.adapter, name: match.tag };
+      }
+      if (inDir.length > 1) {
+        return { session: `${userInfo().username}@${hostname()}`, anonymous: true, ambiguousSessions: inDir.map((e) => e.id) };
+      }
     } catch { /* fall through to anonymous */ }
   }
   return { session: `${userInfo().username}@${hostname()}`, anonymous: true };

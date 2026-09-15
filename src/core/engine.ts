@@ -4,14 +4,17 @@ import type { AdapterLoader } from "../adapters/loader.js";
 import type { Adapter } from "../adapters/types.js";
 import type {
   CoordinationDigest, CoordinationCursor,
-  RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor,
+  RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor, HandoffTarget,
 } from "./types.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError, CursorMismatchError,
 } from "./errors.js";
-import { toBrief, toHandoff, toRaw, toStructured, toSummary } from "./snapshot.js";
-import { cursorAdapter } from "./cursor.js";
+import { toBrief, toRaw, toStructured, toSummary } from "./snapshot.js";
+import { buildHandoff, resolveHandoffRunner, type HandoffRunner, type HandoffProduce } from "./handoff.js";
+import { cursorAdapter, decodeCursor } from "./cursor.js";
 import { displayNames } from "./names.js";
+import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import {
   buildCoordinationDigest, buildCoordinationSession, compactCoordinationSessionForCursor, cwdMatches,
   coordinationCursorFor, coordinationSessionFor, decodeCoordinationCursor,
@@ -28,6 +31,11 @@ export interface PeekOpts {
   around?: number;
   from?: RawWindowFrom;
   order?: RawOrder;
+  /** handoff mode: who the document is for, and how to produce it. */
+  target?: HandoffTarget;
+  produce?: HandoffProduce;
+  runner?: HandoffRunner;
+  onStatus?: (line: string) => void;
 }
 
 export interface RegisterOpts {
@@ -50,6 +58,8 @@ export interface CoordinationOpts {
   adapter?: string;
   status?: SessionEntry["status"];
   includeEnded?: boolean;
+  /** Keep sessions with no task and no files, which coord hides as low-signal. */
+  includeLowSignal?: boolean;
   includeTerminal?: boolean;
   writingOnly?: boolean;
   since?: CoordinationCursor;
@@ -115,10 +125,29 @@ export class Engine {
         from: opts.from,
         order: opts.order,
       });
+      // A cursor read returns only the new messages; number them where they sit in
+      // the transcript so "2-3 of 3" stays "2-3 of 3" instead of becoming "1-2 of 2".
+      if (cursor) {
+        const base = decodeCursor(cursor).msgIndex;
+        snapshot.window = { ...snapshot.window, start: snapshot.window.start + base, end: snapshot.window.end + base };
+        snapshot.totalMessageCount += base;
+      }
     }
     else if (mode === "structured") snapshot = toStructured(entry.id, messages, entry.cwd);
     else if (mode === "brief") snapshot = toBrief(entry.id, messages);
-    else if (mode === "handoff") snapshot = toHandoff(entry.id, messages, entry.cwd);
+    else if (mode === "handoff") {
+      const produce = opts.produce ?? "harness";
+      const runner = produce === "harness"
+        ? (opts.runner ?? resolveHandoffRunner({ adapter: entry.adapter, cwd: entry.cwd }))
+        : opts.runner;
+      snapshot = await buildHandoff(entry.id, messages, {
+        cwd: entry.cwd,
+        target: opts.target,
+        produce,
+        runner,
+        onStatus: opts.onStatus,
+      });
+    }
     else snapshot = await toSummary(entry.id, messages, {
       deltaMessageCount: messages.length,
       cacheKey: result.nextCursor,
@@ -180,7 +209,7 @@ export class Engine {
       const state = nextCursors[session.id];
       if (state) state.session = compactCoordinationSessionForCursor(session);
     }
-    let sessions = opts.includeEnded === true
+    let sessions = opts.includeEnded === true || opts.includeLowSignal === true
       ? normalizedSessions
       : normalizedSessions.filter((session) => !isTrivialCoordinationSession(session));
     const hiddenLowSignalSessionCount = normalizedSessions.length - sessions.length;
@@ -248,12 +277,18 @@ export class Engine {
 
   private async resolve(selector: string): Promise<SessionEntry> {
     const list = (await this.deps.registry.list()).sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+    // "." and other relative directories are cwd selectors too; --help says cwd works.
+    if ((selector === "." || selector.startsWith("./") || selector.startsWith("../")) && existsSync(selector)) {
+      selector = resolvePath(selector);
+    }
+    const names = displayNames(list);
+    const label = (e: SessionEntry) => `${e.id} (${names[list.indexOf(e)]})`;
     const exact = list.find((e) => e.id === selector);
     if (exact) return exact;
     const tagMatches = list.filter((e) => e.tag === selector);
     if (tagMatches.length === 1) return tagMatches[0]!;
     if (tagMatches.length > 1) {
-      throw new AmbiguousSelectorError(selector, tagMatches.map((e) => e.id));
+      throw new AmbiguousSelectorError(selector, tagMatches.map(label));
     }
     const activeName = resolveDisplayName(selector, list.filter((e) => e.status !== "ended"));
     if (activeName) return activeName;
@@ -262,15 +297,26 @@ export class Engine {
     const cwdMatches = list.filter((e) => e.cwd === selector);
     if (cwdMatches.length === 1) return cwdMatches[0]!;
     if (cwdMatches.length > 1) {
-      throw new AmbiguousSelectorError(selector, cwdMatches.map((e) => e.id));
+      // Several sessions share a directory (a parent and its subagents, or two agents):
+      // prefer the one still moving, and only then call it ambiguous.
+      const live = cwdMatches.filter((e) => e.status === "active" && e.parentSessionId === undefined);
+      if (live.length === 1) return live[0]!;
+      throw new AmbiguousSelectorError(selector, cwdMatches.map(label));
     }
     const prefix = selector.endsWith("/") ? selector : `${selector}/`;
     const cwdPrefix = list.filter((e) => e.cwd && (e.cwd === selector || e.cwd.startsWith(prefix)));
     if (cwdPrefix.length === 1) return cwdPrefix[0]!;
     if (cwdPrefix.length > 1) {
-      throw new AmbiguousSelectorError(selector, cwdPrefix.map((e) => e.id));
+      throw new AmbiguousSelectorError(selector, cwdPrefix.map(label));
     }
-    throw new SessionNotFoundError(selector);
+    // A partial name is the usual miss: "deep-slice" for "deep-slice-claude".
+    const needle = selector.toLowerCase();
+    const near = list
+      .map((e, i) => ({ e, name: names[i]! }))
+      .filter(({ e, name }) => e.status !== "ended" && (name.toLowerCase().includes(needle) || (e.tag ?? "").toLowerCase().includes(needle)))
+      .slice(0, 5)
+      .map(({ name }) => name);
+    throw new SessionNotFoundError(selector, near);
   }
 
   private adapterNameFromSelector(selector: string): string | undefined {

@@ -35,15 +35,31 @@ export class ClaimsStore {
   async claim(opts: {
     files: string[];
     owner: string;
+    creator?: string;
     cwd?: string;
     ttlMs: number;
     now?: Date;
   }): Promise<FileClaim> {
     const now = opts.now ?? new Date();
+    const files = [...new Set(opts.files)].sort();
+    // The same owner claiming the same files again is renewing, not stacking a second
+    // record that then reads as two conflicts.
+    let refreshed: FileClaim | undefined;
+    await this.write((file) => {
+      pruneExpired(file, now);
+      const existing = Object.values(file.claims).find((c) =>
+        c.owner === opts.owner && c.files.length === files.length && c.files.every((f, i) => f === files[i]));
+      if (existing) {
+        existing.expiresAt = new Date(now.getTime() + opts.ttlMs).toISOString();
+        refreshed = existing;
+      }
+    });
+    if (refreshed) return refreshed;
     const claim: FileClaim = {
       id: randomUUID(),
-      files: [...new Set(opts.files)].sort(),
+      files,
       owner: opts.owner,
+      ...(opts.creator && opts.creator !== opts.owner ? { creator: opts.creator } : {}),
       cwd: opts.cwd,
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + opts.ttlMs).toISOString(),

@@ -20,16 +20,23 @@ import {
 } from "./skills.js";
 import { ArchiveRefusedError } from "../skills/archive.js";
 import type { PostInput, PostType } from "../feed/index.js";
+import { HANDOFF_TARGETS, parseHandoffTarget } from "../core/handoff.js";
 
 const tools = [
   {
     name: "peek_session",
-    description: "Read a snapshot of another agent's chat session.",
+    description: "Read a snapshot of another agent's chat session. For \"what is that agent doing\" use mode=brief or structured. mode=handoff does not spawn anything: the result's `material` string is a complete prompt (writing instructions and the eight section headings, heuristic hints, then the compressed transcript between `--- transcript ---` and `--- end transcript ---`); you are the harness, so answer that prompt yourself and the markdown you produce is the handoff. `document` in that result is only a regex stub.",
     inputSchema: {
       type: "object",
       properties: {
         selector: { type: "string", description: "Session displayName, id, tag, or cwd." },
-        mode: { type: "string", enum: ["raw", "structured", "brief", "summary", "handoff"], default: "raw" },
+        mode: {
+          type: "string",
+          enum: ["raw", "structured", "brief", "summary", "handoff"],
+          default: "raw",
+          description: "raw: transcript messages (windowed). structured: stable fields (currentTask, activity, writingFiles, pending tools). brief: one-paragraph status; use this for \"what is that agent doing\". summary: prose. handoff: `material` for you to write a handoff document from.",
+        },
+        target: { type: "string", description: "handoff mode: who the handoff is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat). Chat targets get code inlined; CLI targets get paths." },
         since: { type: "string", description: "Cursor returned by a prior peek." },
         limit: { type: "number", description: "Max raw messages (default 200)." },
         first: { type: "number", description: "Show the first N raw messages." },
@@ -277,9 +284,10 @@ export async function run(): Promise<void> {
       return promptText(
         `Handoff for ${selector}`,
         [
-          `Read ${sessionResourceUri(selector, "handoff")} or call peek_session with mode="handoff".`,
-          "Summarize decisions, touched files, open questions, current activity, and the next likely action.",
-          "Do not infer progress beyond what the session data shows.",
+          `Call peek_session with mode="handoff" (or read ${sessionResourceUri(selector, "handoff")}).`,
+          "The result's `material` field is a prompt plus the compressed transcript. You are the model that writes the handoff:",
+          "follow the instructions in `material` and produce the markdown document it describes.",
+          "Do not infer progress beyond what the transcript shows.",
         ].join("\n"),
       );
     }
@@ -378,8 +386,12 @@ export async function run(): Promise<void> {
     const { name, arguments: args = {} } = req.params;
     if (name === "peek_session") {
       try {
+        const target = parseHandoffTarget(args.target);
+        if (!target) return feedToolError(new Error(`Unknown handoff target: ${String(args.target)}. Use one of ${HANDOFF_TARGETS.join(", ")}.`));
         const r = await engine.peek(String(args.selector), {
           mode: parseSnapshotMode(args.mode),
+          target,
+          produce: "material",
           since: args.since ? String(args.since) : undefined,
           limit: rawLimit(args),
           offset: typeof args.offset === "number" ? args.offset : undefined,
@@ -583,7 +595,7 @@ async function readSessionResource(
   view: "brief" | "handoff" | "tail",
 ): Promise<PeekResult> {
   if (view === "brief") return engine.peek(selector, { mode: "brief" });
-  if (view === "handoff") return engine.peek(selector, { mode: "handoff" });
+  if (view === "handoff") return engine.peek(selector, { mode: "handoff", produce: "material" });
   return engine.peek(selector, { mode: "raw", limit: 50 });
 }
 

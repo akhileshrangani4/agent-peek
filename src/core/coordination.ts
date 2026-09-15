@@ -1,4 +1,5 @@
-import { basename, extname, isAbsolute, normalize, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, normalize, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
 import type {
   CoordinationCursor, CoordinationDigest, CoordinationOverlap, CoordinationSession, CoordinationWritingFileEvent,
@@ -98,6 +99,7 @@ export function buildClaimCoordinationSession(claim: FileClaim): CoordinationSes
   return {
     id: `claim:${claim.id}`,
     displayName: `claim-${claim.owner}`,
+    ...(claim.creator ? { creator: claim.creator } : {}),
     adapter: "claim",
     status: "active",
     activity: "tool-running",
@@ -353,9 +355,15 @@ export function inferTouchedFiles(messages: RawMessage[], cwd: string | undefine
   const files = new Set<string>();
   for (const message of messages) {
     for (const tool of message.toolCalls ?? []) {
+      const fromCommand = commandInput(tool.input) !== undefined;
       for (const path of extractPaths(tool)) {
         const normalized = normalizePath(path, cwd);
-        if (isRelevantTouchedPath(normalized, cwd)) files.add(normalized);
+        if (!isRelevantTouchedPath(normalized, cwd)) continue;
+        // A path named as a tool argument was acted on. A path scraped out of a shell
+        // command is a guess (an import specifier, a fixture in a heredoc, a quoted
+        // example), so it counts only when the file is really there.
+        if (fromCommand && !existsSync(normalized)) continue;
+        files.add(normalized);
       }
     }
   }
@@ -376,9 +384,13 @@ function inferWritingFileEvents(
   messages.forEach((message, messageIndex) => {
     for (const tool of message.toolCalls ?? []) {
       if (!isWriteTool(tool)) continue;
-      for (const path of extractPaths(tool)) {
+      const fromCommand = commandInput(tool.input) !== undefined;
+      for (const path of writePaths(tool)) {
         const normalized = normalizePath(path, cwd);
         if (!isRelevantTouchedPath(normalized, cwd)) continue;
+        // Same rule as touched paths, except a command may create or delete the file it
+        // writes, so its parent directory existing is the evidence instead.
+        if (fromCommand && !existsSync(normalized) && !existsSync(dirname(normalized))) continue;
         const lastWritingAt = message.timestamp ?? fallbackTimestamp;
         const previous = events.get(normalized);
         if (previous && previous.lastWritingAt > lastWritingAt) continue;
@@ -472,6 +484,76 @@ function extractPaths(tool: ToolCall): string[] {
   const paths: string[] = [];
   collectPathValues(tool.input, "", paths);
   return paths;
+}
+
+/**
+ * The paths a write tool writes. A named editor writes every path it was given;
+ * a shell command writes only its targets. Treating every path in a command as
+ * written made `node bin/peek.js list > out.json` a write to bin/peek.js, so
+ * any agent that ran a repo script showed up as writing it in `check`.
+ */
+function writePaths(tool: ToolCall): string[] {
+  const command = commandInput(tool.input);
+  if (command === undefined) return extractPaths(tool);
+  return writeTargetsOfCommand(command);
+}
+
+const WRITE_OPERAND_TOOLS = /^(tee|touch|mkdir|rm|rmdir|unlink|truncate)$/;
+const WRITE_DEST_TOOLS = /^(mv|cp|install|ln)$/;
+const INPLACE_EDIT_TOOLS = /^(sed|perl)$/;
+
+export function writeTargetsOfCommand(command: string): string[] {
+  const targets: string[] = [];
+  const patchPattern = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
+  for (const match of command.matchAll(patchPattern)) {
+    const path = match[1]?.trim();
+    if (path) targets.push(path);
+  }
+  // Output redirects: `> file`, `>> file`, `2> file`, `&> file`; not `<`, `<<`, `2>&1`,
+  // and not the `>` inside `=>` or `->`, which is code quoted in the command, not a redirect.
+  const redirectPattern = /(?:^|[^<>=-])(?:\d?>>?|&>)\s*(['"]?)([^\s'"|;&<>]+)\1/g;
+  for (const match of command.matchAll(redirectPattern)) {
+    const path = match[2];
+    if (path && !path.startsWith("&") && path !== "/dev/null" && isPlausibleWriteTarget(path)) targets.push(path);
+  }
+  // Heredoc bodies are data, not commands: strip them before reading operands.
+  const body = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2(?=\n|$)/g, "");
+  for (const segment of body.split(/&&|\|\||[;|\n]/)) {
+    const words = shellWords(segment);
+    if (!words.length) continue;
+    const tool = words[0] === "sudo" ? words[1] : words[0];
+    const rest = (words[0] === "sudo" ? words.slice(2) : words.slice(1));
+    if (!tool) continue;
+    const name = basename(tool);
+    const operands = rest.filter((w) => !w.startsWith("-") && !/^\d?>>?/.test(w));
+    if (WRITE_OPERAND_TOOLS.test(name)) targets.push(...operands.filter(isPlausibleWriteTarget));
+    else if (WRITE_DEST_TOOLS.test(name) && operands.length >= 2) targets.push(...[operands[operands.length - 1]!].filter(isPlausibleWriteTarget));
+    else if (INPLACE_EDIT_TOOLS.test(name) && /(^|\s)-i\b/.test(segment)) {
+      // Operands after the script are files; the script is the first operand not consumed by -e/-i.
+      const files = operands.filter((w) => looksLikeCommandPath(w));
+      targets.push(...files);
+    }
+  }
+  return [...new Set(targets.filter((t) => t && !t.includes("://")))];
+}
+
+/** A write target is a path, not a code fragment or an unexpanded variable. */
+function isPlausibleWriteTarget(value: string): boolean {
+  if (!value || /[()[\]{}<>|;&=`\\]/.test(value)) return false;
+  if (value.includes("$")) return false;
+  return /^[\w.~@/-]+$/.test(value);
+}
+
+function shellWords(segment: string): string[] {
+  const out: string[] = [];
+  const pattern = /'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S+)/g;
+  for (const match of segment.matchAll(pattern)) {
+    const word = match[1] ?? match[2] ?? match[3] ?? "";
+    // A redirect glued to its target (`>out`) is not an operand.
+    if (/^\d?>>?/.test(word) || word === ">" || word === ">>") continue;
+    out.push(word);
+  }
+  return out;
 }
 
 function addFileSession(map: Map<string, CoordinationSession[]>, file: string, session: CoordinationSession): void {
@@ -568,7 +650,8 @@ function collectPathValues(value: unknown, key: string, out: string[]): void {
 }
 
 function isPathKey(key: string): boolean {
-  return /^(path|paths|file|files|filepath|filePath|filename|filenamePattern)$/i.test(key);
+  // file_path and notebook_path are what Claude Code's Read/Edit/Write/NotebookEdit send.
+  return /^(path|paths|file|files|filepath|file_path|notebook_path|filename|filenamePattern)$/i.test(key);
 }
 
 function isCommandKey(key: string): boolean {
@@ -611,9 +694,10 @@ function extractCommandPaths(value: string): string[] {
     const path = match[1]?.trim();
     if (path) paths.push(path);
   }
-  const tokenPattern = /(?:^|[\s'"])(\.{0,2}\/?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+(?:\.[A-Za-z0-9]{1,12})?)(?=$|[\s'"]|[:,])/g;
+  const tokenPattern = /(?:^|[\s'"])(\.{0,2}\/?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+(?:\.[A-Za-z0-9]{1,12})?)(?=$|[\s'"]|[:,;)])/g;
   for (const match of value.matchAll(tokenPattern)) {
-    const path = match[1]?.replace(/^['"]|['"]$/g, "");
+    // A path at the end of a sentence carries the sentence's punctuation.
+    const path = match[1]?.replace(/^['"]|['"]$/g, "").replace(/[.,;:]+$/, "");
     if (path && looksLikeCommandPath(path) && !path.includes("://")) paths.push(path);
   }
   return paths;

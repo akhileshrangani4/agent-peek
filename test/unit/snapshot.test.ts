@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { toBrief, toHandoff, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
+import { settleToolStatuses, toBrief, toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
+import { toHandoff } from "../../src/core/handoff.js";
 import type { RawMessage } from "../../src/core/types.js";
 import { withEnv } from "../helpers/tmp-home.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const msgs = (): RawMessage[] => [
   { role: "user", text: "do X", raw: {} },
@@ -35,6 +39,30 @@ describe("snapshot.toRaw", () => {
   });
 });
 
+describe("snapshot.settleToolStatuses", () => {
+  it("marks a call completed or error from the result that answers it, and leaves unanswered calls pending", () => {
+    const out = settleToolStatuses([
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "ls" }, status: "pending", id: "t1" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "a b", status: "completed", id: "t1" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "false" }, status: "pending", id: "t2" }], raw: {} },
+      { role: "tool", toolCalls: [{ name: "(result)", output: "Exit code 1", status: "error", id: "t2" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Read", input: { file_path: "/x" }, status: "pending", id: "t3" }], raw: {} },
+    ]);
+    expect(out[0]!.toolCalls![0]!.status).toBe("completed");
+    expect(out[2]!.toolCalls![0]!.status).toBe("error");
+    expect(out[4]!.toolCalls![0]!.status).toBe("pending");
+    const s = toStructured("sid", out);
+    expect(s.pendingToolCalls.map((t) => t.name)).toEqual(["Read"]);
+    expect(s.lastToolCalls.map((t) => t.status)).toEqual(["completed", "error", "pending"]);
+  });
+
+  it("a long briefing's first line is the ask, not a verb-bearing sentence from its middle", () => {
+    const briefing = ["Review the peek CLI as a fresh agent.", "", "Setup:", "- run from the repo", "- read-only", "", "Do not review the source code for style; review the experience.", "Then report."].join("\n");
+    const s = toStructured("sid", [{ role: "user", text: briefing, raw: {} }]);
+    expect(s.currentTask).toBe("Review the peek CLI as a fresh agent.");
+  });
+});
+
 describe("snapshot.toStructured", () => {
   it("derives lastUser/lastAssistant + counts", () => {
     const s = toStructured("sid", msgs());
@@ -42,6 +70,50 @@ describe("snapshot.toStructured", () => {
     expect(s.messageCount).toBe(5);
     expect(s.lastUserMessage).toBe("do X");
     expect(s.lastAssistantMessage).toBe("done");
+  });
+
+  it("sees Claude Code's file_path and notebook_path as touched files", () => {
+    const s = toStructured("sid", [
+      { role: "assistant", toolCalls: [{ name: "Read", input: { file_path: "/work/repo/src/a.ts" }, status: "completed" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "NotebookEdit", input: { notebook_path: "/work/repo/nb.ipynb", new_source: "x" }, status: "completed" }], raw: {} },
+    ], "/work/repo");
+    expect(s.touchedFiles).toEqual(["/work/repo/nb.ipynb", "/work/repo/src/a.ts"]);
+    expect(s.writingFiles).toEqual(["/work/repo/nb.ipynb"]);
+  });
+
+  it("marks only a shell command's write targets as writing, not every path in it", () => {
+    // Command-derived paths count only when they are on disk, so the fixture is real.
+    const repo = mkdtempSync(join(tmpdir(), "ap-snap-"));
+    mkdirSync(join(repo, "src"), { recursive: true });
+    mkdirSync(join(repo, "bin"), { recursive: true });
+    for (const f of ["src/a.ts", "src/d.ts", "src/e.ts", "bin/peek.js"]) writeFileSync(join(repo, f), "x");
+    const run = (command: string) => toStructured("sid", [
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command }, status: "completed" }], raw: {} },
+    ], repo);
+    // Running a script and redirecting its output writes the target, not the script.
+    let s = run(`node bin/peek.js list --json > ${repo}/out.json`);
+    expect(s.writingFiles).toEqual([`${repo}/out.json`]);
+    expect(s.touchedFiles).toContain(`${repo}/bin/peek.js`);
+    // Reading a file writes nothing, even when the command mentions words like "add".
+    s = run("cat src/a.ts && git add src/a.ts && git commit -m 'add tests'");
+    expect(s.writingFiles).toEqual([]);
+    // Operand-based writers: the operand is the target; cp/mv write only their destination.
+    s = run("cp src/a.ts src/b.ts && touch src/c.ts && sed -i '' 's/x/y/' src/d.ts && rm src/e.ts");
+    expect(s.writingFiles).toEqual([`${repo}/src/b.ts`, `${repo}/src/c.ts`, `${repo}/src/d.ts`, `${repo}/src/e.ts`]);
+    // Heredoc into a file writes the file; input redirect does not.
+    s = run("cat <<'EOF' > src/f.ts\nhello\nEOF\nwc -l < src/a.ts");
+    expect(s.writingFiles).toEqual([`${repo}/src/f.ts`]);
+    // Code inside a command is not a redirect: `=>` is an arrow, `$VAR/x` is unexpanded,
+    // `bin/peek.js.` ends a sentence. None of these are files anyone wrote.
+    s = run('node -e "const f = (w) => !w.startsWith(1); xs.some((other) => other.id)" > $D/out.err 2>&1; grep -n "admitAppRun(app.id))" src/a.ts; echo done bin/peek.js.');
+    expect(s.writingFiles).toEqual([]);
+    expect(s.touchedFiles).toEqual([`${repo}/src/a.ts`, `${repo}/bin/peek.js`].sort());
+    s = run(`cat a.txt 2>/dev/null >${repo}/log.txt && ls -> ${repo}/arrow.txt`);
+    expect(s.writingFiles).toEqual([`${repo}/log.txt`]);
+    // apply_patch headers name their files.
+    s = run("apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: src/g.ts\n*** End Patch\nEOF");
+    expect(s.writingFiles).toEqual([`${repo}/src/g.ts`]);
+    rmSync(repo, { recursive: true, force: true });
   });
 
   it("includes touched and writing file context", () => {
@@ -81,6 +153,67 @@ describe("snapshot.toStructured", () => {
     expect(toStructured("s", m).activity).toBe("idle");
   });
 
+  it("currentTask prefers the user's ask over the assistant's narration", () => {
+    const s = toStructured("sid", [
+      { role: "user", text: "Okay now let's fix the 5815 error in the daemon.", raw: {} },
+      { role: "assistant", text: "Let me see how the other daemons in that directory actually get run.", raw: {} },
+      { role: "assistant", text: "Now I'll check the launchd plist.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("Okay now let's fix the 5815 error in the daemon.");
+  });
+
+  it("currentTask is the user's words even without an action verb, minus harness wrappers", () => {
+    let s = toStructured("sid", [
+      { role: "user", text: "ci is failing on this", raw: {} },
+      { role: "assistant", text: "The script now resolves the write from its own location. Let me check the workflow.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("ci is failing on this");
+    s = toStructured("sid", [
+      { role: "user", text: "<local-command-stdout>ok</local-command-stdout>\n<system-reminder>ignore</system-reminder>\ncheck the review comment on 5811", raw: {} },
+      { role: "assistant", text: "Let me look at the review comment.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("check the review comment on 5811");
+  });
+
+  it("currentTask and lastUserMessage skip harness-injected user turns and reach the human one", () => {
+    const s = toStructured("sid", [
+      { role: "user", text: "yes third, this time spin off codex too", raw: {} },
+      { role: "assistant", text: "I'll fix it with the batch: first the runner.", raw: {} },
+      { role: "user", text: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<task-id>abc</task-id>\n</task-notification>\n</system-reminder>", raw: {} },
+      { role: "user", text: "Base directory for this skill: /x/y\n\n# Skill\nTo harness a new trigger word, add one entry to LEXICON.", raw: {} },
+      { role: "assistant", text: "Now I need to update the tests.", raw: {} },
+    ]);
+    expect(s.lastUserMessage).toBe("yes third, this time spin off codex too");
+    expect(s.currentTask).toBe("yes third, this time spin off codex too");
+  });
+
+  it("currentTask is not truncated with an ellipsis; renderers shorten it", () => {
+    const long = "Please " + "refactor the uploader module ".repeat(12).trim();
+    const s = toStructured("sid", [{ role: "user", text: long, raw: {} }]);
+    expect(s.currentTask).toBe(long);
+    expect(s.currentTask).not.toMatch(/\.\.\.$/);
+  });
+
+  it("command-derived touched paths must exist on disk; tool arguments need not", () => {
+    const here = process.cwd();
+    const s = toStructured("sid", [
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "cat src/a.ts src/core/engine.ts && grep foo ./cursor.js" }, status: "completed" }], raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Write", input: { file_path: `${here}/src/brand-new.ts`, content: "x" }, status: "completed" }], raw: {} },
+    ], here);
+    expect(s.touchedFiles).toEqual([`${here}/src/brand-new.ts`, `${here}/src/core/engine.ts`]);
+    expect(s.writingFiles).toEqual([`${here}/src/brand-new.ts`]);
+  });
+
+  it("currentTask falls back to the assistant's objective when the user turn is not actionable", () => {
+    const s = toStructured("sid", [
+      { role: "user", text: "Add a retry to the uploader.", raw: {} },
+      { role: "assistant", text: "I'll add a retry loop to the uploader.", raw: {} },
+      { role: "user", text: "yes", raw: {} },
+      { role: "assistant", text: "Now I need to update the tests for the retry.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("Now I need to update the tests for the retry.");
+  });
+
   it("currentTask comes from last user message (heuristic)", () => {
     const s = toStructured("sid", msgs());
     expect(s.currentTask).toBe("do X");
@@ -104,15 +237,16 @@ describe("snapshot.toHandoff", () => {
       { role: "user", text: "Can you add resources?", raw: {} },
       { role: "assistant", text: "Implemented MCP resources. Next I will add prompts.", raw: {} },
       { role: "assistant", toolCalls: [{ name: "Read", input: { path: "src/mcp/index.ts" }, status: "pending" }], raw: {} },
-      { role: "assistant", toolCalls: [{ name: "exec_command", input: { cmd: "cat \"src/core/engine.ts\"" }, status: "pending" }], raw: {} },
+      // A path scraped from a shell command counts only when it is on disk; this one is.
+      { role: "assistant", toolCalls: [{ name: "exec_command", input: { cmd: `cat "${process.cwd()}/src/core/engine.ts"` }, status: "pending" }], raw: {} },
       { role: "assistant", toolCalls: [{ name: "exec_command", input: { cmd: "curl https://example.com/foo/bar && echo Content-Type: application/json" }, status: "pending" }], raw: {} },
-    ], "/work/repo");
+    ], process.cwd());
     expect(s.mode).toBe("handoff");
     expect(s.decisions).toContain("Implemented MCP resources.");
     expect(s.nextActions).toContain("Next I will add prompts.");
     expect(s.openQuestions).toContain("Can you add resources?");
     expect(s.openQuestions).not.toContain("AskUserQuestion/Question: present choices?");
-    expect(s.touchedFiles).toEqual(["/work/repo/src/core/engine.ts", "/work/repo/src/mcp/index.ts"]);
+    expect(s.touchedFiles).toEqual([`${process.cwd()}/src/core/engine.ts`, `${process.cwd()}/src/mcp/index.ts`]);
     expect(s.recentTools).toContain("Read");
   });
 });

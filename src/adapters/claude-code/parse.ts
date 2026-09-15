@@ -72,18 +72,22 @@ function extractToolCalls(content: unknown): ToolCall[] {
   if (!Array.isArray(content)) return out;
   for (const b of content) {
     if (!b || typeof b !== "object") continue;
-    const obj = b as { type?: unknown; name?: unknown; input?: unknown; content?: unknown };
+    const obj = b as { type?: unknown; name?: unknown; input?: unknown; content?: unknown; id?: unknown; tool_use_id?: unknown; is_error?: unknown };
     if (obj.type === "tool_use") {
       out.push({
         name: typeof obj.name === "string" ? obj.name : "?",
         input: obj.input,
         status: "pending",
+        ...(typeof obj.id === "string" ? { id: obj.id } : {}),
       });
     } else if (obj.type === "tool_result") {
       out.push({
         name: "(result)",
         output: obj.content,
-        status: "completed",
+        // The harness flags a failed tool call here; keyword-guessing from the output
+        // called successful commands failed whenever they printed the word "error".
+        status: obj.is_error === true ? "error" : "completed",
+        ...(typeof obj.tool_use_id === "string" ? { id: obj.tool_use_id } : {}),
       });
     }
   }

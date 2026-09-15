@@ -85,13 +85,16 @@ coordinate, but do not claim you changed another agent's state.
 - Use `peek list --files` when you need a quick overview of active/recent file context.
 - Use `peek coord . --writing` before writing; it filters to active writers and claims.
 - Use `peek check <file>` for scriptable conflict checks. Exit `1` means wait or inspect.
-- Use `peek check <file> --as <owner>` after claiming, so your own claim is ignored.
+- `peek check` ignores your own claims by default (you are `CLAUDE_SESSION_ID`, else the session whose cwd is this directory). Add `--ignore-self` to also ignore your own session's writes, `--include-self` to see your own claims, or `--as <owner>` if you claimed under another name. If two live sessions share the directory, peek says it cannot tell which is you: set `CLAUDE_SESSION_ID` or pass `--as`.
+- Every command takes `--json`; errors under `--json` are a JSON record on stdout (`error`, `message`, `hint`, `next`, `exit`) with the slug on stderr. Exit codes: 0 ok, 1 conflict or internal, 2 not found, 3 ambiguous, 4 adapter or skill, 5 usage, 6 environment (peek cannot write `~/.agent-peek`, or the registry lock is held: retry).
 - Use `peek check --files-from <path|->` for a planned multi-file edit.
 - Use `peek claim <file> --ttl 2m` before a planned write; add `--files-from <path|->` for bulk claims. Run `peek release <claim-id> --claim-id --json`, optionally with `--files-from <path|->` for partial release, or `peek release <file>` when done.
 - Treat claims as cooperative local coordination, not authentication. `--as` is an unverified owner label for well-behaved agents.
 - Use `peek at <selector> --mode structured --json` when another script or agent will parse the result.
 - Use `peek at <selector> --mode brief` for a compact human-readable status.
 - Use `peek at <selector> --mode summary` for a sentence-style local summary.
+- Use `peek skills --json` for a bounded summary (top rows per segment); `--all` for every skill, `--details` for installations. `peek list --json` rows carry `name` and `displayName`; key on `displayName`.
+- Use `peek at <selector> --mode handoff --out <file>` when a session must be continued elsewhere: it writes a document (goal, state, decisions, files, next actions, gotchas) via the installed agent CLI, no API key. Add `--for chatgpt` for a reader with no filesystem. Over MCP, `peek_session` with `mode: "handoff"` returns `material` and you write the document yourself.
 - Use `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` for polling coordination state without inline cursor blobs.
 - Use `peek at <selector> --since <nextCursor> --json` when polling one transcript so you only read new messages.
 - Use `peek tag <selector> as <name>` when the display name is unstable or hard to type.

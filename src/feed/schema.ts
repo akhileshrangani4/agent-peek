@@ -20,6 +20,8 @@ export interface PostAuthor {
   adapter?: string;
   name?: string;
   anonymous?: boolean;
+  /** Set when several live sessions share the cwd and none is marked as ours. */
+  ambiguousSessions?: string[];
 }
 
 export interface FeedPost {

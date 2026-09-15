@@ -92,9 +92,22 @@ describe("MCP integration", () => {
     const briefResult = JSON.parse(briefText);
     expect(briefResult.snapshot.mode).toBe("brief");
 
+    // Over MCP the caller is the harness: no CLI is spawned, the prompt comes back as material.
     const handoff = await client.readResource({ uri: handoffResource!.uri });
     const handoffText = (handoff.contents as any)?.[0]?.text ?? "{}";
-    expect(JSON.parse(handoffText).snapshot.mode).toBe("handoff");
+    const handoffSnapshot = JSON.parse(handoffText).snapshot;
+    expect(handoffSnapshot.mode).toBe("handoff");
+    expect(handoffSnapshot.provider).toBe("host");
+    expect(handoffSnapshot.material).toMatch(/--- transcript ---/);
+    expect(handoffSnapshot.material).toMatch(/## Next actions/);
+
+    const chatHandoff = await client.callTool({ name: "peek_session", arguments: { selector: "y-claude", mode: "handoff", target: "chatgpt" } });
+    const chatSnapshot = JSON.parse((chatHandoff.content as any)[0].text).snapshot;
+    expect(chatSnapshot.target).toBe("chatgpt");
+    expect(chatSnapshot.material).toMatch(/NO filesystem/);
+
+    await expect(client.callTool({ name: "peek_session", arguments: { selector: "y-claude", mode: "handoff", target: "nope" } }))
+      .rejects.toThrow(/Unknown handoff target: nope/);
 
     const tail = await client.readResource({ uri: tailResource!.uri });
     const tailText = (tail.contents as any)?.[0]?.text ?? "{}";

@@ -70,7 +70,8 @@ export type {
   UsageQuery, UsageFilter, UsageRow, GroupBy, CoverageReport, Extractor,
   CoverageState, InstallationCoverage, UsageReport, BlindSpot, PartiallyObserved, AdapterWindow,
 } from "./usage/index.js";
-export { toRaw, toStructured, toBrief, toHandoff, toSummary } from "./core/snapshot.js";
+export { toRaw, toStructured, toBrief, toSummary } from "./core/snapshot.js";
+export { toHandoff, buildHandoff, compressTranscript, renderHandoffPrompt, resolveHandoffRunner, parseHandoffTarget } from "./core/handoff.js";
 export {
   encodeCoordinationCursor, decodeCoordinationCursor,
   buildCoordinationDigest, buildCoordinationSession,

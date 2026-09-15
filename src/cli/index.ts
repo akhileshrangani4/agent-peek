@@ -1,21 +1,23 @@
 // src/cli/index.ts
 import { cac } from "cac";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createEngine, VERSION } from "../index.js";
+import type { Engine } from "../core/engine.js";
 import { ClaimsStore } from "../core/claims.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError,
-  AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
+  AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError, StateUnwritableError,
   PostRejectedError, PostNotFoundError, NotAProjectError,
 } from "../core/errors.js";
 import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
 import { displayNames } from "../core/names.js";
+import { HANDOFF_TARGETS, parseHandoffTarget, renderTranscriptLine } from "../core/handoff.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
@@ -28,6 +30,7 @@ import {
 } from "../skills/index.js";
 import type { ArchivePlan, InstallationRow } from "../skills/index.js";
 import { renderSkillsReport, renderSkillsSegment } from "./skills-report.js";
+import { compactSkillsJson } from "./skills-json.js";
 import { renderUsageReport } from "./usage-report.js";
 import { renderAgents } from "./agents-report.js";
 import { renderList } from "./list-report.js";
@@ -114,8 +117,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--include-subagents", "Include subagent sessions spawned by another session")
     .option("--ids", "Show raw session ids")
+    .option("--limit <n>", "Rows shown per status group, active and idle each (default 12)")
     .option("--files", "Show active/recent file context for coordination")
-    .option("--json", "Output JSON with id, displayName, sourceType, cwd, and status")
+    .option("--json", "Output JSON with id, name, displayName, sourceType, cwd, and status")
     .action(async (target, opts) => {
       if (target === "adapters") {
         await listAdapters();
@@ -151,15 +155,23 @@ export async function run(argv: string[] = process.argv): Promise<number> {
           adapter: opts.adapter,
           status,
           includeEnded: Boolean(opts.all),
+          // Same rows as plain list, plus columns: a session with no task or files yet
+          // is still a session, so it shows with "-" rather than vanishing.
+          includeLowSignal: true,
           includeTerminal: opts.terminals || isTerminalAdapter(opts.adapter),
         });
-        if (opts.json) { console.log(JSON.stringify(digest.sessions, null, 2)); return; }
-        printListWithFiles(digest.sessions, { showIds: Boolean(opts.ids) });
+        // The same default as plain list: subagents are hidden unless asked for.
+        const sessions = opts.includeSubagents
+          ? digest.sessions
+          : digest.sessions.filter((session) => session.parentSessionId === undefined);
+        if (opts.json) { console.log(JSON.stringify(sessions, null, 2)); return; }
+        printListWithFiles(sessions, { showIds: Boolean(opts.ids) });
         return;
       }
       if (opts.json) { console.log(JSON.stringify(withDisplayNames(list), null, 2)); return; }
       await renderList(withDisplayNames(list), {
         showIds: Boolean(opts.ids),
+        limit: opts.limit === undefined ? undefined : parsePositiveInt(opts.limit, "--limit"),
         color: Boolean(opts.color),
         width: opts.width === undefined ? undefined : Number(opts.width),
         relativeTime,
@@ -175,22 +187,39 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--adapter <name>", "Scan only one adapter")
     .option("--as <owner>", "Ignore active claims owned by this agent")
-    .option("--ignore-self", "Ignore active claims owned by the default local owner")
+    .option("--ignore-self", "Ignore your own session's writes as well as your own claims (claims are ignored by default; see --include-self). You are CLAUDE_SESSION_ID when set, else the session whose cwd is this directory")
+    .option("--include-self", "Report your own claims as conflicts too")
+    .option("--ignore-session <name|id>", "Ignore writes from this session, for callers that know their own name")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--json", "Output machine-readable check result")
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
-      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? await defaultClaimOwner() : undefined;
       const engine = await createEngine({ withExternal: true });
+      // Your own claim is not a conflict with you. Two reviewers in a row claimed a file,
+      // ran check, and were told to retry with a flag; the default is now the useful one.
+      let ignoredOwner: string | undefined = opts.as ? String(opts.as) : undefined;
+      if (!ignoredOwner && !opts.includeSelf) {
+        const self = await resolveSelf(engine, cwd);
+        ignoredOwner = self.owner;
+        if (self.note && opts.ignoreSelf) console.error(`identity: ${self.note}`);
+      }
       const digest = await engine.coordinate({
         cwd,
         adapter: opts.adapter,
         includeTerminal: Boolean(opts.terminals) || isTerminalAdapter(opts.adapter),
       });
+      // A session's own edits are not a conflict. The reviewer that surfaced this had
+      // only run `node bin/peek.js` and was told it was writing bin/peek.js.
+      const ignoredSessions = new Set<string>();
+      if (opts.ignoreSession) ignoredSessions.add(String(opts.ignoreSession));
+      if (opts.ignoreSelf) {
+        const author = await resolveAuthor({ cwd, engine });
+        if (!author.anonymous) ignoredSessions.add(author.session);
+      }
       const files = targets.map((target) => ({
         file: target,
-        conflicts: activeFileConflicts(digest, target, ignoredOwner),
+        conflicts: activeFileConflicts(digest, target, ignoredOwner, ignoredSessions),
       }));
       const conflictCount = files.reduce((count, item) => count + item.conflicts.length, 0);
       const result = {
@@ -204,7 +233,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         console.log(`conflict: ${conflictCount} active file conflict${conflictCount === 1 ? "" : "s"}`);
         for (const item of files) {
           for (const conflict of item.conflicts) {
-            console.log(indent(`${formatPath(item.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}`));
+            const selfHint = conflict.adapter === "claim" ? ` (yours? --as ${conflict.displayName.replace(/^claim-/, "")}${conflict.creator ? `; made by ${conflict.creator}` : ""})` : "";
+            console.log(indent(`${formatPath(item.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}${selfHint}`));
             if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
           }
         }
@@ -227,18 +257,22 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
       const claims = new ClaimsStore();
+      const self = await resolveSelf(await createEngine({ withExternal: true }), cwd);
+      if (self.note && !opts.as) console.error(`identity: ${self.note}`);
       const claim = await claims.claim({
         files: targets,
         cwd,
-        owner: opts.as ? String(opts.as) : await defaultClaimOwner(),
+        owner: opts.as ? String(opts.as) : self.owner,
+        creator: self.owner,
         ttlMs: parseDurationMs(opts.ttl, "--ttl"),
       });
       if (opts.json) {
-        console.log(JSON.stringify(claim, null, 2));
+        console.log(JSON.stringify(self.note ? { ...claim, identityNote: self.note } : claim, null, 2));
         return;
       }
       console.log(`claimed ${claim.files.length} file${claim.files.length === 1 ? "" : "s"} until ${claim.expiresAt}`);
       console.log(indent(`id: ${claim.id}`));
+      console.log(indent(`owner: ${claim.owner}${claim.creator ? ` (you: ${claim.creator})` : ""}`));
       for (const claimedFile of claim.files) console.log(indent(formatPath(claimedFile)));
     });
 
@@ -267,7 +301,11 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         console.log(JSON.stringify(result, null, 2));
         return;
       }
-      console.log(`released ${result.released} claim${result.released === 1 ? "" : "s"}`);
+      if (result.released === 0) {
+        console.log(`released 0 claims: nothing active matched ${selector} (already released, expired, or a different id)`);
+      } else {
+        console.log(`released ${result.released} claim${result.released === 1 ? "" : "s"}`);
+      }
       for (const claim of releasedClaims) {
         console.log(indent(`${claim.id} (${claim.owner}) ${claim.files.length} file${claim.files.length === 1 ? "" : "s"}`));
       }
@@ -330,14 +368,19 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       });
     });
 
-  cli.command("at <selector>", "Read a session by displayName, id, tag, or cwd.")
-    .usage("at <selector> [--mode raw|structured|brief|summary|handoff] [--since <cursor>] [--limit <n>] [--json]")
+  cli.command("at <selector>", "Read a session by name (the NAME column of peek list), id, tag, or cwd. Over MCP the same read is peek_session; its handoff mode returns the prompt as `material` for the calling agent to answer instead of spawning a CLI.")
+    .usage("at <selector> [--mode raw|structured|brief|summary|handoff] [--for <agent>] [--out <file>] [--since <cursor>] [--limit <n>] [--json]")
     .example("peek at ledgerforge-codex --mode structured")
+    .example("peek at researcher-claude --mode handoff --out handoff.md")
+    .example("peek at researcher-claude --mode handoff --for chatgpt")
     .example("peek at codex:abc123 --mode raw --last 50")
     .example("peek at codex:abc123 --mode raw --first 20")
     .example("peek at codex:abc123 --mode raw --around 100 --limit 30")
-    .example("peek at buildy-claude --since <nextCursor>")
-    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary", { default: "raw" })
+    .example("peek at researcher-claude --since <nextCursor>")
+    .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary. handoff runs the installed agent CLI (claude, codex, ...) headless for up to a minute unless --local; AGENT_PEEK_HANDOFF_RUNNER=\"<bin> <args>\" overrides it", { default: "raw" })
+    .option("--for <agent>", "handoff: who it is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat)", { default: "generic" })
+    .option("--out <file>", "handoff: also write the document to this file (the document is stdout; status and nextCursor go to stderr, so `> file` works too)")
+    .option("--local", "handoff: skip the agent CLI and use the regex fallback")
     .option("--since <cursor>", "Only return new messages after a prior nextCursor")
     .option("--limit <n>", "Raw window size. Defaults to 200, or 30 with --around")
     .option("--first <n>", "Show the first N raw messages")
@@ -351,17 +394,51 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--json", "Output the full PeekResult JSON")
     .action(async (selector, opts) => {
       const mode = parseMode(opts.mode);
+      const target = parseHandoffTarget(opts.for);
+      if (!target) {
+        fail({
+          code: 5,
+          error: "invalid_handoff_target",
+          message: `Unknown handoff target: ${String(opts.for)}`,
+          hint: `Use one of: ${HANDOFF_TARGETS.join(", ")}.`,
+          next: ["peek at <selector> --mode handoff --for claude-code", "peek at <selector> --mode handoff --for chatgpt"],
+        });
+      }
       const rawOpts = parseRawOpts(opts);
       const engine = await createEngine({ withExternal: true });
-      const r = await engine.peek(selector, {
+      const showTools = Boolean(opts.tools || opts.verbose || opts.json);
+      const peekOnce = (limit: number | undefined) => engine.peek(selector, {
         mode,
+        target,
+        produce: opts.local ? "local" : "harness",
+        onStatus: (line) => { if (!opts.json) console.error(line); },
         since: opts.since,
-        limit: rawOpts.limit,
+        limit,
         offset: rawOpts.offset,
         around: rawOpts.around,
         from: rawOpts.from,
         order: rawOpts.order,
       });
+      let r = await peekOnce(rawOpts.limit);
+      // `--last 20` means twenty messages the reader will see. Tool-only rows are hidden
+      // unless --tools, so widen the window until enough visible rows fit, or the
+      // transcript runs out; the header then covers the wider span it took.
+      if (r.snapshot.mode === "raw" && !showTools && rawOpts.limit !== undefined && rawOpts.around === undefined) {
+        const wanted = rawOpts.limit;
+        let limit = wanted;
+        let snap = r.snapshot;
+        while (snap.messages.filter((m) => m.text).length < wanted && snap.messages.length < snap.totalMessageCount && limit < 5000) {
+          limit = Math.min(5000, limit * 3);
+          r = await peekOnce(limit);
+          if (r.snapshot.mode !== "raw") break;
+          snap = r.snapshot;
+        }
+        if (limit !== wanted && !opts.json) console.error(`(window widened to ${snap.messages.length} messages to show ${wanted} visible ones; --tools shows all)`);
+      }
+      if (r.snapshot.mode === "handoff" && opts.out) {
+        writeFileSync(resolve(String(opts.out)), `${r.snapshot.document}\n`);
+        if (!opts.json) console.error(`wrote ${resolve(String(opts.out))}`);
+      }
       if (opts.json) { console.log(JSON.stringify(r, null, 2)); return; }
       printSnapshot(r, { showTools: Boolean(opts.tools || opts.verbose) });
     });
@@ -552,7 +629,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek skills archive my-skill --all-agents --yes")
     .example("peek skills restore my-skill --yes")
     .example("peek skills archives")
-    .option("--json", "Output JSON")
+    .option("--json", "Output JSON: segment totals plus the top rows per segment (--limit). Add --all for every skill, --details for every installation and scanned root")
+    .option("--all", "With --json, include every skill instead of the top rows per segment")
+    .option("--details", "With --json, include installations, flags, and roots scanned (large)")
     .option("--projects <dirs>", "Comma-separated project directories to scan for project-local roots")
     .option("--limit <n>", "Rows per segment (default: 20 archivable, 8 elsewhere)")
     .option("--agent <slug>", "Limit an archive to one agent's installation")
@@ -590,7 +669,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       }
       const { projects, discovery } = await resolveProjectSurvey(opts.projects);
       const inventory = await buildInventory({ projects, projectDiscovery: discovery });
-      console.log(JSON.stringify(await skillsJson(inventory), null, 2));
+      const full = await skillsJson(inventory);
+      const compact = compactSkillsJson(full, {
+        all: Boolean(opts.all),
+        limit: opts.limit === undefined ? undefined : parsePositiveInt(opts.limit, "--limit"),
+      });
+      console.log(JSON.stringify(opts.details ? full : compact, null, 2));
     });
 
   cli.command("adapters", "Print installed adapter names, one per line.")
@@ -749,12 +833,17 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const seen = await adaptersWithSessions();
       const agents = (await listAgents()).filter((a) => isPresent(a, seen));
       const divergence = await manifestDivergence(sharedLibraryRoot());
-      if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents, divergence }, null, 2)); return; }
+      const state = probeStateDir();
+      if (opts.json) { console.log(JSON.stringify({ adapters: rows, agents, divergence, state }, null, 2)); return; }
       await renderDoctor(rows, agents, {
         version: VERSION,
         color: Boolean(opts.color),
         width: opts.width === undefined ? undefined : Number(opts.width),
       });
+      // Every command writes here; a sandbox that forbids it fails all of them.
+      console.log(state.writable
+        ? `\nstate: ${formatPath(state.path)} writable`
+        : `\nstate: ${formatPath(state.path)} NOT writable (${state.error}); every peek command needs it. Exit 6 until fixed.`);
       await printManifestDivergence();
     });
 
@@ -762,7 +851,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.version(VERSION);
 
   try {
-    cli.parse(argv, { run: false });
+    // A bare `peek` is a request for orientation, not a mistake.
+    if (argv.length <= 2) {
+      printFocusedHelp(undefined);
+      return 0;
+    }
+    cli.parse(normalizeStdinDash(argv), { run: false });
     if (!(cli as unknown as { matchedCommand?: unknown }).matchedCommand && !isGlobalInfoRequest(argv)) {
       fail({
         code: 5,
@@ -777,6 +871,39 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   } catch (e) {
     return handleError(e);
   }
+}
+
+/**
+ * cac reads a lone `-` as a flag, so `--files-from -` failed with "value is missing"
+ * while the help text advertised `-` for stdin. Join the pair so the parser sees a value.
+ */
+const STDIN_DASH_OPTIONS = new Set(["--files-from"]);
+function normalizeStdinDash(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (STDIN_DASH_OPTIONS.has(arg) && argv[i + 1] === "-") {
+      out.push(`${arg}=-`);
+      i++;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
+function parsePositiveInt(value: unknown, flag: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    fail({
+      code: 5,
+      error: "invalid_usage",
+      message: `${flag} must be a positive integer, got ${String(value)}.`,
+      hint: `Use ${flag} 20, for example.`,
+      next: [`peek list ${flag} 20`],
+    });
+  }
+  return n;
 }
 
 function isGlobalInfoRequest(argv: string[]): boolean {
@@ -941,14 +1068,27 @@ async function listAdapters(): Promise<void> {
   console.log(engine.adapterNames().join("\n"));
 }
 
+const ADAPTER_ALIASES: Record<string, string> = {
+  claude: "claude-code", "claude-code": "claude-code", codex: "codex", gemini: "gemini",
+  copilot: "copilot-cli", "copilot-cli": "copilot-cli", opencode: "opencode", goose: "goose", tmux: "tmux", screen: "screen",
+};
+function adapterNameFromSelectorMessage(message: string): string | undefined {
+  const selector = /selector: (\S+)/.exec(message)?.[1]?.toLowerCase();
+  return selector ? ADAPTER_ALIASES[selector] : undefined;
+}
+
 function handleError(e: unknown): number {
   if (e instanceof SessionNotFoundError) {
+    // "peek at claude" is a natural first try; the agent's name is an adapter, not a session.
+    const adapter = adapterNameFromSelectorMessage(e.message);
     fail({
       code: 2,
       error: "session_not_found",
       message: e.message,
-      hint: "Use `peek list` to get the current displayName values. Use `peek list --ids` if you need raw ids.",
-      next: ["peek list", "peek list --ids", "peek doctor"],
+      hint: adapter
+        ? `\`${adapter}\` is an adapter (agent kind), not a session. Sessions are the NAME column of \`peek list\`; filter by agent with \`peek list --adapter ${adapter}\`.`
+        : "Use `peek list` to get the current displayName values. Use `peek list --ids` if you need raw ids.",
+      next: adapter ? [`peek list --adapter ${adapter}`, "peek list --ids"] : ["peek list", "peek list --ids", "peek doctor"],
     });
   }
   if (e instanceof AmbiguousSelectorError) {
@@ -971,11 +1111,20 @@ function handleError(e: unknown): number {
   }
   if (e instanceof RegistryLockTimeoutError) {
     fail({
-      code: 5,
+      code: 6,
       error: "registry_locked",
       message: e.message,
-      hint: "Another peek process is writing the registry. Retry the command.",
-      next: ["peek list"],
+      hint: "Another peek process holds the registry lock. This is transient: retry the command.",
+      next: ["peek list", "peek doctor"],
+    });
+  }
+  if (e instanceof StateUnwritableError) {
+    fail({
+      code: 6,
+      error: "state_unwritable",
+      message: e.message,
+      hint: "peek keeps its registry, claims and usage index under ~/.agent-peek and needs to write there. In a read-only sandbox, allow writes to that directory (or set HOME to a writable one).",
+      next: ["peek doctor", "ls -ld ~/.agent-peek"],
     });
   }
   if (e instanceof InvalidCursorError || e instanceof CursorMismatchError) {
@@ -1015,13 +1164,22 @@ function handleError(e: unknown): number {
     });
   }
   const err = e as Error;
+  // Any other store (claims, feed) that trips over an unwritable ~/.agent-peek lands
+  // here as a bare fs error; it is the same environment problem, so say so.
+  const fsCode = (e as { code?: string; path?: string } | undefined)?.code;
+  const fsPath = (e as { path?: string } | undefined)?.path ?? /'([^']*\.agent-peek[^']*)'/.exec(err?.message ?? "")?.[1];
+  if (fsCode && ["EACCES", "EROFS", "EPERM", "ENOTDIR", "EEXIST"].includes(fsCode) && fsPath?.includes(".agent-peek")) {
+    return handleError(new StateUnwritableError(fsPath, e));
+  }
   if (err?.name === "CACError") {
+    const command = /command `([a-z-]+)/.exec(err.message)?.[1] ?? process.argv[2];
+    const known = command && /^[a-z][a-z-]*$/.test(command) ? command : undefined;
     fail({
       code: 5,
       error: "invalid_usage",
       message: err.message,
-      hint: "Run command help for the expected arguments and options.",
-      next: ["peek help", "peek list --help", "peek at --help"],
+      hint: known ? `Run \`peek ${known} --help\` for the expected arguments and options.` : "Run command help for the expected arguments and options.",
+      next: known ? [`peek ${known} --help`, "peek help"] : ["peek help", "peek list --help", "peek at --help"],
     });
   }
   fail({
@@ -1040,13 +1198,14 @@ function printListWithFiles(
 ): void {
   if (sessions.length === 0) { console.log("(no sessions)"); return; }
   const rows = sessions.map((session) => {
-    const files = session.activeWritingFiles.length
+    // The FILES cell is a summary; a session touching forty files made 800-column rows.
+    const files = oneLine(session.activeWritingFiles.length
       ? `writing: ${formatCoordinationFiles(session.activeWritingFiles, { verbose: false })}`
       : session.hotFiles.length
         ? `hot: ${formatCoordinationFiles(session.hotFiles, { verbose: false })}`
         : session.recentFiles.length
           ? `recent: ${formatCoordinationFiles(session.recentFiles, { verbose: false })}`
-          : "-";
+          : "-", 120);
     const row = [
       session.displayName,
       session.adapter,
@@ -1061,7 +1220,8 @@ function printListWithFiles(
   const headers = ["NAME", "ADAPTER", "STATUS", "INTENT", "UPDATED", "FILES"];
   if (opts.showIds) headers.push("ID");
   const cols = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ");
+  // No padding after the last cell: a wide FILES column otherwise trails hundreds of spaces.
+  const fmt = (r: string[]) => r.map((v, i) => v.padEnd(cols[i]!)).join("  ").trimEnd();
   console.log(fmt(headers));
   for (const row of rows) console.log(fmt(row));
 }
@@ -1070,9 +1230,11 @@ function activeFileConflicts(
   digest: CoordinationDigest,
   target: string,
   ignoredOwner?: string,
+  ignoredSessions: Set<string> = new Set(),
 ): {
   id: string;
   displayName: string;
+  creator?: string;
   adapter: string;
   status: string;
   currentTask?: string;
@@ -1080,10 +1242,14 @@ function activeFileConflicts(
 }[] {
   return digest.sessions
     .filter((session) => session.activeWritingFiles.includes(target))
-    .filter((session) => !ignoredOwner || session.adapter !== "claim" || session.displayName !== `claim-${ignoredOwner}`)
+    .filter((session) => !ignoredOwner || session.adapter !== "claim"
+      || (session.displayName !== `claim-${ignoredOwner}` && session.creator !== ignoredOwner))
+    // A subagent's writes count as its parent's: the parent asked for them.
+    .filter((session) => !isIgnoredSession(session, ignoredSessions))
     .map((session) => ({
       id: session.id,
       displayName: session.displayName,
+      ...(session.creator ? { creator: session.creator } : {}),
       adapter: session.adapter,
       status: session.status,
       currentTask: session.currentTask,
@@ -1091,10 +1257,19 @@ function activeFileConflicts(
     }));
 }
 
+function isIgnoredSession(
+  session: { id: string; displayName: string; parentSessionId?: string },
+  ignored: Set<string>,
+): boolean {
+  if (!ignored.size) return false;
+  if (ignored.has(session.id) || ignored.has(session.displayName)) return true;
+  return session.parentSessionId !== undefined && ignored.has(session.parentSessionId);
+}
+
 function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] {
   const values: string[] = [];
   if (file !== undefined) values.push(String(file));
-  if (filesFrom !== undefined) values.push(...readFilesFrom(String(filesFrom)));
+  if (filesFrom !== undefined) values.push(...readFilesFrom(String(filesFrom), cwd));
   if (values.length === 0) {
     fail({
       code: 5,
@@ -1107,14 +1282,22 @@ function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] 
   return [...new Set(values.map((value) => resolve(cwd, value)))].sort();
 }
 
-function readFilesFrom(path: string): string[] {
+function readFilesFrom(path: string, cwd: string = process.cwd()): string[] {
   const raw = path === "-"
     ? readFileSync(0, "utf8")
     : readFileSync(path, "utf8");
-  return raw
+  const entries = raw
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"));
+    .filter((line) => line && !line.startsWith("#"))
+    // The format is one path per line, but a space-separated line that names no file
+    // is several paths, not one; checking "a b" as a single path silently passes.
+    .flatMap((line) => (/\s/.test(line) && !existsSync(resolve(cwd, line)) ? line.split(/\s+/) : [line]));
+  const missing = entries.filter((entry) => !existsSync(resolve(cwd, entry)));
+  if (missing.length) {
+    console.error(`warning: ${missing.length} path${missing.length === 1 ? " is" : "s are"} not on disk: ${missing.join(", ")} (checked anyway; a typo here passes as "ok")`);
+  }
+  return entries;
 }
 
 /**
@@ -1434,10 +1617,26 @@ function parseEvidence(value: unknown): { kind: "file" | "commit" | "session"; p
   });
 }
 
-async function defaultClaimOwner(): Promise<string> {
-  const author = await resolveAuthor({ cwd: process.cwd() });
-  if (!author.anonymous) return author.session;
-  return `${userInfo().username || "agent"}@${hostname()}:${process.pid}`;
+/**
+ * Who "you" are to peek: CLAUDE_SESSION_ID when the harness sets it, else the session
+ * whose cwd is this directory. No pid of any kind: every peek call is a new process,
+ * and for an agent every shell command is a new shell too, so neither pid nor parent
+ * pid ever matched again and --ignore-self could not recognise a claim made a second
+ * earlier. Untracked agents fall back to user, host and directory.
+ */
+/** The owner string plus, when peek had to fall back, why: printed so the caller can
+ * pass --as or set CLAUDE_SESSION_ID instead of trusting a guess. */
+async function resolveSelf(engine: Engine | undefined, cwd: string): Promise<{ owner: string; note?: string }> {
+  const author = await resolveAuthor({ cwd, engine });
+  if (!author.anonymous) return { owner: author.session };
+  const owner = `${userInfo().username || "agent"}@${hostname()}:${cwd}`;
+  if (author.ambiguousSessions?.length) {
+    return {
+      owner,
+      note: `could not tell which of ${author.ambiguousSessions.length} live sessions in this directory is you (${author.ambiguousSessions.join(", ")}); using ${owner}. Set CLAUDE_SESSION_ID or pass --as <name> for a stable identity.`,
+    };
+  }
+  return { owner, note: `no tracked session found for this directory; using ${owner}.` };
 }
 
 function printCoordinationDigest(
@@ -1455,7 +1654,7 @@ function printCoordinationDigest(
     ? `${digest.shownSessionCount} sessions`
     : `${digest.shownSessionCount}/${digest.totalSessionCount} sessions shown`;
   console.log(`coordination: ${countLabel}, ${snapshotLabel}${risk}`);
-  if (digest.hiddenLowSignalSessionCount) console.log(`hidden low-signal: ${digest.hiddenLowSignalSessionCount} sessions (--all to include)`);
+  if (digest.hiddenLowSignalSessionCount) console.log(`hidden low-signal: ${digest.hiddenLowSignalSessionCount} session${digest.hiddenLowSignalSessionCount === 1 ? "" : "s"} with no task or files (--all shows them along with ended sessions)`);
   if (digest.hiddenUnchangedSessionCount) console.log(`hidden unchanged: ${digest.hiddenUnchangedSessionCount} sessions`);
   if (digest.filteredSessionCount) console.log(`filtered: ${digest.filteredSessionCount} sessions`);
   if (digest.cwd) console.log(`cwd: ${formatPath(digest.cwd)}`);
@@ -1655,7 +1854,8 @@ function withDisplayNames<T extends { id: string; name?: string; tag?: string; a
   list: T[],
 ): (T & { displayName: string })[] {
   const names = displayNames(list);
-  return list.map((entry, i) => ({ ...entry, displayName: names[i]! }));
+  // Some adapters leave `name` empty; a JSON consumer should be able to key on one field.
+  return list.map((entry, i) => ({ ...entry, name: entry.name ?? names[i]!, displayName: names[i]! }));
 }
 
 function parseStatus(value: unknown): SessionEntry["status"] | undefined {
@@ -1798,6 +1998,14 @@ function fail(opts: {
   const red = (t: string) => (colour ? `\u001b[31m${t}\u001b[39m` : t);
   const dim = (t: string) => (colour ? `\u001b[2m${t}\u001b[22m` : t);
 
+  // Under --json a caller is parsing stdout; give it the record there and keep the
+  // plain slug line on stderr so greps and scripts keep working.
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({ error: opts.error, message: opts.message, hint: opts.hint, next: opts.next, exit: opts.code }, null, 2));
+    console.error(`error: ${opts.error} · exit ${opts.code}`);
+    process.exit(opts.code);
+  }
+
   const lines: string[] = ["", `  ${red("error")}  ${opts.error.replace(/_/g, " ")}`, ""];
   lines.push(`     ${opts.message}`);
   if (opts.hint) lines.push("", `     ${opts.hint}`);
@@ -1821,7 +2029,7 @@ function printFocusedHelp(command?: string): void {
     at: [
       "peek at <selector> --mode brief       # compact local status",
       "peek at <selector> --mode structured  # stable fields for agents",
-      "peek at <selector> --mode handoff     # decisions, files, next actions",
+      "peek at <selector> --mode handoff     # document a new session can start from",
       "peek at <selector> --last 50 --tools  # inspect raw transcript details",
     ],
     coord: [
@@ -1880,8 +2088,11 @@ function printFocusedHelp(command?: string): void {
   console.log("Visibility and coordination for local AI agent sessions, and the skills they load.");
   console.log("");
   console.log("Sessions:");
-  console.log("  peek list                         show active sessions");
+  console.log("  peek list                         show active sessions (NAME is the selector for peek at)");
   console.log("  peek at <selector> --mode brief   read one session without touching it");
+  console.log("  peek at <selector> --mode handoff --out h.md");
+  console.log("                                    document a new session can start from; runs the");
+  console.log("                                    installed agent CLI for up to a minute, --local skips it");
   console.log("  peek ui                           browse sessions interactively");
   console.log("");
   console.log("Coordination:");
@@ -1900,6 +2111,20 @@ function printFocusedHelp(command?: string): void {
   console.log("  peek doctor                       diagnose adapter availability");
   console.log("  peek version                      show installed version");
   console.log("  peek update                       install the latest npm version globally");
+  console.log("");
+  console.log("For agents:");
+  console.log("  agent-peek-mcp                    the same as an MCP stdio server (peek_session, coordination_digest, read_feed)");
+  console.log("  --json                            machine-readable output everywhere, errors included");
+  console.log("  raw mode hides tool-only messages; pass --tools to see them");
+  console.log("");
+  console.log("Words:");
+  console.log("  status (list)     how recently the transcript changed: active, idle, ended");
+  console.log("  activity (at)     what the agent is doing now: tool-running, thinking, idle");
+  console.log("");
+  console.log("Exit codes:");
+  console.log("  0 ok   1 conflict or internal error   2 not found   3 ambiguous selector");
+  console.log("  4 adapter or skill error   5 usage: bad command, option, mode, or cursor");
+  console.log("  6 environment: peek cannot write ~/.agent-peek, or the registry lock is held (retry)");
   console.log("");
   console.log("Focused help:");
   console.log("  peek help coord");
@@ -2038,6 +2263,19 @@ interface DoctorRow {
   note?: string;
 }
 
+function probeStateDir(): { path: string; writable: boolean; error?: string } {
+  const dir = join(process.env.HOME ?? homedir(), ".agent-peek");
+  const probe = join(dir, `.write-probe-${process.pid}`);
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(probe, "");
+    unlinkSync(probe);
+    return { path: dir, writable: true };
+  } catch (e) {
+    return { path: dir, writable: false, error: (e as { code?: string }).code ?? (e as Error).message };
+  }
+}
+
 async function doctorRows(): Promise<DoctorRow[]> {
   const home = process.env.HOME ?? homedir();
   const xdgData = process.env.XDG_DATA_HOME ?? join(home, ".local", "share");
@@ -2144,17 +2382,36 @@ function relativeTime(iso: string): string {
 function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void {
   const s = r.snapshot;
   if (s.mode === "raw") {
+    if (s.messages.length === 0) {
+      console.log(s.totalMessageCount === 0
+        ? "No messages in this session yet."
+        : `No new messages; cursor is at message ${s.totalMessageCount} of ${s.totalMessageCount}.`);
+      if (s.mode === "raw") { console.log(`\nnextCursor: ${r.nextCursor}`); return; }
+    }
     console.log(`messages: ${s.window.start + 1}-${s.window.end} of ${s.totalMessageCount} (${s.window.order})`);
+    let hidden = 0;
+    let shown = 0;
     for (const m of s.messages) {
-      if (!opts.showTools && !m.text) continue;
+      if (!opts.showTools && !m.text) { hidden++; continue; }
+      // A record with neither text nor tool calls (a bare system marker) is a blank row.
+      if (!m.text && !m.toolCalls?.length) continue;
+      shown++;
       const head = `[${m.role}]${m.timestamp ? " " + m.timestamp : ""}`;
       console.log(head);
       if (m.text) console.log(indent(m.text));
       if (opts.showTools && m.toolCalls?.length) {
-        for (const tc of m.toolCalls) {
-          console.log(indent(`tool=${tc.name} status=${tc.status ?? "?"}`));
-        }
+        // The same collapsed form the handoff prompt uses: the command or path that
+        // identifies the call, and a truncated result. A bare name and status told a
+        // reader nothing about what the agent was doing.
+        const line = renderTranscriptLine({ ...m, text: undefined });
+        if (line) console.log(indent(line));
       }
+    }
+    // A window that prints nothing looks like an empty transcript; say what was skipped.
+    if (hidden && !shown) {
+      console.log(`0 shown: all ${hidden} messages in this window are tool-only. Try --tools, or a wider window such as --last ${Math.max(60, hidden * 3)}.`);
+    } else if (hidden) {
+      console.log(`${hidden} tool-only message${hidden === 1 ? "" : "s"} hidden; pass --tools to see ${hidden === 1 ? "it" : "them"}`);
     }
   } else if (s.mode === "structured") {
     console.log(`session: ${s.sessionId}`);
@@ -2174,32 +2431,22 @@ function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void 
     if (s.pendingTools.length) console.log(`pending tools: ${s.pendingTools.join(", ")}`);
     if (s.recentTools.length) console.log(`recent tools: ${s.recentTools.join(", ")}`);
   } else if (s.mode === "handoff") {
-    console.log(`session: ${s.sessionId}`);
-    console.log(`messages: ${s.messageCount}`);
-    console.log(`activity: ${s.activity}`);
-    if (s.currentTask) console.log(`task: ${oneLine(s.currentTask)}`);
-    printListSection("decisions", s.decisions);
-    printListSection("open questions", s.openQuestions);
-    printListSection("next actions", s.nextActions);
-    printListSection("files", s.touchedFiles.map(formatPath));
-    if (s.pendingTools.length) console.log(`pending tools: ${s.pendingTools.join(", ")}`);
-    if (s.recentTools.length) console.log(`recent tools: ${s.recentTools.join(", ")}`);
+    // The document is the deliverable; it goes to stdout so it pipes cleanly.
+    console.log(s.document);
+    const via = s.provider === "harness" ? `written by ${s.runner}` : s.provider === "host" ? "material for the host model" : "local fallback";
+    console.error(`\n(${via}; for ${s.target}; ${s.messageCount} messages; activity: ${s.activity})`);
   } else {
     console.log(s.summary);
     if (s.fallback) console.log(`(fallback: structured returned)`);
   }
-  console.log(`\nnextCursor: ${r.nextCursor}`);
+  // Handoff stdout is the document itself; keep the cursor off it so it pipes cleanly.
+  if (s.mode === "handoff") console.error(`nextCursor: ${r.nextCursor}`);
+  else console.log(`\nnextCursor: ${r.nextCursor}`);
 }
 
 function indent(s: string, n = 2): string {
   const pad = " ".repeat(n);
   return s.split("\n").map((l) => pad + l).join("\n");
-}
-
-function printListSection(label: string, values: string[]): void {
-  if (!values.length) return;
-  console.log(`${label}:`);
-  for (const value of values) console.log(indent(`- ${value}`));
 }
 
 function oneLine(value: string, max = 160): string {

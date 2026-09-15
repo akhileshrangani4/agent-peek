@@ -1,7 +1,7 @@
 export class SessionNotFoundError extends Error {
   readonly name = "SessionNotFoundError";
-  constructor(public selector: string) {
-    super(`No session matched selector: ${selector}`);
+  constructor(public selector: string, public suggestions: string[] = []) {
+    super(`No session matched selector: ${selector}${suggestions.length ? `. Did you mean: ${suggestions.join(", ")}?` : ""}`);
   }
 }
 
@@ -45,6 +45,23 @@ export class RegistryLockTimeoutError extends Error {
   constructor(cause?: unknown) {
     super("Could not acquire lock on registry within timeout.", { cause });
   }
+}
+
+/**
+ * peek could not write its own state (registry, usage index, claims). This is the
+ * environment, not the caller: a read-only sandbox, a missing home, bad permissions.
+ * It used to be reported as a lock timeout, which told the reader to retry.
+ */
+export class StateUnwritableError extends Error {
+  readonly name = "StateUnwritableError";
+  constructor(public path: string, cause?: unknown) {
+    const code = (cause as { code?: string } | undefined)?.code;
+    super(`peek cannot write its state at ${path}${code ? ` (${code})` : ""}.`, { cause });
+  }
+}
+
+export function isLockContention(error: unknown): boolean {
+  return (error as { code?: string } | undefined)?.code === "ELOCKED";
 }
 
 export class TranscriptUnreadableError extends AdapterError {

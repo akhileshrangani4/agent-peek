@@ -1,5 +1,91 @@
 # Changelog
 
+## 0.6.0
+
+`--mode handoff` was five regexes over the transcript tail; it now writes the document a
+new session needs to continue without re-exploring: goal, current state, decisions and
+why, files, open questions, next actions, gotchas, environment. No API key: the whole
+transcript is compressed and handed to whichever agent CLI is installed, headless on its
+own login, the session's own harness first. Hooks, MCP and session persistence are off for
+that child so it cannot recurse into peek or leave a transcript peek would list. `--for`
+picks the reader: CLI agents get paths, chat agents (`chatgpt`, `claude-chat`) get code
+inlined because they cannot open files. `--out` writes the file, `--local` keeps the old
+regex output, and stdout is the document alone so it pipes; the cursor moved to stderr.
+
+Over MCP the caller is already a model, so `peek_session mode=handoff` and the `/handoff`
+resource return `material` (prompt plus compressed transcript) instead of spawning anything,
+and the calling agent writes the document. `HandoffSnapshot` gained `target`, `document`,
+`provider`, `runner` and `material`; the regex fields stay.
+
+The handoff runner resolves past `~/.superset/bin` and `~/.superset-*/bin`. Superset's
+codex wrapper, run headless, re-execs itself forever (one `codex exec --help` left about
+2,800 bash processes), and a runner that spawned it would do the same to the user's machine.
+
+A fresh agent was handed the CLI blind and asked where it stumbled; these are its findings.
+`check` marked every path in a shell command as written when the command wrote anything,
+so `node bin/peek.js list > out.json` was a write to `bin/peek.js` and any agent running a
+repo script conflicted with itself; shell commands now report only their targets, and
+`--ignore-self` (or `--ignore-session <name|id>`) drops the caller's own session and its
+subagents. `currentTask` preferred the assistant's last "Let me see..." over the user's ask,
+which is what brief, structured, coord and the handoff Goal all showed; the user's actionable
+turn comes first now. A raw window of tool-only messages printed a header and nothing else;
+it now says how many rows are hidden and names `--tools`. `--since` renumbered new messages
+from 1; positions are absolute. Bare `peek` exits 0 with the overview. Errors under `--json`
+are a JSON record. `--files-from -` works with a space. `peek list` has a header row, a
+`--limit`, a footer that names it, and `name` in every JSON row. `peek help` lists exit
+codes, the MCP server, and the difference between list's `status` and at's `activity`.
+The `--local` handoff header no longer claims no CLI was found.
+
+A second blind pass found what the first fix missed. The redirect matcher read the `>` in
+`=>` as a redirect, so arrow functions quoted in a command became written files and fed
+`check`; a target must be a plain path now. `--ignore-self` never matched a claim the same
+shell had just made, because the anonymous owner was keyed on a pid that changes with every
+invocation; it is keyed on the parent shell, and the conflict line says how to skip your own
+claim. `--files-from` splits a spaced line that names no file and warns about paths that are
+not on disk, since a typo there passed as "ok". `currentTask` skipped user turns without an
+action verb ("ci is failing on this"); the user's words win unless they only hand the turn
+back. `raw --tools` shows the command or path and a truncated result instead of a bare tool
+name, and an all-tool-only window says "0 shown" with a way out. The `--local` handoff carries
+the git branch, the original ask beside the latest, and the last eight shell commands, and
+keeps questions out of Next actions.
+
+A third pass ran two reviewers, one of them Codex in a read-only sandbox, which failed every
+command with "registry locked, retry" and exit 5 (the usage code). That was a misdiagnosis:
+any error acquiring the lock was reported as contention. A held lock is contention; EACCES,
+EROFS or a missing directory are `state_unwritable`, exit 6, naming the path and the fix, and
+`doctor` now probes the state directory. The same pass showed that no pid is a stable
+identity for an agent, whose every shell command is a new shell: the claim owner is your
+session (CLAUDE_SESSION_ID, else the session whose cwd is this directory), a claim made with
+`--as` records its creator, and `--ignore-self` matches either. A user-role record can be a
+task notification or a skill body the harness injected; task inference skips those and
+reaches the human turn, and `currentTask` is no longer cut with an ellipsis. A path scraped
+from a shell command counts only when it is on disk, which removes import specifiers and
+quoted fixtures from touched files. `--last 20` means twenty visible rows. `list` never cuts
+the NAME column and validates `--limit`. An exhausted cursor reads "No new messages" instead
+of an inverted range. `at .` resolves the current directory. Ambiguous selectors name their
+candidates. `skills --json` is one compact record per skill; `--details` restores the
+~400k-token inventory it used to be. Open questions must address someone or ask for a
+decision, so rhetorical questions and code fragments ending in `?` drop out.
+
+A fourth pass, Claude and Codex again. Two agents reviewing one repo share a cwd, and
+picking the newest session as "you" made peek claim files as the other agent; with several
+live sessions in a directory and no CLAUDE_SESSION_ID, identity is anonymous and peek says
+which sessions it could not choose between. Every tool call read as pending even with its
+result in the transcript: results now carry the id of the call they answer and the harness's
+error flag, calls settle to completed or error after a read, and a command in a handoff is
+failed when its result says so, not when its output contains the word "error". Your own
+claim is not a conflict with you: `check` ignores it by default (`--include-self` shows it)
+and a repeat claim renews rather than stacks. Handoff decisions and next actions are drawn
+from the current ask onward, so finished tasks stop resurfacing as open work; chat-target
+handoffs keep 1500 characters per tool result and the prompt states the budget. `skills
+--json` defaults to the top rows per segment (`--all` for every skill). `list --files` keeps
+every row plain `list` shows. Unknown selectors suggest near matches, a widened `--last`
+window says so, and a long briefing's first line is its ask.
+
+`inferTouchedFiles` never saw `file_path` or `notebook_path`, which is what Claude Code's
+Read, Edit, Write and NotebookEdit send, so touched-file lists for Claude Code sessions
+came only from shell commands. Both keys count now.
+
 ## 0.5.1
 
 `node:sqlite` emits an `ExperimentalWarning` on import, and the usage index uses it, so

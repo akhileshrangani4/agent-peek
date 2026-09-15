@@ -9,6 +9,7 @@ import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
 import { readFileWindow, statusFromMtime } from "../common.js";
 import { parseJsonlSlice, parseRecord } from "./parse.js";
+import { settleToolStatuses } from "../../core/snapshot.js";
 
 const ADAPTER_NAME = "claude-code";
 
@@ -57,7 +58,8 @@ const adapter: Adapter = {
       throw new TranscriptUnreadableError(ADAPTER_NAME, `cannot read ${entry.transcriptPath}`, e);
     }
     const { records, nextOffset } = parseJsonlSlice(win.buf, 0);
-    const messages: RawMessage[] = records.map(parseRecord);
+    // Statuses settle within a read window; a call answered past the window stays pending.
+    const messages: RawMessage[] = settleToolStatuses(records.map(parseRecord));
     const absNextOffset = win.effFrom + nextOffset;
     const nextCursor = encodeCursor({
       adapter: ADAPTER_NAME,

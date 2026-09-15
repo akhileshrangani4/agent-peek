@@ -1,5 +1,5 @@
 import type {
-  BriefSnapshot, HandoffSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
+  BriefSnapshot, RawMessage, RawOrder, RawSnapshot, RawWindowFrom,
   StructuredSnapshot, SummarySnapshot, ToolCall,
 } from "./types.js";
 import { inferTouchedFiles, inferWritingFiles } from "./coordination.js";
@@ -10,6 +10,29 @@ export interface ToRawOpts {
   around?: number;
   from?: RawWindowFrom;
   order?: RawOrder;
+}
+
+/**
+ * A tool_use starts as "pending" because the record that answers it comes later.
+ * Once the transcript is read, pair each result with its call by id and settle the
+ * call's status, so structured views and the handoff prompt stop reporting every
+ * finished call as pending.
+ */
+export function settleToolStatuses(messages: RawMessage[]): RawMessage[] {
+  const outcome = new Map<string, "completed" | "error">();
+  for (const m of messages) {
+    for (const tc of m.toolCalls ?? []) {
+      if (tc.name === "(result)" && tc.id) outcome.set(tc.id, tc.status === "error" ? "error" : "completed");
+    }
+  }
+  if (!outcome.size) return messages;
+  return messages.map((m) => {
+    if (!m.toolCalls?.some((tc) => tc.name !== "(result)" && tc.id && outcome.has(tc.id))) return m;
+    return {
+      ...m,
+      toolCalls: m.toolCalls.map((tc) => (tc.name !== "(result)" && tc.id && outcome.has(tc.id) ? { ...tc, status: outcome.get(tc.id)! } : tc)),
+    };
+  });
 }
 
 export function toRaw(sessionId: string, messages: RawMessage[], opts: ToRawOpts = {}): RawSnapshot {
@@ -49,7 +72,12 @@ export function toStructured(sessionId: string, messages: RawMessage[], cwd?: st
   let lastAssistantMessage: string | undefined;
   const lastToolCalls: ToolCall[] = [];
   for (const m of messages) {
-    if (m.role === "user" && m.text) lastUserMessage = m.text;
+    // A user-role record is not always the user: harnesses inject notifications, skill
+    // bodies and reminders in that role. Those are never the ask.
+    if (m.role === "user" && m.text && !m.toolCalls?.length) {
+      const human = humanUserText(m.text);
+      if (human) lastUserMessage = human;
+    }
     if (m.role === "assistant" && m.text) lastAssistantMessage = m.text;
     if (m.toolCalls) lastToolCalls.push(...m.toolCalls.filter(isNamedToolCall));
   }
@@ -95,31 +123,6 @@ export function toBrief(sessionId: string, messages: RawMessage[]): BriefSnapsho
   };
 }
 
-export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: string): HandoffSnapshot {
-  const structured = toStructured(sessionId, messages, cwd);
-  const assistantText = messages
-    .filter((message) => message.role === "assistant" && message.text)
-    .map((message) => message.text!);
-  const allText = messages
-    .filter((message) => message.text && message.role !== "system")
-    .map((message) => message.text!);
-
-  return {
-    mode: "handoff",
-    sessionId,
-    messageCount: messages.length,
-    activity: structured.activity,
-    currentTask: structured.currentTask,
-    lastAssistantMessage: structured.lastAssistantMessage,
-    decisions: extractLines(assistantText, /\b(decided|decision|chose|using|implemented|added|changed|fixed|removed)\b/i, 5),
-    openQuestions: extractQuestions(allText, 5),
-    nextActions: extractLines(assistantText, /\b(next|todo|remaining|follow[- ]?up|need to|will)\b/i, 5),
-    touchedFiles: inferTouchedFiles(messages, cwd),
-    pendingTools: toolNames(structured.pendingToolCalls),
-    recentTools: toolNames(structured.lastToolCalls),
-  };
-}
-
 function computePending(messages: RawMessage[]): ToolCall[] {
   const pendingByName: ToolCall[] = [];
   let resultsAfter = 0;
@@ -146,14 +149,48 @@ function computeActivity(messages: RawMessage[], pending: ToolCall[]): "idle" | 
   return "idle";
 }
 
+/**
+ * The task is what the user asked for. The assistant's own "Let me see how..."
+ * lines are steps toward it, and reading them as the task turned every brief,
+ * structured view and handoff Goal into the last thing the agent happened to
+ * be doing. Only when the latest user turn is not actionable ("yes", "go ahead")
+ * does the assistant's stated objective stand in.
+ */
 function inferCurrentTask(messages: RawMessage[], fallback: string | undefined): string | undefined {
+  const asked = objectiveFromUserText(fallback);
+  if (asked && !isAcknowledgement(asked)) return asked;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
     if (message.role !== "assistant" || !message.text) continue;
     const candidate = objectiveFromAssistantText(message.text);
     if (candidate) return candidate;
   }
-  return objectiveFromUserText(fallback);
+  return asked;
+}
+
+/** "yes", "go ahead", "ok do it": the user handed the turn back without restating the task. */
+function isAcknowledgement(line: string): boolean {
+  const flat = line.toLowerCase().replace(/[^a-z ]/g, "").trim();
+  if (!flat) return true;
+  if (flat.split(" ").length > 6) return false;
+  return /^(y|yes|yep|yeah|ya|ok|okay|sure|go|go ahead|do it|proceed|continue|please|thanks|thank you|sounds good|lgtm|approved|correct|right|fine|yes please|ok go ahead|go for it)( please| do it| go ahead| then| proceed| continue| thanks)*$/.test(flat);
+}
+
+/** Harness wrappers a user turn can carry that were never the user's words. */
+function stripHarnessWrappers(text: string): string {
+  return text
+    .replace(/<(local-command-[a-z-]+|system-reminder|task-notification|command-name|command-message|command-args|ide_[a-z_]+)>[\s\S]*?<\/\1>/g, "")
+    .replace(/<\/?(local-command-[a-z-]+|system-reminder|task-notification|command-[a-z]+)>/g, "")
+    .trim();
+}
+
+/** The user's own words in a user-role record, or undefined when the record is all harness. */
+export function humanUserText(text: string): string | undefined {
+  const stripped = stripHarnessWrappers(text);
+  if (!stripped) return undefined;
+  // Whole-record injections: a skill body loaded into the user role, a hook's output.
+  if (/^(Base directory for this skill|\[SYSTEM NOTIFICATION|SessionStart:|<command-name>|Launching skill:)/.test(stripped)) return undefined;
+  return stripped;
 }
 
 function objectiveFromAssistantText(text: string): string | undefined {
@@ -163,21 +200,38 @@ function objectiveFromAssistantText(text: string): string | undefined {
   const objective = lines.find((line) => (
     isObjectiveLine(line) && !isReviewOrStatusLine(line)
   ));
-  return objective ? oneLine(cleanObjectiveLine(objective)).slice(0, 240) : undefined;
+  return objective ? flat(cleanObjectiveLine(objective)) : undefined;
+}
+
+// The task is a field, not a cell: renderers shorten it for a terminal, a JSON
+// consumer gets the sentence. A hard cap only guards against a pasted document.
+const TASK_MAX = 1000;
+function flat(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, TASK_MAX);
 }
 
 function objectiveFromUserText(text: string | undefined): string | undefined {
   if (!text) return undefined;
+  text = humanUserText(text) ?? "";
+  if (!text) return undefined;
   const lines = candidateLines(text);
+  // A long briefing (a subagent's prompt, a pasted spec) states its ask up front; a
+  // verb-bearing sentence from its middle is an instruction to the agent, not the task.
+  if (text.split(/\r?\n/).filter((line) => line.trim()).length > 4) {
+    const first = lines.find((line) => !isSystemPromptLine(line));
+    return first ? flat(cleanObjectiveLine(first)) : undefined;
+  }
   const reviewLine = lines.find((line) => /\breview\b.+\b(diff|changes|code|project|uncommitted)\b/i.test(line));
-  if (reviewLine) return oneLine(cleanObjectiveLine(reviewLine)).slice(0, 240);
+  if (reviewLine) return flat(cleanObjectiveLine(reviewLine));
   const actionLine = lines.find((line) => (
     !isSystemPromptLine(line) && !isReviewOrStatusLine(line) && /\b(add|build|fix|implement|update|review|inspect|summarize|test|debug|refactor)\b/i.test(line)
   ));
-  if (actionLine) return oneLine(cleanObjectiveLine(actionLine)).slice(0, 240);
-  if (text.split(/\r?\n/).filter((line) => line.trim()).length > 2 || text.length > 180) return undefined;
+  if (actionLine) return flat(cleanObjectiveLine(actionLine));
+  // No action verb: the user's first usable sentence is still their ask ("ci is failing
+  // on this"). Long pasted blocks are not; their first line is rarely the request.
+  if (text.split(/\r?\n/).filter((line) => line.trim()).length > 6 || text.length > 600) return undefined;
   const simpleLine = lines.find((line) => !isSystemPromptLine(line) && !isReviewOrStatusLine(line));
-  return simpleLine ? oneLine(cleanObjectiveLine(simpleLine)).slice(0, 240) : undefined;
+  return simpleLine ? flat(cleanObjectiveLine(simpleLine)) : undefined;
 }
 
 function candidateLines(text: string): string[] {
@@ -361,36 +415,7 @@ function renderSummaryPrompt(messages: RawMessage[]): string {
   return lines.join("\n");
 }
 
-function extractLines(values: string[], pattern: RegExp, max: number): string[] {
-  const lines: string[] = [];
-  for (const value of values) {
-    for (const line of splitCandidateLines(value)) {
-      if (pattern.test(line)) lines.push(oneLine(line, 220));
-    }
-  }
-  return uniqueStrings(lines).slice(-max);
-}
-
-function extractQuestions(values: string[], max: number): string[] {
-  const questions: string[] = [];
-  for (const value of values) {
-    for (const line of splitCandidateLines(value)) {
-      if (line.endsWith("?") || /\b(blocked|unclear|need input|open question)\b/i.test(line)) {
-        questions.push(oneLine(line, 220));
-      }
-    }
-  }
-  return uniqueStrings(questions).slice(-max);
-}
-
-function splitCandidateLines(value: string): string[] {
-  return value
-    .split(/\n|(?<=[.!?])\s+/)
-    .map((line) => line.replace(/^[-*]\s+/, "").trim())
-    .filter((line) => line.length > 0);
-}
-
-function toolNames(tools: ToolCall[]): string[] {
+export function toolNames(tools: ToolCall[]): string[] {
   return [...new Set(tools.map((tool) => tool.name))];
 }
 
@@ -398,11 +423,11 @@ function isNamedToolCall(tool: ToolCall): boolean {
   return tool.name !== "(result)";
 }
 
-function uniqueStrings(values: string[]): string[] {
+export function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function oneLine(value: string, max = 180): string {
+export function oneLine(value: string, max = 180): string {
   const flat = value.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}...` : flat;
 }

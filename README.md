@@ -212,13 +212,49 @@ peek at researcher-codex --mode structured
 | `raw` | Reading transcript messages directly. Best for debugging or inspecting exactly what happened. | No |
 | `structured` | Stable fields for agents: current task, activity, last messages, pending tools, recent tools. | No |
 | `brief` | A compact local summary built from structured fields. Good default for humans and scripts that do not need raw logs. | No |
-| `handoff` | Local structured handoff: decisions, open questions, next actions, touched files, and tools. | No |
+| `handoff` | A document a new session can start from: goal, state, decisions, files, open questions, next actions, gotchas, environment. Written by a local agent CLI on your existing login. | No |
 | `summary` | Optional sentence-style summary. De-emphasized for agent loops; prefer `brief` unless you explicitly need prose. Can use Anthropic when configured. | No |
 
 ```bash
 peek at researcher-codex --mode brief
-peek at researcher-codex --mode handoff
+peek at researcher-codex --mode handoff --out handoff.md
 ```
+
+### Handing a session off
+
+When a session is running out of context, or you want to move the work to a
+different agent, `--mode handoff` writes the document the next session needs so
+it does not have to re-explore:
+
+```bash
+peek at researcher-claude --mode handoff --out handoff.md          # then: "read handoff.md and continue"
+peek at researcher-claude --mode handoff --for chatgpt             # paste into a chat with no filesystem
+peek at researcher-claude --mode handoff --for codex --out h.md    # switch harness, keep the state
+```
+
+No API key is involved. peek compresses the whole transcript (user and assistant
+text in full, tool calls collapsed to paths and arguments, results truncated with
+error lines kept) and hands it to whichever agent CLI is installed, headless, on
+that CLI's own login: the session's own harness first (`claude` for a Claude Code
+session, `codex` for Codex), then any other. Hooks, MCP servers and session
+persistence are turned off for that child, so it neither recurses into peek nor
+leaves a transcript behind for peek to list. Override the command with
+`AGENT_PEEK_HANDOFF_RUNNER="<bin> <args>"`; it receives the prompt on stdin and
+must print the document. `--local` skips the model and prints the regex-extracted
+fallback, which is also what you get, with a header saying so, when no agent CLI
+is found. Only `claude` has been verified headless on this machine; `codex`,
+`gemini`, `opencode` and `copilot` use their documented non-interactive forms.
+
+`--for` sets who the document is written for. It changes the framing, not the
+facts: CLI targets (`claude-code`, `codex`, `gemini`, `copilot`, `opencode`,
+`generic`) get paths and commands to verify claims; chat targets (`chatgpt`,
+`claude-chat`) have no filesystem, so the relevant code excerpts and error output
+are inlined from the transcript.
+
+Over MCP the caller is already a model, so `peek_session` with `mode: "handoff"`
+does not spawn anything: the result's `material` field is the prompt plus the
+compressed transcript, and the calling agent writes the document itself. That is
+how a session writes its own handoff before its context runs out.
 
 Raw mode has pagination controls:
 
@@ -393,7 +429,7 @@ Useful details:
 - `peek list --files` gives the same file-context view as part of a regular session list.
 - `peek check <file>` exits `0` when clear and `1` on conflict.
 - `peek check --files-from changed-files.txt` bulk-checks a planned edit.
-- `peek check <file> --as <owner>` ignores your own claims in claim-then-check loops.
+- `peek check <file>` ignores your own claims by default; `--include-self` shows them, `--as <owner>` covers a claim made under another name, and `--ignore-self` also drops your own session's writes.
 - `peek claim <file> --ttl 2m` broadcasts temporary write intent (2m is the default TTL if you omit `--ttl`).
 - `peek release <claim-id> --claim-id --files-from done-files.txt` partially releases a claim.
 - `peek coord . --since-file .peek-cursor --json --fields currentTask,intent,activeWritingFiles` is the polling-friendly JSON path.
@@ -425,7 +461,7 @@ Exposed resources:
 - `agent-peek://sessions`: active sessions as JSON.
 - `agent-peek://feed`: this project's context feed, ranked and packed to a token budget.
 - `agent-peek://session/{selector}/brief`: brief snapshot for one session.
-- `agent-peek://session/{selector}/handoff`: handoff snapshot for one session.
+- `agent-peek://session/{selector}/handoff`: handoff material for one session (the caller writes the document; see "Handing a session off").
 - `agent-peek://session/{selector}/tail`: raw tail for one session.
 
 The `agent-peek://feed` resource always serves the feed for the MCP server's
@@ -436,7 +472,7 @@ whose feed you want (or configure your client to set its `cwd`), or use the
 Exposed prompts:
 
 - `coordinate-agents`: check nearby agents before continuing work.
-- `session-handoff`: prepare a concise handoff from one session.
+- `session-handoff`: write a handoff document for one session from its `material`.
 - `avoid-overlap`: inspect overlap hints before editing files.
 
 It is a local stdio server. Different clients use different config shapes.

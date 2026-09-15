@@ -20,9 +20,64 @@ function runCli(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ code: nu
   });
 }
 
+function runCliWithStdin(args: string[], stdin: string, env: NodeJS.ProcessEnv = {}): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((res) => {
+    const p = spawn("node", [BIN, ...args], { env: { ...process.env, ...env } });
+    let out = "", err = "";
+    p.stdout.on("data", (d) => { out += d.toString(); });
+    p.stderr.on("data", (d) => { err += d.toString(); });
+    p.on("close", (code) => res({ code: code ?? 0, stdout: out, stderr: err }));
+    p.stdin.end(stdin);
+  });
+}
+
 beforeAll(() => assertDistFresh());
 
 describe("CLI integration", () => {
+  it("bare peek prints the overview and exits 0", async () => {
+    const r = await runCli([]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/^agent-peek/m);
+    expect(r.stdout).toMatch(/Exit codes:/);
+    expect(r.stdout).toMatch(/agent-peek-mcp/);
+    expect(r.stderr).toBe("");
+  });
+
+  it("at <adapter-name> explains that adapters are not sessions", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const r = await runCli(["at", "claude"], { HOME: home });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/`claude-code` is an adapter \(agent kind\), not a session/);
+    expect(r.stderr).toMatch(/peek list --adapter claude-code/);
+  });
+
+  it("errors under --json are a JSON record on stdout with the slug line on stderr", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const r = await runCli(["at", "nosuchsession", "--json"], { HOME: home });
+    expect(r.code).toBe(2);
+    const record = JSON.parse(r.stdout);
+    expect(record.error).toBe("session_not_found");
+    expect(record.exit).toBe(2);
+    expect(record.next.length).toBeGreaterThan(0);
+    expect(r.stderr.trim()).toBe("error: session_not_found · exit 2");
+  });
+
+  it("a read-only home is an environment error (exit 6), and doctor says so", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-ro-"));
+    await writeFile(join(home, ".agent-peek"), "a file where the state dir should be", "utf8");
+    const r = await runCli(["list", "--json"], { HOME: home });
+    expect(r.code).toBe(6);
+    const record = JSON.parse(r.stdout);
+    expect(record.error).toBe("state_unwritable");
+    expect(record.message).toMatch(/cannot write its state at .*\.agent-peek/);
+    expect(record.hint).toMatch(/read-only sandbox/);
+    const doctor = await runCli(["doctor", "--json"], { HOME: home });
+    expect(JSON.parse(doctor.stdout).state).toMatchObject({ writable: false });
+    const usage = await runCli(["usage", "--json"], { HOME: home });
+    expect(usage.code).toBe(6);
+    expect(JSON.parse(usage.stdout).error).toBe("state_unwritable");
+  });
+
   it("--help prints usage", async () => {
     const r = await runCli(["--help"]);
     expect(r.code).toBe(0);
@@ -153,6 +208,27 @@ describe("CLI integration", () => {
     expect(byStatus.stdout).toMatch(/old-claude/);
   });
 
+  it("list prints a header row and names the flag that reveals cut rows", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-many");
+    await mkdir(projDir, { recursive: true });
+    for (let i = 0; i < 3; i++) {
+      await writeFile(join(projDir, `s${i}.jsonl`), `{"type":"user","sessionId":"s${i}","cwd":"/tmp/many/${i}","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"hi"}}\n`, "utf8");
+    }
+    const r = await runCli(["list", "--limit", "2", "--width", "100"], { HOME: home });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/name\s+adapter\s+updated\s+cwd/);
+    // The selector column is never cut; a long name pushes the path column instead.
+    const longDir = join(home, ".claude", "projects", "-tmp-a-deliberately-very-long-session-directory-name");
+    await mkdir(longDir, { recursive: true });
+    await writeFile(join(longDir, "long.jsonl"), `{"type":"user","sessionId":"long","cwd":"/tmp/a-deliberately-very-long-session-directory-name","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"hi"}}\n`, "utf8");
+    const wide = await runCli(["list", "--width", "80"], { HOME: home });
+    expect(wide.stdout).toMatch(/a-deliberately-very-long-session-directory-name-claude\s/);
+    expect(wide.stdout).not.toMatch(/session-directory-name-cl\S*…/);
+    expect(r.stdout).toMatch(/1 more \w+ · peek list --limit 3/);
+    expect(r.stdout).not.toMatch(/more \w+ · peek list --all/);
+  });
+
   it("list --json includes displayName", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const projDir = join(home, ".claude", "projects", "-tmp-json");
@@ -227,10 +303,35 @@ describe("CLI integration", () => {
     expect(brief.code).toBe(0);
     expect(brief.stdout).toMatch(/Task: third/);
 
-    const handoff = await runCli(["at", "page-claude", "--mode", "handoff"], { HOME: home });
-    expect(handoff.code).toBe(0);
-    expect(handoff.stdout).toMatch(/session: claude-code:page/);
-    expect(handoff.stdout).toMatch(/activity:/);
+    // --local skips the agent CLI: tests must never spawn a real harness.
+    const local = await runCli(["at", "page-claude", "--mode", "handoff", "--local"], { HOME: home });
+    expect(local.code).toBe(0);
+    expect(local.stdout).toMatch(/^> regex handoff \(--local\)/m);
+    expect(local.stdout).not.toMatch(/Install claude/);
+    expect(local.stdout).toMatch(/^# Handoff$/m);
+    expect(local.stdout).toMatch(/## Next actions/);
+    expect(local.stdout).not.toMatch(/nextCursor/); // stdout is the document; the cursor goes to stderr
+    expect(local.stderr).toMatch(/nextCursor:/);
+    expect(local.stderr).toMatch(/local fallback; for generic; 3 messages/);
+
+    // A runner override stands in for the harness. `cat` echoes the prompt back as the document,
+    // which also proves the prompt carried the transcript and the target framing.
+    const outFile = join(home, "handoff.md");
+    const viaRunner = await runCli(
+      ["at", "page-claude", "--mode", "handoff", "--for", "chatgpt", "--out", outFile],
+      { HOME: home, AGENT_PEEK_HANDOFF_RUNNER: "cat" },
+    );
+    expect(viaRunner.code).toBe(0);
+    expect(viaRunner.stdout).toMatch(/\[user\] first/);
+    expect(viaRunner.stdout).toMatch(/\[assistant\] second/);
+    expect(viaRunner.stdout).toMatch(/NO filesystem/);
+    expect(viaRunner.stderr).toMatch(/written by cat; for chatgpt/);
+    expect(viaRunner.stderr).toMatch(/wrote .*handoff\.md/);
+    expect((await readFile(outFile, "utf8")).trim()).toBe(viaRunner.stdout.trim());
+
+    const badTarget = await runCli(["at", "page-claude", "--mode", "handoff", "--for", "nope", "--local"], { HOME: home });
+    expect(badTarget.code).toBe(5);
+    expect(badTarget.stderr).toMatch(/invalid_handoff_target/);
 
     const first = await runCli(["at", "page-claude", "--first", "1"], { HOME: home });
     expect(first.code).toBe(0);
@@ -241,6 +342,107 @@ describe("CLI integration", () => {
     const newest = await runCli(["at", "page-claude", "--last", "2", "--reverse"], { HOME: home });
     expect(newest.code).toBe(0);
     expect(newest.stdout.indexOf("third")).toBeLessThan(newest.stdout.indexOf("second"));
+
+    // --since keeps absolute numbering: message 2 of 3 stays "2", not "1 of 2".
+    const lines = (await readFile(tx, "utf8")).split("\n");
+    const afterFirst = Buffer.from(JSON.stringify({ adapter: "claude-code", byteOffset: Buffer.byteLength(lines[0]! + "\n"), msgIndex: 1 }), "utf8").toString("base64url");
+    const since = await runCli(["at", "page-claude", "--since", afterFirst], { HOME: home });
+    expect(since.code).toBe(0);
+    expect(since.stdout).toMatch(/messages: 2-3 of 3/);
+    expect(since.stdout).not.toMatch(/^\s+first$/m);
+    const sinceJson = JSON.parse((await runCli(["at", "page-claude", "--since", afterFirst, "--json"], { HOME: home })).stdout);
+    expect(sinceJson.snapshot.window).toEqual({ start: 1, end: 3, order: "oldest-first" });
+    expect(sinceJson.snapshot.totalMessageCount).toBe(3);
+  });
+
+  it("at says when a raw window is all tool-only messages instead of printing nothing", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-tools");
+    await mkdir(projDir, { recursive: true });
+    await writeFile(join(projDir, "tools.jsonl"), [
+      `{"type":"user","sessionId":"tools","cwd":"/tmp/tools","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"read it"}}`,
+      `{"type":"assistant","sessionId":"tools","cwd":"/tmp/tools","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/tools/a.ts"}}]}}`,
+      `{"type":"assistant","sessionId":"tools","cwd":"/tmp/tools","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/tools/b.ts"}}]}}`,
+    ].join("\n") + "\n", "utf8");
+
+    // --last 2 means two visible rows: the window widens past the tool-only tail.
+    const widened = await runCli(["at", "tools-claude", "--last", "2"], { HOME: home });
+    expect(widened.code).toBe(0);
+    expect(widened.stdout).toMatch(/messages: 1-3 of 3/);
+    expect(widened.stdout).toMatch(/read it/);
+    expect(widened.stdout).toMatch(/2 tool-only messages hidden/);
+    // With --tools the window is exactly what was asked for.
+    const exact = await runCli(["at", "tools-claude", "--last", "2", "--tools"], { HOME: home });
+    expect(exact.stdout).toMatch(/messages: 2-3 of 3/);
+
+    const shown = await runCli(["at", "tools-claude", "--last", "2", "--tools"], { HOME: home });
+    expect(shown.stdout).toMatch(/tool=Read file_path=\/tmp\/tools\/a\.ts/);
+    expect(shown.stdout).not.toMatch(/hidden|0 shown/);
+
+    const mixed = await runCli(["at", "tools-claude", "--last", "3"], { HOME: home });
+    expect(mixed.stdout).toMatch(/read it/);
+    expect(mixed.stdout).toMatch(/2 tool-only messages hidden/);
+
+    // A cursor at the end reads as an explicit empty result, not an inverted range.
+    const first = await runCli(["at", "tools-claude", "--json"], { HOME: home });
+    const cursor = JSON.parse(first.stdout).nextCursor;
+    const empty = await runCli(["at", "tools-claude", "--since", cursor], { HOME: home });
+    expect(empty.code).toBe(0);
+    expect(empty.stdout).toMatch(/^No new messages; cursor is at message 3 of 3\./m);
+    expect(empty.stdout).not.toMatch(/messages: 4-3/);
+
+    // "." resolves to this directory's session, and an unknown --limit is refused.
+    const dot = await runCli(["at", ".", "--mode", "brief"], { HOME: home, PWD: "/tmp/tools" });
+    expect(dot.code).toBe(2); // the fixture cwd does not exist on disk, so "." stays literal here
+    const badLimit = await runCli(["list", "--limit", "abc"], { HOME: home });
+    expect(badLimit.code).toBe(5);
+    expect(badLimit.stderr).toMatch(/--limit must be a positive integer, got abc/);
+  });
+
+  it("at . resolves the session whose cwd is the current directory", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-cwd");
+    await mkdir(projDir, { recursive: true });
+    const cwd = process.cwd();
+    await writeFile(join(projDir, "here.jsonl"), `{"type":"user","sessionId":"here","cwd":${JSON.stringify(cwd)},"timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"look here"}}\n`, "utf8");
+    const r = await runCli(["at", ".", "--mode", "brief"], { HOME: home });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/Task: look here/);
+  });
+
+  it("claiming from a directory shared by two live sessions does not impersonate either", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-shared");
+    await mkdir(projDir, { recursive: true });
+    const cwd = process.cwd();
+    for (const id of ["agent-a", "agent-b"]) {
+      await writeFile(join(projDir, `${id}.jsonl`), `{"type":"user","sessionId":"${id}","cwd":${JSON.stringify(cwd)},"timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"working"}}\n`, "utf8");
+    }
+    const r = await runCli(["claim", "shared-probe.ts", "--json"], { HOME: home });
+    expect(r.code).toBe(0);
+    const claim = JSON.parse(r.stdout);
+    expect(claim.owner).not.toMatch(/^claude-code:agent-/);
+    expect(claim.identityNote).toMatch(/could not tell which of 2 live sessions in this directory is you/);
+    expect(r.stderr).toMatch(/identity: could not tell/);
+    await runCli(["release", "shared-probe.ts"], { HOME: home });
+  });
+
+  it("ambiguous selectors name the candidate sessions, and bare claim/release point at their own help", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-amb");
+    await mkdir(projDir, { recursive: true });
+    for (const id of ["one", "two"]) {
+      await writeFile(join(projDir, `${id}.jsonl`), `{"type":"user","sessionId":"${id}","cwd":"/tmp/amb","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"x"}}\n`, "utf8");
+    }
+    const amb = await runCli(["at", "/tmp/amb"], { HOME: home });
+    expect(amb.code).toBe(3);
+    expect(amb.stderr).toMatch(/claude-code:one \(\S+\)/);
+    const bare = await runCli(["claim"], { HOME: home });
+    expect(bare.code).toBe(5);
+    expect(bare.stderr).toMatch(/peek claim --help/);
+    const gone = await runCli(["release", "00000000-0000-0000-0000-000000000000", "--claim-id"], { HOME: home });
+    expect(gone.code).toBe(0);
+    expect(gone.stdout).toMatch(/released 0 claims: nothing active matched/);
   });
 
   it("coord summarizes sessions for a cwd and returns a reusable cursor", async () => {
@@ -260,7 +462,7 @@ describe("CLI integration", () => {
     const human = await runCli(["coord", "/tmp/coord"], { HOME: home });
     expect(human.code).toBe(0);
     expect(human.stdout).toMatch(/coordination: 1\/2 sessions shown, first snapshot, 1 new/);
-    expect(human.stdout).toMatch(/hidden low-signal: 1 sessions/);
+    expect(human.stdout).toMatch(/hidden low-signal: 1 session with no task or files \(--all shows them/);
     expect(human.stdout).toMatch(/sessions:/);
     expect(human.stdout).toMatch(/coord-claude/);
     expect(human.stdout).not.toMatch(/noise-claude/);
@@ -361,10 +563,53 @@ describe("CLI integration", () => {
     expect(ok.code).toBe(0);
     expect(ok.stdout).toMatch(/ok: no active writing conflict/);
 
+    // An agent checking a file it is itself editing is not in conflict with anyone.
+    const self = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "check" });
+    expect(self.code).toBe(0);
+    // A partial name gets a suggestion.
+    const near = await runCli(["at", "chec"], { HOME: home });
+    expect(near.code).toBe(2);
+    expect(near.stderr).toMatch(/Did you mean: check-claude/);
+    const named = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-session", "check-claude"], { HOME: home });
+    expect(named.code).toBe(0);
+    // Without identifying itself, the same call still reports the conflict.
+    const other = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/check", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "someone-else" });
+    expect(other.code).toBe(1);
+
+    // `--files-from -` with a space, as the help text shows it, reads stdin.
+    const viaStdin = await runCliWithStdin(["check", "--files-from", "-", "--cwd", "/tmp/check"], "src/core/engine.ts\nREADME.md\n", { HOME: home });
+    expect(viaStdin.code).toBe(1);
+    expect(viaStdin.stdout).toMatch(/conflict: 1 active file conflict/);
+    expect(viaStdin.stdout).toMatch(/src\/core\/engine.ts/);
+    // A space-separated line is several files, and paths that are not on disk are named.
+    const spaced = await runCliWithStdin(["check", "--files-from", "-", "--cwd", "/tmp/check", "--json"], "src/core/engine.ts README.md\n", { HOME: home });
+    expect(spaced.code).toBe(1);
+    expect(JSON.parse(spaced.stdout).files.map((f: { file: string }) => f.file)).toEqual(["/tmp/check/README.md", "/tmp/check/src/core/engine.ts"]);
+    expect(spaced.stderr).toMatch(/warning: 2 paths are not on disk/);
+
+    // A subagent sidecar beside the parent: hidden by --files too, unless asked for.
+    const subDir = join(projDir, "check", "subagents");
+    await mkdir(subDir, { recursive: true });
+    // The subagent must be writing something, or coord hides it as low-signal regardless.
+    await writeFile(join(subDir, "agent-sub1.jsonl"), [
+      `{"type":"user","sessionId":"check","agentId":"sub1","isSidechain":true,"cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"edit the sub file"}}`,
+      `{"type":"assistant","sessionId":"check","agentId":"sub1","isSidechain":true,"cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/check/src/sub.ts"}}]}}`,
+    ].join("\n") + "\n", "utf8");
+
+    // A session with no task and no files yet is still a row here, as it is in plain list.
+    await writeFile(join(projDir, "quiet.jsonl"), `{"type":"user","sessionId":"quiet","cwd":"/tmp/check","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"hi"}}\n`, "utf8");
+
     const files = await runCli(["list", "--files", "--adapter", "claude-code"], { HOME: home });
     expect(files.code).toBe(0);
     expect(files.stdout).toMatch(/FILES/);
+    expect(files.stdout).toMatch(/check-claude-2/); // the quiet session, named from its cwd
+    expect(files.stdout).not.toMatch(/ {20,}$/m);
     expect(files.stdout).toMatch(/writing: .*src\/core\/engine.ts/);
+    expect(files.stdout).not.toMatch(/-sub\b/);
+    const filesJson = JSON.parse((await runCli(["list", "--files", "--adapter", "claude-code", "--json"], { HOME: home })).stdout);
+    expect(filesJson.every((s: { parentSessionId?: string }) => s.parentSessionId === undefined)).toBe(true);
+    const withSubs = JSON.parse((await runCli(["list", "--files", "--adapter", "claude-code", "--json", "--include-subagents"], { HOME: home })).stdout);
+    expect(withSubs.some((s: { parentSessionId?: string }) => s.parentSessionId === "check")).toBe(true);
   });
 
   it("claim adds temporary file ownership that check and coord can see", async () => {
@@ -384,7 +629,9 @@ describe("CLI integration", () => {
     expect(claimed.owner).toBe("tester");
     expect(claimed.files).toEqual(["/tmp/claim/README.md", "/tmp/claim/src/core/engine.ts"]);
 
-    const conflict = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    // The claim was made from this same directory by this same anonymous identity, so a
+    // default check treats it as ours; --include-self shows it as another agent would see it.
+    const conflict = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json", "--include-self"], { HOME: home });
     expect(conflict.code).toBe(1);
     const check = JSON.parse(conflict.stdout);
     expect(check.ok).toBe(false);
@@ -397,7 +644,7 @@ describe("CLI integration", () => {
 
     const filesList = join(home, "files.txt");
     await writeFile(filesList, "README.md\nsrc/other.ts\n", "utf8");
-    const bulk = await runCli(["check", "--files-from", filesList, "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    const bulk = await runCli(["check", "--files-from", filesList, "--cwd", "/tmp/claim", "--json", "--include-self"], { HOME: home });
     expect(bulk.code).toBe(1);
     expect(JSON.parse(bulk.stdout).conflictCount).toBe(1);
 
@@ -412,7 +659,7 @@ describe("CLI integration", () => {
     const partial = JSON.parse(partialRelease.stdout);
     expect(partial.files).toEqual(["/tmp/claim/README.md"]);
 
-    const stillClaimed = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json"], { HOME: home });
+    const stillClaimed = await runCli(["check", "src/core/engine.ts", "--cwd", "/tmp/claim", "--json", "--include-self"], { HOME: home });
     expect(stillClaimed.code).toBe(1);
     expect(JSON.parse(stillClaimed.stdout).conflictCount).toBe(1);
 
@@ -432,6 +679,37 @@ describe("CLI integration", () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["claim", "test-file.ts", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(r.code).toBe(0);
+    // Your own claim is not a conflict: check skips it by default, --include-self shows it,
+    // and a repeat claim of the same files renews the first record instead of stacking.
+    const own = await runCli(["check", "test-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(own.code).toBe(0);
+    const shown = await runCli(["check", "test-file.ts", "--include-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(shown.code).toBe(1);
+    expect(shown.stdout).toMatch(/conflict: 1 active file conflict/);
+    expect(shown.stdout).toMatch(/\(yours\? --as claude-code:sess-42\)/);
+    const again = await runCli(["claim", "test-file.ts", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(JSON.parse(again.stdout).id).toBe(JSON.parse(r.stdout).id);
+    const still = await runCli(["check", "test-file.ts", "--include-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(still.stdout).toMatch(/conflict: 1 active file conflict/);
+    // Someone else sees it either way.
+    const other = await runCli(["check", "test-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-99" });
+    expect(other.code).toBe(1);
+    // A claim given a display owner with --as still belongs to the session that made it.
+    const named = await runCli(["claim", "named-file.ts", "--as", "codex-review", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(JSON.parse(named.stdout)).toMatchObject({ owner: "codex-review", creator: "claude-code:sess-42" });
+    const namedSelf = await runCli(["check", "named-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(namedSelf.code).toBe(0);
+    const namedOther = await runCli(["check", "named-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-99" });
+    expect(namedOther.code).toBe(1);
+    expect(namedOther.stdout).toMatch(/made by claude-code:sess-42/);
+    // Untracked agents are identified by user, host and directory: no pid, so a later
+    // process in the same directory is still "you". peek says it fell back.
+    const anon = await runCli(["claim", "other-file.ts"], { HOME: home });
+    expect(anon.code).toBe(0);
+    expect(anon.stdout).toMatch(/owner: \S+@\S+:\//);
+    expect(anon.stderr).toMatch(/identity: no tracked session found for this directory/);
+    const anonSelf = await runCli(["check", "other-file.ts"], { HOME: home });
+    expect(anonSelf.code).toBe(0);
     const claim = JSON.parse(r.stdout);
     expect(claim.owner).toBe("claude-code:sess-42");
   });
@@ -460,7 +738,7 @@ describe("skills --json segmentation", () => {
     // safe to act on: the human report says a skill is archivable and the JSON did not
     // say which bucket anything was in, so verifying "no archivable row lacks a mutable
     // installation" from the outside was impossible.
-    const r = await runCli(["skills", "--json"]);
+    const r = await runCli(["skills", "--json", "--details"]);
     expect(r.code).toBe(0);
     const doc = JSON.parse(r.stdout) as {
       skills: { segment?: string; installations: { mutable: boolean }[] }[];
