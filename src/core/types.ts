@@ -32,7 +32,11 @@ export interface SessionEntry {
 export interface FileClaim {
   id: string;
   files: string[];
+  /** The name other agents see; --as sets it freely. */
   owner: string;
+  /** The session identity peek resolved for whoever made the claim, so --ignore-self
+   * still matches a claim that was given a display owner with --as. */
+  creator?: string;
   cwd?: string;
   createdAt: string;
   expiresAt: string;
@@ -167,6 +171,8 @@ export interface CoordinationSession {
    * cwd, so without it the two render identically.
    */
   parentSessionId?: string;
+  /** For claim rows: the resolved identity of the claimer, when it differs from the owner. */
+  creator?: string;
   adapter: string;
   status: SessionStatus;
   activity?: Activity;

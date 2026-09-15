@@ -572,9 +572,19 @@ describe("CLI integration", () => {
     const shown = await runCli(["check", "test-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(shown.code).toBe(1);
     expect(shown.stdout).toMatch(/\(yours\? --ignore-self, or --as claude-code:sess-42\)/);
-    // Anonymous owners are keyed on the parent shell, so the same shell matches itself too.
-    const anon = await runCli(["claim", "other-file.ts", "--json"], { HOME: home });
+    // A claim given a display owner with --as still belongs to the session that made it.
+    const named = await runCli(["claim", "named-file.ts", "--as", "codex-review", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(JSON.parse(named.stdout)).toMatchObject({ owner: "codex-review", creator: "claude-code:sess-42" });
+    const namedSelf = await runCli(["check", "named-file.ts", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(namedSelf.code).toBe(0);
+    const namedOther = await runCli(["check", "named-file.ts", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-99" });
+    expect(namedOther.code).toBe(1);
+    expect(namedOther.stdout).toMatch(/made by claude-code:sess-42/);
+    // Untracked agents are identified by user, host and directory: no pid, so a later
+    // process in the same directory is still "you".
+    const anon = await runCli(["claim", "other-file.ts"], { HOME: home });
     expect(anon.code).toBe(0);
+    expect(anon.stdout).toMatch(/owner: \S+@\S+:\//);
     const anonSelf = await runCli(["check", "other-file.ts", "--ignore-self"], { HOME: home });
     expect(anonSelf.code).toBe(0);
     const claim = JSON.parse(r.stdout);

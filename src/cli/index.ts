@@ -6,6 +6,7 @@ import { homedir, hostname, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createEngine, VERSION } from "../index.js";
+import type { Engine } from "../core/engine.js";
 import { ClaimsStore } from "../core/claims.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError,
@@ -178,15 +179,15 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--cwd <path>", "Working directory that relative file paths resolve from. Defaults to current directory.")
     .option("--adapter <name>", "Scan only one adapter")
     .option("--as <owner>", "Ignore active claims owned by this agent")
-    .option("--ignore-self", "Ignore your own claims and your own session's writes (identified by CLAUDE_SESSION_ID or cwd)")
+    .option("--ignore-self", "Ignore your own claims and your own session's writes. You are CLAUDE_SESSION_ID when set, else the session whose cwd is this directory")
     .option("--ignore-session <name|id>", "Ignore writes from this session, for callers that know their own name")
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--json", "Output machine-readable check result")
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
-      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? await defaultClaimOwner() : undefined;
       const engine = await createEngine({ withExternal: true });
+      const ignoredOwner = opts.as ? String(opts.as) : opts.ignoreSelf ? await defaultClaimOwner(engine, cwd) : undefined;
       const digest = await engine.coordinate({
         cwd,
         adapter: opts.adapter,
@@ -216,7 +217,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         console.log(`conflict: ${conflictCount} active file conflict${conflictCount === 1 ? "" : "s"}`);
         for (const item of files) {
           for (const conflict of item.conflicts) {
-            const selfHint = conflict.adapter === "claim" ? ` (yours? --ignore-self, or --as ${conflict.displayName.replace(/^claim-/, "")})` : "";
+            const selfHint = conflict.adapter === "claim" ? ` (yours? --ignore-self, or --as ${conflict.displayName.replace(/^claim-/, "")}${conflict.creator ? `; made by ${conflict.creator}` : ""})` : "";
             console.log(indent(`${formatPath(item.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}${selfHint}`));
             if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
           }
@@ -240,10 +241,12 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
       const claims = new ClaimsStore();
+      const self = await defaultClaimOwner(await createEngine({ withExternal: true }), cwd);
       const claim = await claims.claim({
         files: targets,
         cwd,
-        owner: opts.as ? String(opts.as) : await defaultClaimOwner(),
+        owner: opts.as ? String(opts.as) : self,
+        creator: self,
         ttlMs: parseDurationMs(opts.ttl, "--ttl"),
       });
       if (opts.json) {
@@ -252,6 +255,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       }
       console.log(`claimed ${claim.files.length} file${claim.files.length === 1 ? "" : "s"} until ${claim.expiresAt}`);
       console.log(indent(`id: ${claim.id}`));
+      console.log(indent(`owner: ${claim.owner}${claim.creator ? ` (you: ${claim.creator})` : ""}`));
       for (const claimedFile of claim.files) console.log(indent(formatPath(claimedFile)));
     });
 
@@ -1146,6 +1150,7 @@ function activeFileConflicts(
 ): {
   id: string;
   displayName: string;
+  creator?: string;
   adapter: string;
   status: string;
   currentTask?: string;
@@ -1153,12 +1158,14 @@ function activeFileConflicts(
 }[] {
   return digest.sessions
     .filter((session) => session.activeWritingFiles.includes(target))
-    .filter((session) => !ignoredOwner || session.adapter !== "claim" || session.displayName !== `claim-${ignoredOwner}`)
+    .filter((session) => !ignoredOwner || session.adapter !== "claim"
+      || (session.displayName !== `claim-${ignoredOwner}` && session.creator !== ignoredOwner))
     // A subagent's writes count as its parent's: the parent asked for them.
     .filter((session) => !isIgnoredSession(session, ignoredSessions))
     .map((session) => ({
       id: session.id,
       displayName: session.displayName,
+      ...(session.creator ? { creator: session.creator } : {}),
       adapter: session.adapter,
       status: session.status,
       currentTask: session.currentTask,
@@ -1526,13 +1533,17 @@ function parseEvidence(value: unknown): { kind: "file" | "commit" | "session"; p
   });
 }
 
-async function defaultClaimOwner(): Promise<string> {
-  const author = await resolveAuthor({ cwd: process.cwd() });
+/**
+ * Who "you" are to peek: CLAUDE_SESSION_ID when the harness sets it, else the session
+ * whose cwd is this directory. No pid of any kind: every peek call is a new process,
+ * and for an agent every shell command is a new shell too, so neither pid nor parent
+ * pid ever matched again and --ignore-self could not recognise a claim made a second
+ * earlier. Untracked agents fall back to user, host and directory.
+ */
+async function defaultClaimOwner(engine?: Engine, cwd: string = process.cwd()): Promise<string> {
+  const author = await resolveAuthor({ cwd, engine });
   if (!author.anonymous) return author.session;
-  // The parent pid, not our own: every peek invocation is a new process, so an owner
-  // keyed on process.pid never matched again and --ignore-self could not skip a claim
-  // the same shell had just made. The parent (the agent's shell) outlives all of them.
-  return `${userInfo().username || "agent"}@${hostname()}:${process.ppid}`;
+  return `${userInfo().username || "agent"}@${hostname()}:${cwd}`;
 }
 
 function printCoordinationDigest(

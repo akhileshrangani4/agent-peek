@@ -99,6 +99,7 @@ export function buildClaimCoordinationSession(claim: FileClaim): CoordinationSes
   return {
     id: `claim:${claim.id}`,
     displayName: `claim-${claim.owner}`,
+    ...(claim.creator ? { creator: claim.creator } : {}),
     adapter: "claim",
     status: "active",
     activity: "tool-running",

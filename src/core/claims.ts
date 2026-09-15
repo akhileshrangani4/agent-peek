@@ -35,6 +35,7 @@ export class ClaimsStore {
   async claim(opts: {
     files: string[];
     owner: string;
+    creator?: string;
     cwd?: string;
     ttlMs: number;
     now?: Date;
@@ -44,6 +45,7 @@ export class ClaimsStore {
       id: randomUUID(),
       files: [...new Set(opts.files)].sort(),
       owner: opts.owner,
+      ...(opts.creator && opts.creator !== opts.owner ? { creator: opts.creator } : {}),
       cwd: opts.cwd,
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + opts.ttlMs).toISOString(),
