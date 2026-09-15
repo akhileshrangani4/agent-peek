@@ -1,0 +1,83 @@
+---
+title: Handoff
+description: Write the document a new session needs to continue this one, via the agent CLI you already have.
+---
+
+A session runs out of context, or you want to move the work from one agent to
+another. `peek at <session> --mode handoff` writes the document the next session
+needs so it does not have to re-explore:
+
+```bash
+peek at researcher-claude --mode handoff --out handoff.md     # then: "read handoff.md and continue"
+peek at researcher-claude --mode handoff --for chatgpt        # paste into a chat with no filesystem
+peek at researcher-claude --mode handoff --for codex --out h.md   # switch harness, keep the state
+```
+
+The document has eight fixed sections:
+
+| Section | What it holds |
+| --- | --- |
+| Goal | The original ask, and how it evolved |
+| Current state | What is done, what is verified (tests run, commands that passed), what is in progress |
+| Decisions and why | Including alternatives that were rejected |
+| Files | Every touched file with one line: what changed and why |
+| Open questions / blockers | Anything unresolved or waiting on the user |
+| Next actions | Ordered and concrete, starting with the very next step |
+| Gotchas | What bit the previous session: failed commands, wrong assumptions |
+| Environment | cwd, git branch, env vars, commands to run things |
+
+## No API key
+
+peek does not call a model API. It compresses the whole transcript (user and
+assistant text in full, tool calls collapsed to the paths and arguments that
+identify them, results truncated with error lines kept) and hands it to
+whichever agent CLI is installed, headless, on that CLI's own login: the
+session's own harness first (`claude` for a Claude Code session, `codex` for a
+Codex one), then any other.
+
+For that child process, hooks, MCP servers and session persistence are turned
+off, so it neither recurses into peek nor leaves a transcript behind for peek to
+list. A 466-message session takes about a minute; stderr shows progress.
+
+- `AGENT_PEEK_HANDOFF_RUNNER="<bin> <args>"` overrides the command. It receives
+  the prompt on stdin and must print the document.
+- `--local` skips the model and prints the regex-extracted fallback: the same
+  sections, filled from pattern matches, with the git branch and the recent
+  shell commands and how their output read (ok, failed, unknown). It is
+  orientation, not a restart document, and its first line says so.
+- If no agent CLI is found, or it fails, you get that fallback with a header
+  naming the reason.
+- Runner lookup skips `~/.superset/bin` and `~/.superset-*/bin`: Superset's
+  wrappers re-exec themselves when run headless.
+
+Only `claude` has been verified headless on the machine peek was built on;
+`codex`, `gemini`, `opencode` and `copilot` use their documented
+non-interactive forms.
+
+## Who the document is for
+
+`--for` sets the reader. It changes the framing, not the facts:
+
+| Target | Framing |
+| --- | --- |
+| `claude-code`, `codex`, `gemini`, `copilot`, `opencode`, `generic` | Has a filesystem and shell: paths are referenced, claims come with a command to verify them |
+| `chatgpt`, `claude-chat` | No filesystem: the relevant code excerpts and error output are inlined from the transcript, and the repo layout is explained in prose. Tool results are kept to 1500 characters each (300 for CLI targets) and the prompt states that budget |
+
+## Output
+
+The document is stdout, alone, so `> file` and `--out <file>` both work.
+Status (which runner wrote it, for whom, message count, activity) and the
+`nextCursor` go to stderr.
+
+## Over MCP
+
+The caller is already a model, so `peek_session` with `mode: "handoff"` does
+not spawn anything. The result's `material` field is the complete prompt:
+instructions and the eight section headings, heuristic hints, then the
+compressed transcript between `--- transcript ---` markers. The calling agent
+answers that prompt and the markdown it produces is the handoff. The `document`
+field in that result is only the regex stub.
+
+That is how a session writes its own handoff before its context runs out: call
+`peek_session` on yourself with `mode: "handoff"`, write the document, save it,
+and tell the next session to read it.

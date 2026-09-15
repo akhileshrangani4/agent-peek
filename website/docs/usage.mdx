@@ -91,6 +91,9 @@ peek skills --interactive         # browse and mark for archiving
 peek skills --skill <name>        # every installation of one skill
 peek skills archive <name> --agent <slug>    # describes; does not act
 peek skills archive <name> --all-agents --yes  # acts
+peek skills --json                # top rows per segment, with an omitted count
+peek skills --json --all          # every skill, one compact record each
+peek skills --json --details      # installations, flags with evidence, roots scanned (large)
 ```
 
 The report is segmented by **what you can act on**:

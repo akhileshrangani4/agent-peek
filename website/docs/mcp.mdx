@@ -15,7 +15,10 @@ the tabs below.
 ## Exposed tools
 
 - `list_sessions` — list discovered sessions with display names.
-- `peek_session` — read one session snapshot.
+- `peek_session` — read one session snapshot. `mode=brief` or `structured` for "what
+  is that agent doing"; `mode=handoff` returns `material`, a complete prompt with the
+  compressed transcript, which the calling agent answers itself to produce the
+  handoff document (see [Handoff](/handoff)). Nothing is spawned.
 - `coordination_digest` — summarize nearby session activity and overlap.
 - `tag_session` — assign a stable tag.
 - `post_to_feed` — publish a context post to this project's feed.
@@ -27,7 +30,7 @@ the tabs below.
 - `agent-peek://sessions` — active sessions as JSON.
 - `agent-peek://feed` — this project's context feed, ranked and packed to a token budget.
 - `agent-peek://session/{selector}/brief` — brief snapshot for one session.
-- `agent-peek://session/{selector}/handoff` — handoff snapshot for one session.
+- `agent-peek://session/{selector}/handoff` — handoff material for one session; the caller writes the document.
 - `agent-peek://session/{selector}/tail` — raw tail for one session.
 
 :::note
@@ -40,8 +43,14 @@ whose feed you want (or configure your client to set its `cwd`), or use the
 ## Exposed prompts
 
 - `coordinate-agents` — check nearby agents before continuing work.
-- `session-handoff` — prepare a concise handoff from one session.
+- `session-handoff` — write a handoff document for one session from its `material`.
 - `avoid-overlap` — inspect overlap hints before editing files.
+
+:::note
+The server writes its registry, claims and usage index under `~/.agent-peek`. A
+client sandbox that forbids that makes every tool fail with `state_unwritable`;
+allow writes to that directory.
+:::
 
 ## Client configuration
 

@@ -26,15 +26,25 @@ peek list --json                          # machine-readable list
 peek list adapters                        # show installed adapters
 ```
 
-Default output is compact and human-first:
+Default output is compact and human-first, grouped by status with a header row:
 
 ```text
-NAME               ADAPTER  STATUS  UPDATED  SOURCE  CWD
-sessionseek-codex  codex    active  0s ago   file    ~/Documents/sessionseek/sessionseek
+── active ─────────────────────────────────────────────── 2 sessions ──
+     name                  adapter        updated    cwd
+     researcher-codex      codex          0s ago     ~/Documents/sessionseek/sessionseek
+     researcher-claude     claude-code    4m ago     ~/Documents/sessionseek/sessionseek
 ```
 
-The `NAME` column is the selector to use with `peek at`. Raw ids stay available
-with `peek list --ids`, and JSON output includes both `id` and `displayName`.
+The `name` column is the selector to use with `peek at`; it is never truncated,
+the path column absorbs long names instead. Each status group shows `--limit
+<n>` rows (default 12) and names that flag when it cuts rows. Raw ids stay
+available with `peek list --ids`, and JSON rows carry `id`, `name` and
+`displayName`; key on `displayName`. Subagent sessions are hidden unless
+`--include-subagents`, in `--files` too.
+
+`status` is how recently the transcript changed (active, idle, ended). It is not
+process liveness; `activity` in `peek at` is what the agent is doing now
+(tool-running, thinking, idle).
 
 ## Peek at a session
 
@@ -51,13 +61,20 @@ peek at researcher-codex --mode structured
 | `raw` | Reading transcript messages directly. Best for debugging or inspecting exactly what happened. | No |
 | `structured` | Stable fields for agents: current task, activity, last messages, pending tools, recent tools. | No |
 | `brief` | A compact local summary built from structured fields. Good default for humans and scripts that do not need raw logs. | No |
-| `handoff` | Local structured handoff: decisions, open questions, next actions, touched files, and tools. | No |
+| `handoff` | A document a new session can start from: goal, state, decisions, files, open questions, next actions, gotchas, environment. Written by a local agent CLI on your existing login; see [Handoff](/handoff). | No |
 | `summary` | Optional sentence-style summary. De-emphasized for agent loops; prefer `brief` unless you explicitly need prose. Can use Anthropic when configured. | No |
 
 ```bash
 peek at researcher-codex --mode brief
-peek at researcher-codex --mode handoff
+peek at researcher-codex --mode handoff --out handoff.md
 ```
+
+`task:` in `structured` and `brief` is the user's latest ask, not the
+assistant's last step. Harness-injected records in the user role (task
+notifications, loaded skill bodies, reminders) are skipped; if the latest user
+turn only hands the turn back ("yes", "go ahead"), the assistant's stated
+objective stands in. The selector can also be `.` for the session whose cwd is
+the current directory.
 
 ### Raw pagination
 
@@ -69,8 +86,13 @@ peek at researcher --around 250 --limit 40
 peek at researcher --last 50 --reverse
 ```
 
-By default, raw mode hides tool-only messages and tool-call status lines to keep
-the output readable. Add `--tools` or `--verbose` when you need that detail.
+By default, raw mode hides tool-only messages to keep the output readable.
+`--last N` counts the rows you will see: the window widens past hidden tool
+calls until N visible rows fit, and says so on stderr. A window that is all
+tool calls prints how many rows are hidden instead of nothing. Add `--tools` to
+see them: each call shows the command or path that identifies it and a
+truncated result, with its settled status (`completed`, `error`, or `pending`
+while unanswered).
 
 ### Summaries
 
@@ -101,19 +123,45 @@ peek at researcher --mode raw --json
 peek at researcher --mode raw --since <nextCursor> --json
 ```
 
-### Error shape
+Message numbers stay absolute under `--since` (`messages: 2-3 of 3`, not
+`1-2 of 2`), and a cursor already at the end reads `No new messages; cursor is
+at message 3 of 3.`
 
-CLI failures are printed to stderr in a stable shape:
+### Errors and exit codes
+
+CLI failures are a sentence first and a machine record second:
 
 ```text
-error: session_not_found
-message: No session matched selector: worker
-hint: Use `peek list` to get the current displayName values.
-next:
-  - peek list
-  - peek list --ids
-exitCode: 2
+  error  session not found
+
+     No session matched selector: worker. Did you mean: worker-claude?
+
+     Use `peek list` to get the current displayName values.
+
+     try   peek list
+           peek list --ids
+
+     error: session_not_found · exit 2
 ```
+
+Under `--json` the record goes to stdout as JSON (`error`, `message`, `hint`,
+`next`, `exit`) and only the last line stays on stderr, so a script can parse
+one stream and grep the other. Passing an adapter name as a selector
+(`peek at claude`) says so and offers `peek list --adapter claude-code`.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | ok |
+| 1 | `check` found a conflict, or an internal error |
+| 2 | not found |
+| 3 | ambiguous selector; the message names each candidate |
+| 4 | adapter or skill error |
+| 5 | usage: bad command, option, mode, or cursor |
+| 6 | environment: peek cannot write `~/.agent-peek`, or the registry lock is held (retry) |
+
+Every peek command writes state under `~/.agent-peek`. In a sandbox that
+forbids it, every command exits 6 and names the directory; `peek doctor`
+reports whether it is writable.
 
 ## Terminal UI
 
