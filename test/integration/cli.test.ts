@@ -480,6 +480,11 @@ describe("CLI integration", () => {
     expect(viaStdin.code).toBe(1);
     expect(viaStdin.stdout).toMatch(/conflict: 1 active file conflict/);
     expect(viaStdin.stdout).toMatch(/src\/core\/engine.ts/);
+    // A space-separated line is several files, and paths that are not on disk are named.
+    const spaced = await runCliWithStdin(["check", "--files-from", "-", "--cwd", "/tmp/check", "--json"], "src/core/engine.ts README.md\n", { HOME: home });
+    expect(spaced.code).toBe(1);
+    expect(JSON.parse(spaced.stdout).files.map((f: { file: string }) => f.file)).toEqual(["/tmp/check/README.md", "/tmp/check/src/core/engine.ts"]);
+    expect(spaced.stderr).toMatch(/warning: 2 paths are not on disk/);
 
     const files = await runCli(["list", "--files", "--adapter", "claude-code"], { HOME: home });
     expect(files.code).toBe(0);
@@ -552,6 +557,18 @@ describe("CLI integration", () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["claim", "test-file.ts", "--json"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
     expect(r.code).toBe(0);
+    // A later command from the same shell is the same owner: --ignore-self skips the claim,
+    // and without it the conflict line says how to.
+    const own = await runCli(["check", "test-file.ts", "--ignore-self"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(own.code).toBe(0);
+    const shown = await runCli(["check", "test-file.ts"], { HOME: home, CLAUDE_SESSION_ID: "sess-42" });
+    expect(shown.code).toBe(1);
+    expect(shown.stdout).toMatch(/\(yours\? --ignore-self, or --as claude-code:sess-42\)/);
+    // Anonymous owners are keyed on the parent shell, so the same shell matches itself too.
+    const anon = await runCli(["claim", "other-file.ts", "--json"], { HOME: home });
+    expect(anon.code).toBe(0);
+    const anonSelf = await runCli(["check", "other-file.ts", "--ignore-self"], { HOME: home });
+    expect(anonSelf.code).toBe(0);
     const claim = JSON.parse(r.stdout);
     expect(claim.owner).toBe("claude-code:sess-42");
   });

@@ -216,7 +216,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         console.log(`conflict: ${conflictCount} active file conflict${conflictCount === 1 ? "" : "s"}`);
         for (const item of files) {
           for (const conflict of item.conflicts) {
-            console.log(indent(`${formatPath(item.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}`));
+            const selfHint = conflict.adapter === "claim" ? ` (yours? --ignore-self, or --as ${conflict.displayName.replace(/^claim-/, "")})` : "";
+            console.log(indent(`${formatPath(item.file)} claimed/written by ${conflict.displayName} (${conflict.adapter}, ${conflict.status})${conflict.lastWritingAt ? ` ${relativeTime(conflict.lastWritingAt)}` : ""}${selfHint}`));
             if (conflict.currentTask) console.log(indent(`task: ${oneLine(conflict.currentTask)}`, 4));
           }
         }
@@ -1164,7 +1165,7 @@ function isIgnoredSession(
 function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] {
   const values: string[] = [];
   if (file !== undefined) values.push(String(file));
-  if (filesFrom !== undefined) values.push(...readFilesFrom(String(filesFrom)));
+  if (filesFrom !== undefined) values.push(...readFilesFrom(String(filesFrom), cwd));
   if (values.length === 0) {
     fail({
       code: 5,
@@ -1177,14 +1178,22 @@ function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] 
   return [...new Set(values.map((value) => resolve(cwd, value)))].sort();
 }
 
-function readFilesFrom(path: string): string[] {
+function readFilesFrom(path: string, cwd: string = process.cwd()): string[] {
   const raw = path === "-"
     ? readFileSync(0, "utf8")
     : readFileSync(path, "utf8");
-  return raw
+  const entries = raw
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"));
+    .filter((line) => line && !line.startsWith("#"))
+    // The format is one path per line, but a space-separated line that names no file
+    // is several paths, not one; checking "a b" as a single path silently passes.
+    .flatMap((line) => (/\s/.test(line) && !existsSync(resolve(cwd, line)) ? line.split(/\s+/) : [line]));
+  const missing = entries.filter((entry) => !existsSync(resolve(cwd, entry)));
+  if (missing.length) {
+    console.error(`warning: ${missing.length} path${missing.length === 1 ? " is" : "s are"} not on disk: ${missing.join(", ")} (checked anyway; a typo here passes as "ok")`);
+  }
+  return entries;
 }
 
 /**
@@ -1507,7 +1516,10 @@ function parseEvidence(value: unknown): { kind: "file" | "commit" | "session"; p
 async function defaultClaimOwner(): Promise<string> {
   const author = await resolveAuthor({ cwd: process.cwd() });
   if (!author.anonymous) return author.session;
-  return `${userInfo().username || "agent"}@${hostname()}:${process.pid}`;
+  // The parent pid, not our own: every peek invocation is a new process, so an owner
+  // keyed on process.pid never matched again and --ignore-self could not skip a claim
+  // the same shell had just made. The parent (the agent's shell) outlives all of them.
+  return `${userInfo().username || "agent"}@${hostname()}:${process.ppid}`;
 }
 
 function printCoordinationDigest(
