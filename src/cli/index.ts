@@ -116,7 +116,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--include-subagents", "Include subagent sessions spawned by another session")
     .option("--ids", "Show raw session ids")
-    .option("--limit <n>", "Rows per status group (default 12)")
+    .option("--limit <n>", "Rows shown per status group, active and idle each (default 12)")
     .option("--files", "Show active/recent file context for coordination")
     .option("--json", "Output JSON with id, name, displayName, sourceType, cwd, and status")
     .action(async (target, opts) => {
@@ -163,7 +163,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       if (opts.json) { console.log(JSON.stringify(withDisplayNames(list), null, 2)); return; }
       await renderList(withDisplayNames(list), {
         showIds: Boolean(opts.ids),
-        limit: opts.limit === undefined ? undefined : Math.max(1, Number(opts.limit) || 12),
+        limit: opts.limit === undefined ? undefined : parsePositiveInt(opts.limit, "--limit"),
         color: Boolean(opts.color),
         width: opts.width === undefined ? undefined : Number(opts.width),
         relativeTime,
@@ -284,7 +284,11 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         console.log(JSON.stringify(result, null, 2));
         return;
       }
-      console.log(`released ${result.released} claim${result.released === 1 ? "" : "s"}`);
+      if (result.released === 0) {
+        console.log(`released 0 claims: nothing active matched ${selector} (already released, expired, or a different id)`);
+      } else {
+        console.log(`released ${result.released} claim${result.released === 1 ? "" : "s"}`);
+      }
       for (const claim of releasedClaims) {
         console.log(indent(`${claim.id} (${claim.owner}) ${claim.files.length} file${claim.files.length === 1 ? "" : "s"}`));
       }
@@ -347,7 +351,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       });
     });
 
-  cli.command("at <selector>", "Read a session by displayName, id, tag, or cwd.")
+  cli.command("at <selector>", "Read a session by name (the NAME column of peek list), id, tag, or cwd. Over MCP the same read is peek_session; its handoff mode returns the prompt as `material` for the calling agent to answer instead of spawning a CLI.")
     .usage("at <selector> [--mode raw|structured|brief|summary|handoff] [--for <agent>] [--out <file>] [--since <cursor>] [--limit <n>] [--json]")
     .example("peek at ledgerforge-codex --mode structured")
     .example("peek at researcher-claude --mode handoff --out handoff.md")
@@ -358,7 +362,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek at researcher-claude --since <nextCursor>")
     .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary. handoff runs the installed agent CLI (claude, codex, ...) headless for up to a minute unless --local; AGENT_PEEK_HANDOFF_RUNNER=\"<bin> <args>\" overrides it", { default: "raw" })
     .option("--for <agent>", "handoff: who it is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat)", { default: "generic" })
-    .option("--out <file>", "handoff: also write the document to this file. The document is stdout; status and nextCursor go to stderr, so `> file` also works. Over MCP, peek_session mode=handoff returns the prompt as `material` for the calling agent to answer instead of spawning a CLI")
+    .option("--out <file>", "handoff: also write the document to this file (the document is stdout; status and nextCursor go to stderr, so `> file` works too)")
     .option("--local", "handoff: skip the agent CLI and use the regex fallback")
     .option("--since <cursor>", "Only return new messages after a prior nextCursor")
     .option("--limit <n>", "Raw window size. Defaults to 200, or 30 with --around")
@@ -385,18 +389,34 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       }
       const rawOpts = parseRawOpts(opts);
       const engine = await createEngine({ withExternal: true });
-      const r = await engine.peek(selector, {
+      const showTools = Boolean(opts.tools || opts.verbose || opts.json);
+      const peekOnce = (limit: number | undefined) => engine.peek(selector, {
         mode,
         target,
         produce: opts.local ? "local" : "harness",
         onStatus: (line) => { if (!opts.json) console.error(line); },
         since: opts.since,
-        limit: rawOpts.limit,
+        limit,
         offset: rawOpts.offset,
         around: rawOpts.around,
         from: rawOpts.from,
         order: rawOpts.order,
       });
+      let r = await peekOnce(rawOpts.limit);
+      // `--last 20` means twenty messages the reader will see. Tool-only rows are hidden
+      // unless --tools, so widen the window until enough visible rows fit, or the
+      // transcript runs out; the header then covers the wider span it took.
+      if (r.snapshot.mode === "raw" && !showTools && rawOpts.limit !== undefined && rawOpts.around === undefined) {
+        const wanted = rawOpts.limit;
+        let limit = wanted;
+        let snap = r.snapshot;
+        while (snap.messages.filter((m) => m.text).length < wanted && snap.messages.length < snap.totalMessageCount && limit < 5000) {
+          limit = Math.min(5000, limit * 3);
+          r = await peekOnce(limit);
+          if (r.snapshot.mode !== "raw") break;
+          snap = r.snapshot;
+        }
+      }
       if (r.snapshot.mode === "handoff" && opts.out) {
         writeFileSync(resolve(String(opts.out)), `${r.snapshot.document}\n`);
         if (!opts.json) console.error(`wrote ${resolve(String(opts.out))}`);
@@ -842,6 +862,20 @@ function normalizeStdinDash(argv: string[]): string[] {
   return out;
 }
 
+function parsePositiveInt(value: unknown, flag: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    fail({
+      code: 5,
+      error: "invalid_usage",
+      message: `${flag} must be a positive integer, got ${String(value)}.`,
+      hint: `Use ${flag} 20, for example.`,
+      next: [`peek list ${flag} 20`],
+    });
+  }
+  return n;
+}
+
 function isGlobalInfoRequest(argv: string[]): boolean {
   return argv.slice(2).some((arg) => arg === "--help" || arg === "-h" || arg === "--version" || arg === "-v");
 }
@@ -1092,12 +1126,14 @@ function handleError(e: unknown): number {
   }
   const err = e as Error;
   if (err?.name === "CACError") {
+    const command = /command `([a-z-]+)/.exec(err.message)?.[1] ?? process.argv[2];
+    const known = command && /^[a-z][a-z-]*$/.test(command) ? command : undefined;
     fail({
       code: 5,
       error: "invalid_usage",
       message: err.message,
-      hint: "Run command help for the expected arguments and options.",
-      next: ["peek help", "peek list --help", "peek at --help"],
+      hint: known ? `Run \`peek ${known} --help\` for the expected arguments and options.` : "Run command help for the expected arguments and options.",
+      next: known ? [`peek ${known} --help`, "peek help"] : ["peek help", "peek list --help", "peek at --help"],
     });
   }
   fail({
@@ -2275,6 +2311,12 @@ function relativeTime(iso: string): string {
 function printSnapshot(r: PeekResult, opts: { showTools?: boolean } = {}): void {
   const s = r.snapshot;
   if (s.mode === "raw") {
+    if (s.messages.length === 0) {
+      console.log(s.totalMessageCount === 0
+        ? "No messages in this session yet."
+        : `No new messages; cursor is at message ${s.totalMessageCount} of ${s.totalMessageCount}.`);
+      if (s.mode === "raw") { console.log(`\nnextCursor: ${r.nextCursor}`); return; }
+    }
     console.log(`messages: ${s.window.start + 1}-${s.window.end} of ${s.totalMessageCount} (${s.window.order})`);
     let hidden = 0;
     let shown = 0;

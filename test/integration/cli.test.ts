@@ -202,6 +202,13 @@ describe("CLI integration", () => {
     const r = await runCli(["list", "--limit", "2", "--width", "100"], { HOME: home });
     expect(r.code).toBe(0);
     expect(r.stdout).toMatch(/name\s+adapter\s+updated\s+cwd/);
+    // The selector column is never cut; a long name pushes the path column instead.
+    const longDir = join(home, ".claude", "projects", "-tmp-a-deliberately-very-long-session-directory-name");
+    await mkdir(longDir, { recursive: true });
+    await writeFile(join(longDir, "long.jsonl"), `{"type":"user","sessionId":"long","cwd":"/tmp/a-deliberately-very-long-session-directory-name","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"hi"}}\n`, "utf8");
+    const wide = await runCli(["list", "--width", "80"], { HOME: home });
+    expect(wide.stdout).toMatch(/a-deliberately-very-long-session-directory-name-claude\s/);
+    expect(wide.stdout).not.toMatch(/session-directory-name-cl\S*…/);
     expect(r.stdout).toMatch(/1 more \w+ · peek list --limit 3/);
     expect(r.stdout).not.toMatch(/more \w+ · peek list --all/);
   });
@@ -342,10 +349,15 @@ describe("CLI integration", () => {
       `{"type":"assistant","sessionId":"tools","cwd":"/tmp/tools","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/tools/b.ts"}}]}}`,
     ].join("\n") + "\n", "utf8");
 
-    const hidden = await runCli(["at", "tools-claude", "--last", "2"], { HOME: home });
-    expect(hidden.code).toBe(0);
-    expect(hidden.stdout).toMatch(/messages: 2-3 of 3/);
-    expect(hidden.stdout).toMatch(/0 shown: all 2 messages in this window are tool-only\. Try --tools, or a wider window such as --last 60/);
+    // --last 2 means two visible rows: the window widens past the tool-only tail.
+    const widened = await runCli(["at", "tools-claude", "--last", "2"], { HOME: home });
+    expect(widened.code).toBe(0);
+    expect(widened.stdout).toMatch(/messages: 1-3 of 3/);
+    expect(widened.stdout).toMatch(/read it/);
+    expect(widened.stdout).toMatch(/2 tool-only messages hidden/);
+    // With --tools the window is exactly what was asked for.
+    const exact = await runCli(["at", "tools-claude", "--last", "2", "--tools"], { HOME: home });
+    expect(exact.stdout).toMatch(/messages: 2-3 of 3/);
 
     const shown = await runCli(["at", "tools-claude", "--last", "2", "--tools"], { HOME: home });
     expect(shown.stdout).toMatch(/tool=Read file_path=\/tmp\/tools\/a\.ts/);
@@ -354,6 +366,50 @@ describe("CLI integration", () => {
     const mixed = await runCli(["at", "tools-claude", "--last", "3"], { HOME: home });
     expect(mixed.stdout).toMatch(/read it/);
     expect(mixed.stdout).toMatch(/2 tool-only messages hidden/);
+
+    // A cursor at the end reads as an explicit empty result, not an inverted range.
+    const first = await runCli(["at", "tools-claude", "--json"], { HOME: home });
+    const cursor = JSON.parse(first.stdout).nextCursor;
+    const empty = await runCli(["at", "tools-claude", "--since", cursor], { HOME: home });
+    expect(empty.code).toBe(0);
+    expect(empty.stdout).toMatch(/^No new messages; cursor is at message 3 of 3\./m);
+    expect(empty.stdout).not.toMatch(/messages: 4-3/);
+
+    // "." resolves to this directory's session, and an unknown --limit is refused.
+    const dot = await runCli(["at", ".", "--mode", "brief"], { HOME: home, PWD: "/tmp/tools" });
+    expect(dot.code).toBe(2); // the fixture cwd does not exist on disk, so "." stays literal here
+    const badLimit = await runCli(["list", "--limit", "abc"], { HOME: home });
+    expect(badLimit.code).toBe(5);
+    expect(badLimit.stderr).toMatch(/--limit must be a positive integer, got abc/);
+  });
+
+  it("at . resolves the session whose cwd is the current directory", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-cwd");
+    await mkdir(projDir, { recursive: true });
+    const cwd = process.cwd();
+    await writeFile(join(projDir, "here.jsonl"), `{"type":"user","sessionId":"here","cwd":${JSON.stringify(cwd)},"timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"look here"}}\n`, "utf8");
+    const r = await runCli(["at", ".", "--mode", "brief"], { HOME: home });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/Task: look here/);
+  });
+
+  it("ambiguous selectors name the candidate sessions, and bare claim/release point at their own help", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-amb");
+    await mkdir(projDir, { recursive: true });
+    for (const id of ["one", "two"]) {
+      await writeFile(join(projDir, `${id}.jsonl`), `{"type":"user","sessionId":"${id}","cwd":"/tmp/amb","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"x"}}\n`, "utf8");
+    }
+    const amb = await runCli(["at", "/tmp/amb"], { HOME: home });
+    expect(amb.code).toBe(3);
+    expect(amb.stderr).toMatch(/claude-code:one \(\S+\)/);
+    const bare = await runCli(["claim"], { HOME: home });
+    expect(bare.code).toBe(5);
+    expect(bare.stderr).toMatch(/peek claim --help/);
+    const gone = await runCli(["release", "00000000-0000-0000-0000-000000000000", "--claim-id"], { HOME: home });
+    expect(gone.code).toBe(0);
+    expect(gone.stdout).toMatch(/released 0 claims: nothing active matched/);
   });
 
   it("coord summarizes sessions for a cwd and returns a reusable cursor", async () => {

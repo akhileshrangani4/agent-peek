@@ -13,6 +13,8 @@ import { toBrief, toRaw, toStructured, toSummary } from "./snapshot.js";
 import { buildHandoff, resolveHandoffRunner, type HandoffRunner, type HandoffProduce } from "./handoff.js";
 import { cursorAdapter, decodeCursor } from "./cursor.js";
 import { displayNames } from "./names.js";
+import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import {
   buildCoordinationDigest, buildCoordinationSession, compactCoordinationSessionForCursor, cwdMatches,
   coordinationCursorFor, coordinationSessionFor, decodeCoordinationCursor,
@@ -273,12 +275,18 @@ export class Engine {
 
   private async resolve(selector: string): Promise<SessionEntry> {
     const list = (await this.deps.registry.list()).sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+    // "." and other relative directories are cwd selectors too; --help says cwd works.
+    if ((selector === "." || selector.startsWith("./") || selector.startsWith("../")) && existsSync(selector)) {
+      selector = resolvePath(selector);
+    }
+    const names = displayNames(list);
+    const label = (e: SessionEntry) => `${e.id} (${names[list.indexOf(e)]})`;
     const exact = list.find((e) => e.id === selector);
     if (exact) return exact;
     const tagMatches = list.filter((e) => e.tag === selector);
     if (tagMatches.length === 1) return tagMatches[0]!;
     if (tagMatches.length > 1) {
-      throw new AmbiguousSelectorError(selector, tagMatches.map((e) => e.id));
+      throw new AmbiguousSelectorError(selector, tagMatches.map(label));
     }
     const activeName = resolveDisplayName(selector, list.filter((e) => e.status !== "ended"));
     if (activeName) return activeName;
@@ -287,13 +295,17 @@ export class Engine {
     const cwdMatches = list.filter((e) => e.cwd === selector);
     if (cwdMatches.length === 1) return cwdMatches[0]!;
     if (cwdMatches.length > 1) {
-      throw new AmbiguousSelectorError(selector, cwdMatches.map((e) => e.id));
+      // Several sessions share a directory (a parent and its subagents, or two agents):
+      // prefer the one still moving, and only then call it ambiguous.
+      const live = cwdMatches.filter((e) => e.status === "active" && e.parentSessionId === undefined);
+      if (live.length === 1) return live[0]!;
+      throw new AmbiguousSelectorError(selector, cwdMatches.map(label));
     }
     const prefix = selector.endsWith("/") ? selector : `${selector}/`;
     const cwdPrefix = list.filter((e) => e.cwd && (e.cwd === selector || e.cwd.startsWith(prefix)));
     if (cwdPrefix.length === 1) return cwdPrefix[0]!;
     if (cwdPrefix.length > 1) {
-      throw new AmbiguousSelectorError(selector, cwdPrefix.map((e) => e.id));
+      throw new AmbiguousSelectorError(selector, cwdPrefix.map(label));
     }
     throw new SessionNotFoundError(selector);
   }

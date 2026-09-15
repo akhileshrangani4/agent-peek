@@ -7,7 +7,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { Row, Rows, Rule, num, renderStatic, terminalWidth } from "./render.js";
 import type { Role } from "./render.js";
-import { fit, shortenPath } from "./paths.js";
+import { shortenPath } from "./paths.js";
 
 const h = React.createElement;
 
@@ -40,7 +40,9 @@ function Group({ status, entries, width, opts, first }: {
   const shown = entries.slice(0, limit);
   // Columns are sized to the data or the label, whichever is wider, so the header
   // row never truncates its own words.
-  const nameW = Math.max("name".length, ...shown.map((e) => Math.min(e.displayName.length, 24)));
+  // The name is the selector; a truncated selector cannot be copied into `peek at`.
+  // The path column absorbs the difference instead.
+  const nameW = Math.max("name".length, ...shown.map((e) => e.displayName.length));
   const adapterW = Math.max("adapter".length, ...shown.map((e) => e.adapter.length));
   const whenW = Math.max("updated".length, ...shown.map((e) => opts.relativeTime(e.lastSeen).length));
   // The path gets whatever the fixed columns leave rather than a hardcoded 20: at 120
@@ -71,7 +73,7 @@ function Group({ status, entries, width, opts, first }: {
       children: shown.map((e) => h(Row, {
         key: e.id,
         cells: [
-          { text: fit(e.displayName, 24), role: ROLE[status], width: nameW },
+          { text: e.displayName, role: ROLE[status], width: nameW },
           { text: e.adapter, role: "muted", width: adapterW },
           { text: opts.relativeTime(e.lastSeen), role: "muted", width: whenW, align: "right" },
           // The uuid segment identifies nothing a reader uses; the tail is the answer.
