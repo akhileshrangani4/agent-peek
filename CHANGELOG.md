@@ -36,6 +36,19 @@ are a JSON record. `--files-from -` works with a space. `peek list` has a header
 codes, the MCP server, and the difference between list's `status` and at's `activity`.
 The `--local` handoff header no longer claims no CLI was found.
 
+A second blind pass found what the first fix missed. The redirect matcher read the `>` in
+`=>` as a redirect, so arrow functions quoted in a command became written files and fed
+`check`; a target must be a plain path now. `--ignore-self` never matched a claim the same
+shell had just made, because the anonymous owner was keyed on a pid that changes with every
+invocation; it is keyed on the parent shell, and the conflict line says how to skip your own
+claim. `--files-from` splits a spaced line that names no file and warns about paths that are
+not on disk, since a typo there passed as "ok". `currentTask` skipped user turns without an
+action verb ("ci is failing on this"); the user's words win unless they only hand the turn
+back. `raw --tools` shows the command or path and a truncated result instead of a bare tool
+name, and an all-tool-only window says "0 shown" with a way out. The `--local` handoff carries
+the git branch, the original ask beside the latest, and the last eight shell commands, and
+keeps questions out of Next actions.
+
 `inferTouchedFiles` never saw `file_path` or `notebook_path`, which is what Claude Code's
 Read, Edit, Write and NotebookEdit send, so touched-file lists for Claude Code sessions
 came only from shell commands. Both keys count now.

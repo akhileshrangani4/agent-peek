@@ -354,7 +354,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .example("peek at researcher-claude --since <nextCursor>")
     .option("--mode <m>", "Snapshot shape: raw transcript, structured status, brief, handoff, or optional summary. handoff runs the installed agent CLI (claude, codex, ...) headless for up to a minute unless --local; AGENT_PEEK_HANDOFF_RUNNER=\"<bin> <args>\" overrides it", { default: "raw" })
     .option("--for <agent>", "handoff: who it is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat)", { default: "generic" })
-    .option("--out <file>", "handoff: also write the document to this file")
+    .option("--out <file>", "handoff: also write the document to this file. The document is stdout; status and nextCursor go to stderr, so `> file` also works. Over MCP, peek_session mode=handoff returns the prompt as `material` for the calling agent to answer instead of spawning a CLI")
     .option("--local", "handoff: skip the agent CLI and use the regex fallback")
     .option("--since <cursor>", "Only return new messages after a prior nextCursor")
     .option("--limit <n>", "Raw window size. Defaults to 200, or 30 with --around")
@@ -1000,14 +1000,27 @@ async function listAdapters(): Promise<void> {
   console.log(engine.adapterNames().join("\n"));
 }
 
+const ADAPTER_ALIASES: Record<string, string> = {
+  claude: "claude-code", "claude-code": "claude-code", codex: "codex", gemini: "gemini",
+  copilot: "copilot-cli", "copilot-cli": "copilot-cli", opencode: "opencode", goose: "goose", tmux: "tmux", screen: "screen",
+};
+function adapterNameFromSelectorMessage(message: string): string | undefined {
+  const selector = /selector: (\S+)/.exec(message)?.[1]?.toLowerCase();
+  return selector ? ADAPTER_ALIASES[selector] : undefined;
+}
+
 function handleError(e: unknown): number {
   if (e instanceof SessionNotFoundError) {
+    // "peek at claude" is a natural first try; the agent's name is an adapter, not a session.
+    const adapter = adapterNameFromSelectorMessage(e.message);
     fail({
       code: 2,
       error: "session_not_found",
       message: e.message,
-      hint: "Use `peek list` to get the current displayName values. Use `peek list --ids` if you need raw ids.",
-      next: ["peek list", "peek list --ids", "peek doctor"],
+      hint: adapter
+        ? `\`${adapter}\` is an adapter (agent kind), not a session. Sessions are the NAME column of \`peek list\`; filter by agent with \`peek list --adapter ${adapter}\`.`
+        : "Use `peek list` to get the current displayName values. Use `peek list --ids` if you need raw ids.",
+      next: adapter ? [`peek list --adapter ${adapter}`, "peek list --ids"] : ["peek list", "peek list --ids", "peek doctor"],
     });
   }
   if (e instanceof AmbiguousSelectorError) {
@@ -1537,7 +1550,7 @@ function printCoordinationDigest(
     ? `${digest.shownSessionCount} sessions`
     : `${digest.shownSessionCount}/${digest.totalSessionCount} sessions shown`;
   console.log(`coordination: ${countLabel}, ${snapshotLabel}${risk}`);
-  if (digest.hiddenLowSignalSessionCount) console.log(`hidden low-signal: ${digest.hiddenLowSignalSessionCount} sessions (--all to include)`);
+  if (digest.hiddenLowSignalSessionCount) console.log(`hidden low-signal: ${digest.hiddenLowSignalSessionCount} session${digest.hiddenLowSignalSessionCount === 1 ? "" : "s"} with no task or files (--all shows them along with ended sessions)`);
   if (digest.hiddenUnchangedSessionCount) console.log(`hidden unchanged: ${digest.hiddenUnchangedSessionCount} sessions`);
   if (digest.filteredSessionCount) console.log(`filtered: ${digest.filteredSessionCount} sessions`);
   if (digest.cwd) console.log(`cwd: ${formatPath(digest.cwd)}`);

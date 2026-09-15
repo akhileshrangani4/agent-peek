@@ -43,6 +43,14 @@ describe("CLI integration", () => {
     expect(r.stderr).toBe("");
   });
 
+  it("at <adapter-name> explains that adapters are not sessions", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const r = await runCli(["at", "claude"], { HOME: home });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/`claude-code` is an adapter \(agent kind\), not a session/);
+    expect(r.stderr).toMatch(/peek list --adapter claude-code/);
+  });
+
   it("errors under --json are a JSON record on stdout with the slug line on stderr", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const r = await runCli(["at", "nosuchsession", "--json"], { HOME: home });
@@ -365,7 +373,7 @@ describe("CLI integration", () => {
     const human = await runCli(["coord", "/tmp/coord"], { HOME: home });
     expect(human.code).toBe(0);
     expect(human.stdout).toMatch(/coordination: 1\/2 sessions shown, first snapshot, 1 new/);
-    expect(human.stdout).toMatch(/hidden low-signal: 1 sessions/);
+    expect(human.stdout).toMatch(/hidden low-signal: 1 session with no task or files \(--all shows them/);
     expect(human.stdout).toMatch(/sessions:/);
     expect(human.stdout).toMatch(/coord-claude/);
     expect(human.stdout).not.toMatch(/noise-claude/);
