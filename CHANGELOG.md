@@ -67,6 +67,21 @@ candidates. `skills --json` is one compact record per skill; `--details` restore
 ~400k-token inventory it used to be. Open questions must address someone or ask for a
 decision, so rhetorical questions and code fragments ending in `?` drop out.
 
+A fourth pass, Claude and Codex again. Two agents reviewing one repo share a cwd, and
+picking the newest session as "you" made peek claim files as the other agent; with several
+live sessions in a directory and no CLAUDE_SESSION_ID, identity is anonymous and peek says
+which sessions it could not choose between. Every tool call read as pending even with its
+result in the transcript: results now carry the id of the call they answer and the harness's
+error flag, calls settle to completed or error after a read, and a command in a handoff is
+failed when its result says so, not when its output contains the word "error". Your own
+claim is not a conflict with you: `check` ignores it by default (`--include-self` shows it)
+and a repeat claim renews rather than stacks. Handoff decisions and next actions are drawn
+from the current ask onward, so finished tasks stop resurfacing as open work; chat-target
+handoffs keep 1500 characters per tool result and the prompt states the budget. `skills
+--json` defaults to the top rows per segment (`--all` for every skill). `list --files` keeps
+every row plain `list` shows. Unknown selectors suggest near matches, a widened `--last`
+window says so, and a long briefing's first line is its ask.
+
 `inferTouchedFiles` never saw `file_path` or `notebook_path`, which is what Claude Code's
 Read, Edit, Write and NotebookEdit send, so touched-file lists for Claude Code sessions
 came only from shell commands. Both keys count now.
