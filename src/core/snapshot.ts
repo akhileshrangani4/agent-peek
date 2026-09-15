@@ -129,16 +129,31 @@ function computeActivity(messages: RawMessage[], pending: ToolCall[]): "idle" | 
  * does the assistant's stated objective stand in.
  */
 function inferCurrentTask(messages: RawMessage[], fallback: string | undefined): string | undefined {
-  const asked = objectiveFromUserText(fallback, { actionOnly: true });
-  if (asked) return asked;
+  const asked = objectiveFromUserText(fallback);
+  if (asked && !isAcknowledgement(asked)) return asked;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
     if (message.role !== "assistant" || !message.text) continue;
     const candidate = objectiveFromAssistantText(message.text);
     if (candidate) return candidate;
   }
-  // Nothing stated an objective; a short user turn is the best remaining guess.
-  return objectiveFromUserText(fallback);
+  return asked;
+}
+
+/** "yes", "go ahead", "ok do it": the user handed the turn back without restating the task. */
+function isAcknowledgement(line: string): boolean {
+  const flat = line.toLowerCase().replace(/[^a-z ]/g, "").trim();
+  if (!flat) return true;
+  if (flat.split(" ").length > 6) return false;
+  return /^(y|yes|yep|yeah|ya|ok|okay|sure|go|go ahead|do it|proceed|continue|please|thanks|thank you|sounds good|lgtm|approved|correct|right|fine|yes please|ok go ahead|go for it)( please| do it| go ahead| then| proceed| continue| thanks)*$/.test(flat);
+}
+
+/** Harness wrappers a user turn can carry that were never the user's words. */
+function stripHarnessWrappers(text: string): string {
+  return text
+    .replace(/<(local-command-[a-z]+|system-reminder|command-name|command-message|command-args)>[\s\S]*?<\/\1>/g, "")
+    .replace(/<\/?(local-command-[a-z]+|system-reminder)>/g, "")
+    .trim();
 }
 
 function objectiveFromAssistantText(text: string): string | undefined {
@@ -151,7 +166,9 @@ function objectiveFromAssistantText(text: string): string | undefined {
   return objective ? oneLine(cleanObjectiveLine(objective)).slice(0, 240) : undefined;
 }
 
-function objectiveFromUserText(text: string | undefined, opts: { actionOnly?: boolean } = {}): string | undefined {
+function objectiveFromUserText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  text = stripHarnessWrappers(text);
   if (!text) return undefined;
   const lines = candidateLines(text);
   const reviewLine = lines.find((line) => /\breview\b.+\b(diff|changes|code|project|uncommitted)\b/i.test(line));
@@ -160,8 +177,9 @@ function objectiveFromUserText(text: string | undefined, opts: { actionOnly?: bo
     !isSystemPromptLine(line) && !isReviewOrStatusLine(line) && /\b(add|build|fix|implement|update|review|inspect|summarize|test|debug|refactor)\b/i.test(line)
   ));
   if (actionLine) return oneLine(cleanObjectiveLine(actionLine)).slice(0, 240);
-  if (opts.actionOnly) return undefined;
-  if (text.split(/\r?\n/).filter((line) => line.trim()).length > 2 || text.length > 180) return undefined;
+  // No action verb: the user's first usable sentence is still their ask ("ci is failing
+  // on this"). Long pasted blocks are not; their first line is rarely the request.
+  if (text.split(/\r?\n/).filter((line) => line.trim()).length > 6 || text.length > 600) return undefined;
   const simpleLine = lines.find((line) => !isSystemPromptLine(line) && !isReviewOrStatusLine(line));
   return simpleLine ? oneLine(cleanObjectiveLine(simpleLine)).slice(0, 240) : undefined;
 }

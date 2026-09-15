@@ -129,6 +129,19 @@ describe("snapshot.toStructured", () => {
     expect(s.currentTask).toBe("Okay now let's fix the 5815 error in the daemon.");
   });
 
+  it("currentTask is the user's words even without an action verb, minus harness wrappers", () => {
+    let s = toStructured("sid", [
+      { role: "user", text: "ci is failing on this", raw: {} },
+      { role: "assistant", text: "The script now resolves the write from its own location. Let me check the workflow.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("ci is failing on this");
+    s = toStructured("sid", [
+      { role: "user", text: "<local-command-stdout>ok</local-command-stdout>\n<system-reminder>ignore</system-reminder>\ncheck the review comment on 5811", raw: {} },
+      { role: "assistant", text: "Let me look at the review comment.", raw: {} },
+    ]);
+    expect(s.currentTask).toBe("check the review comment on 5811");
+  });
+
   it("currentTask falls back to the assistant's objective when the user turn is not actionable", () => {
     const s = toStructured("sid", [
       { role: "user", text: "Add a retry to the uploader.", raw: {} },
