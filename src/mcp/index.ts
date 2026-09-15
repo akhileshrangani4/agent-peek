@@ -25,12 +25,17 @@ import { HANDOFF_TARGETS, parseHandoffTarget } from "../core/handoff.js";
 const tools = [
   {
     name: "peek_session",
-    description: "Read a snapshot of another agent's chat session. mode=handoff returns `material` (instructions plus the compressed transcript): you are the harness, so write the handoff document from it yourself rather than expecting a finished one.",
+    description: "Read a snapshot of another agent's chat session. For \"what is that agent doing\" use mode=brief or structured. mode=handoff does not spawn anything: the result's `material` string is a complete prompt (writing instructions and the eight section headings, heuristic hints, then the compressed transcript between `--- transcript ---` and `--- end transcript ---`); you are the harness, so answer that prompt yourself and the markdown you produce is the handoff. `document` in that result is only a regex stub.",
     inputSchema: {
       type: "object",
       properties: {
         selector: { type: "string", description: "Session displayName, id, tag, or cwd." },
-        mode: { type: "string", enum: ["raw", "structured", "brief", "summary", "handoff"], default: "raw" },
+        mode: {
+          type: "string",
+          enum: ["raw", "structured", "brief", "summary", "handoff"],
+          default: "raw",
+          description: "raw: transcript messages (windowed). structured: stable fields (currentTask, activity, writingFiles, pending tools). brief: one-paragraph status; use this for \"what is that agent doing\". summary: prose. handoff: `material` for you to write a handoff document from.",
+        },
         target: { type: "string", description: "handoff mode: who the handoff is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat). Chat targets get code inlined; CLI targets get paths." },
         since: { type: "string", description: "Cursor returned by a prior peek." },
         limit: { type: "number", description: "Max raw messages (default 200)." },

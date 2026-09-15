@@ -89,7 +89,12 @@ export async function buildHandoff(sessionId: string, messages: RawMessage[], op
   const base = toHandoff(sessionId, messages, opts.cwd, target);
   const produce = opts.produce ?? (opts.runner ? "harness" : "local");
 
-  if (produce === "local") return base;
+  if (produce === "local") {
+    // Asked for (--local) is not the same as fallen back to (no CLI found): only the
+    // second should tell the reader to install something.
+    if (opts.produce !== "local") return base;
+    return { ...base, document: base.document.replace(/^> local fallback[^\n]*/, "> regex handoff (--local): fields below are pattern-extracted, not model-written.") };
+  }
 
   const transcript = compressTranscript(messages, { budgetChars: opts.budgetChars });
   const prompt = renderHandoffPrompt(transcript, {

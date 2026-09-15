@@ -132,6 +132,13 @@ describe("handoff.buildHandoff", () => {
     expect(s.document).toContain("src/mcp/index.ts");
   });
 
+  it("labels a deliberately local handoff as such instead of as a fallback", async () => {
+    const s = await buildHandoff("sid", msgs(), { cwd: "/work/repo", target: "generic", produce: "local" });
+    expect(s.provider).toBe("local");
+    expect(s.document).toMatch(/^> regex handoff \(--local\)/m);
+    expect(s.document).not.toMatch(/local fallback|Install claude/);
+  });
+
   it("falls back to local when the runner throws, and says why", async () => {
     const s = await buildHandoff("sid", msgs(), {
       cwd: "/work/repo",

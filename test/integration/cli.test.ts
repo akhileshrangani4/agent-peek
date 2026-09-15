@@ -184,6 +184,20 @@ describe("CLI integration", () => {
     expect(byStatus.stdout).toMatch(/old-claude/);
   });
 
+  it("list prints a header row and names the flag that reveals cut rows", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-many");
+    await mkdir(projDir, { recursive: true });
+    for (let i = 0; i < 3; i++) {
+      await writeFile(join(projDir, `s${i}.jsonl`), `{"type":"user","sessionId":"s${i}","cwd":"/tmp/many/${i}","timestamp":"${new Date().toISOString()}","message":{"role":"user","content":"hi"}}\n`, "utf8");
+    }
+    const r = await runCli(["list", "--limit", "2", "--width", "100"], { HOME: home });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/name\s+adapter\s+updated\s+cwd/);
+    expect(r.stdout).toMatch(/1 more \w+ · peek list --limit 3/);
+    expect(r.stdout).not.toMatch(/more \w+ · peek list --all/);
+  });
+
   it("list --json includes displayName", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const projDir = join(home, ".claude", "projects", "-tmp-json");
@@ -261,7 +275,8 @@ describe("CLI integration", () => {
     // --local skips the agent CLI: tests must never spawn a real harness.
     const local = await runCli(["at", "page-claude", "--mode", "handoff", "--local"], { HOME: home });
     expect(local.code).toBe(0);
-    expect(local.stdout).toMatch(/^> local fallback/m);
+    expect(local.stdout).toMatch(/^> regex handoff \(--local\)/m);
+    expect(local.stdout).not.toMatch(/Install claude/);
     expect(local.stdout).toMatch(/^# Handoff$/m);
     expect(local.stdout).toMatch(/## Next actions/);
     expect(local.stdout).not.toMatch(/nextCursor/); // stdout is the document; the cursor goes to stderr

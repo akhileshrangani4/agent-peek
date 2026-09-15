@@ -21,6 +21,21 @@ The handoff runner resolves past `~/.superset/bin` and `~/.superset-*/bin`. Supe
 codex wrapper, run headless, re-execs itself forever (one `codex exec --help` left about
 2,800 bash processes), and a runner that spawned it would do the same to the user's machine.
 
+A fresh agent was handed the CLI blind and asked where it stumbled; these are its findings.
+`check` marked every path in a shell command as written when the command wrote anything,
+so `node bin/peek.js list > out.json` was a write to `bin/peek.js` and any agent running a
+repo script conflicted with itself; shell commands now report only their targets, and
+`--ignore-self` (or `--ignore-session <name|id>`) drops the caller's own session and its
+subagents. `currentTask` preferred the assistant's last "Let me see..." over the user's ask,
+which is what brief, structured, coord and the handoff Goal all showed; the user's actionable
+turn comes first now. A raw window of tool-only messages printed a header and nothing else;
+it now says how many rows are hidden and names `--tools`. `--since` renumbered new messages
+from 1; positions are absolute. Bare `peek` exits 0 with the overview. Errors under `--json`
+are a JSON record. `--files-from -` works with a space. `peek list` has a header row, a
+`--limit`, a footer that names it, and `name` in every JSON row. `peek help` lists exit
+codes, the MCP server, and the difference between list's `status` and at's `activity`.
+The `--local` handoff header no longer claims no CLI was found.
+
 `inferTouchedFiles` never saw `file_path` or `notebook_path`, which is what Claude Code's
 Read, Edit, Write and NotebookEdit send, so touched-file lists for Claude Code sessions
 came only from shell commands. Both keys count now.

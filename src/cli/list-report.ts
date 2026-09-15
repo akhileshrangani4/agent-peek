@@ -32,15 +32,17 @@ export interface ListViewOptions {
   relativeTime: (iso: string) => string;
 }
 
-function Group({ status, entries, width, opts }: {
-  status: string; entries: ListEntry[]; width: number; opts: ListViewOptions;
+function Group({ status, entries, width, opts, first }: {
+  status: string; entries: ListEntry[]; width: number; opts: ListViewOptions; first: boolean;
 }): React.JSX.Element | null {
   if (entries.length === 0) return null;
   const limit = opts.limit ?? 12;
   const shown = entries.slice(0, limit);
-  const nameW = Math.max(...shown.map((e) => Math.min(e.displayName.length, 24)));
-  const adapterW = Math.max(...shown.map((e) => e.adapter.length));
-  const whenW = Math.max(...shown.map((e) => opts.relativeTime(e.lastSeen).length));
+  // Columns are sized to the data or the label, whichever is wider, so the header
+  // row never truncates its own words.
+  const nameW = Math.max("name".length, ...shown.map((e) => Math.min(e.displayName.length, 24)));
+  const adapterW = Math.max("adapter".length, ...shown.map((e) => e.adapter.length));
+  const whenW = Math.max("updated".length, ...shown.map((e) => opts.relativeTime(e.lastSeen).length));
   // The path gets whatever the fixed columns leave rather than a hardcoded 20: at 120
   // columns a fixed budget elides the segment that distinguishes two worktrees, which
   // is the only part of a 90-character path a reader is looking for.
@@ -54,6 +56,17 @@ function Group({ status, entries, width, opts }: {
       role: ROLE[status] ?? "plain",
       width,
     }),
+    // Column labels once, above the first group: without them a reader has to infer
+    // that the first column is the selector `peek at` wants.
+    first ? h(Row, {
+      cells: [
+        { text: "name", role: "muted", width: nameW },
+        { text: "adapter", role: "muted", width: adapterW },
+        { text: "updated", role: "muted", width: whenW, align: "right" },
+        { text: "cwd", role: "muted" },
+        ...(opts.showIds ? [{ text: "id", role: "muted" as Role }] : []),
+      ],
+    }) : null,
     h(Rows, {
       children: shown.map((e) => h(Row, {
         key: e.id,
@@ -71,7 +84,9 @@ function Group({ status, entries, width, opts }: {
     }),
     entries.length > shown.length
       ? h(Box, { marginTop: 1 },
-        h(Text, { dimColor: true }, `     ${num(entries.length - shown.length)} more · peek list --all`))
+        // --all means "include ended"; the rows cut here are hidden by the per-group
+        // limit, so name the flag that actually reveals them.
+        h(Text, { dimColor: true }, `     ${num(entries.length - shown.length)} more ${status} · peek list --limit ${entries.length}`))
       : null);
 }
 
@@ -106,11 +121,12 @@ export async function renderList(
     ...ORDER.map((s) => h(Group, {
       key: s, status: s, width, opts,
       entries: entries.filter((e) => e.status === s),
+      first: s === counts[0]?.[0],
     })),
     // A status the table does not know about must still appear, or a session vanishes
     // from a listing whose whole job is to say what is running.
     other.length > 0
-      ? h(Group, { status: "other", width, opts, entries: other })
+      ? h(Group, { status: "other", width, opts, entries: other, first: counts.length === 0 })
       : null);
   await renderStatic(view, { forceColor: opts.color, width: opts.width });
 }

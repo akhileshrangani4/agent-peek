@@ -115,8 +115,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--terminals", "Include terminal capture adapters (tmux, screen)")
     .option("--include-subagents", "Include subagent sessions spawned by another session")
     .option("--ids", "Show raw session ids")
+    .option("--limit <n>", "Rows per status group (default 12)")
     .option("--files", "Show active/recent file context for coordination")
-    .option("--json", "Output JSON with id, displayName, sourceType, cwd, and status")
+    .option("--json", "Output JSON with id, name, displayName, sourceType, cwd, and status")
     .action(async (target, opts) => {
       if (target === "adapters") {
         await listAdapters();
@@ -161,6 +162,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       if (opts.json) { console.log(JSON.stringify(withDisplayNames(list), null, 2)); return; }
       await renderList(withDisplayNames(list), {
         showIds: Boolean(opts.ids),
+        limit: opts.limit === undefined ? undefined : Math.max(1, Number(opts.limit) || 12),
         color: Boolean(opts.color),
         width: opts.width === undefined ? undefined : Number(opts.width),
         relativeTime,
@@ -1723,7 +1725,8 @@ function withDisplayNames<T extends { id: string; name?: string; tag?: string; a
   list: T[],
 ): (T & { displayName: string })[] {
   const names = displayNames(list);
-  return list.map((entry, i) => ({ ...entry, displayName: names[i]! }));
+  // Some adapters leave `name` empty; a JSON consumer should be able to key on one field.
+  return list.map((entry, i) => ({ ...entry, name: entry.name ?? names[i]!, displayName: names[i]! }));
 }
 
 function parseStatus(value: unknown): SessionEntry["status"] | undefined {
