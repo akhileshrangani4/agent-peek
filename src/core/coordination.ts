@@ -497,11 +497,12 @@ export function writeTargetsOfCommand(command: string): string[] {
     const path = match[1]?.trim();
     if (path) targets.push(path);
   }
-  // Output redirects: `> file`, `>> file`, `2> file`, `&> file`; not `<`, `<<`, `2>&1`.
-  const redirectPattern = /(?:^|[^<>])(?:\d?>>?|&>)\s*(['"]?)([^\s'"|;&<>]+)\1/g;
+  // Output redirects: `> file`, `>> file`, `2> file`, `&> file`; not `<`, `<<`, `2>&1`,
+  // and not the `>` inside `=>` or `->`, which is code quoted in the command, not a redirect.
+  const redirectPattern = /(?:^|[^<>=\-])(?:\d?>>?|&>)\s*(['"]?)([^\s'"|;&<>]+)\1/g;
   for (const match of command.matchAll(redirectPattern)) {
     const path = match[2];
-    if (path && !path.startsWith("&") && path !== "/dev/null") targets.push(path);
+    if (path && !path.startsWith("&") && path !== "/dev/null" && isPlausibleWriteTarget(path)) targets.push(path);
   }
   // Heredoc bodies are data, not commands: strip them before reading operands.
   const body = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2(?=\n|$)/g, "");
@@ -513,8 +514,8 @@ export function writeTargetsOfCommand(command: string): string[] {
     if (!tool) continue;
     const name = basename(tool);
     const operands = rest.filter((w) => !w.startsWith("-") && !/^\d?>>?/.test(w));
-    if (WRITE_OPERAND_TOOLS.test(name)) targets.push(...operands);
-    else if (WRITE_DEST_TOOLS.test(name) && operands.length >= 2) targets.push(operands[operands.length - 1]!);
+    if (WRITE_OPERAND_TOOLS.test(name)) targets.push(...operands.filter(isPlausibleWriteTarget));
+    else if (WRITE_DEST_TOOLS.test(name) && operands.length >= 2) targets.push(...[operands[operands.length - 1]!].filter(isPlausibleWriteTarget));
     else if (INPLACE_EDIT_TOOLS.test(name) && /(^|\s)-i\b/.test(segment)) {
       // Operands after the script are files; the script is the first operand not consumed by -e/-i.
       const files = operands.filter((w) => looksLikeCommandPath(w));
@@ -522,6 +523,13 @@ export function writeTargetsOfCommand(command: string): string[] {
     }
   }
   return [...new Set(targets.filter((t) => t && !t.includes("://")))];
+}
+
+/** A write target is a path, not a code fragment or an unexpanded variable. */
+function isPlausibleWriteTarget(value: string): boolean {
+  if (!value || /[()[\]{}<>|;&=`\\]/.test(value)) return false;
+  if (value.includes("$")) return false;
+  return /^[\w.~@/-]+$/.test(value);
 }
 
 function shellWords(segment: string): string[] {
@@ -674,9 +682,10 @@ function extractCommandPaths(value: string): string[] {
     const path = match[1]?.trim();
     if (path) paths.push(path);
   }
-  const tokenPattern = /(?:^|[\s'"])(\.{0,2}\/?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+(?:\.[A-Za-z0-9]{1,12})?)(?=$|[\s'"]|[:,])/g;
+  const tokenPattern = /(?:^|[\s'"])(\.{0,2}\/?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+(?:\.[A-Za-z0-9]{1,12})?)(?=$|[\s'"]|[:,;)])/g;
   for (const match of value.matchAll(tokenPattern)) {
-    const path = match[1]?.replace(/^['"]|['"]$/g, "");
+    // A path at the end of a sentence carries the sentence's punctuation.
+    const path = match[1]?.replace(/^['"]|['"]$/g, "").replace(/[.,;:]+$/, "");
     if (path && looksLikeCommandPath(path) && !path.includes("://")) paths.push(path);
   }
   return paths;

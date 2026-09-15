@@ -71,6 +71,13 @@ describe("snapshot.toStructured", () => {
     // Heredoc into a file writes the file; input redirect does not.
     s = run("cat <<'EOF' > src/f.ts\nhello\nEOF\nwc -l < src/a.ts");
     expect(s.writingFiles).toEqual(["/work/repo/src/f.ts"]);
+    // Code inside a command is not a redirect: `=>` is an arrow, `$VAR/x` is unexpanded,
+    // `bin/peek.js.` ends a sentence. None of these are files anyone wrote.
+    s = run('node -e "const f = (w) => !w.startsWith(1); xs.some((other) => other.id)" > $D/out.err 2>&1; grep -n "admitAppRun(app.id))" src/a.ts; echo done bin/peek.js.');
+    expect(s.writingFiles).toEqual([]);
+    expect(s.touchedFiles).toEqual(["/work/repo/src/a.ts", "/work/repo/bin/peek.js"].sort());
+    s = run("cat a.txt 2>/dev/null >/work/repo/log.txt && ls -> /work/repo/arrow.txt");
+    expect(s.writingFiles).toEqual(["/work/repo/log.txt"]);
     // apply_patch headers name their files.
     s = run("apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: src/g.ts\n*** End Patch\nEOF");
     expect(s.writingFiles).toEqual(["/work/repo/src/g.ts"]);
