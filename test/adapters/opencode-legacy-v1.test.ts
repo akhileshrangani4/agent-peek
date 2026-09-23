@@ -1,12 +1,12 @@
-// test/adapters/opencode.test.ts
+// test/adapters/opencode-legacy-v1.test.ts
 import { describe, it, expect } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import opencode from "../../src/adapters/opencode/index.js";
+import opencodeLegacyV1 from "../../src/adapters/opencode-legacy-v1/index.js";
 import { withEnv } from "../helpers/tmp-home.js";
 
-describe("opencode adapter", () => {
+describe("opencode-legacy-v1 adapter", () => {
   it("scans and reads filesystem storage", async () => {
     const data = await mkdtemp(join(tmpdir(), "opencode-data-"));
     const storage = join(data, "opencode", "storage");
@@ -44,12 +44,12 @@ describe("opencode adapter", () => {
     }), "utf8");
 
     await withEnv({ XDG_DATA_HOME: data }, async () => {
-      const sessions = await opencode.scan();
+      const sessions = await opencodeLegacyV1.scan();
       expect(sessions.length).toBe(1);
-      expect(sessions[0]!.id).toBe("opencode:ses_1");
+      expect(sessions[0]!.id).toBe("opencode-legacy-v1:ses_1");
       expect(sessions[0]!.name).toBe("work");
       expect(sessions[0]!.cwd).toBe("/tmp/repo");
-      const r = await opencode.read(sessions[0]!);
+      const r = await opencodeLegacyV1.read(sessions[0]!);
       expect(r.messages[0]!.role).toBe("user");
       expect(r.messages[0]!.text).toBe("fix auth");
       expect(r.messages[1]!.role).toBe("assistant");

@@ -1,4 +1,4 @@
-// src/adapters/opencode/index.ts
+// src/adapters/opencode-legacy-v1/index.ts
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -7,7 +7,7 @@ import type { Cursor, RawMessage, SessionEntry, ToolCall } from "../../core/type
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
 import { extractText, homeDir, statusFromMtime, toolCallFromPart, walkFiles } from "../common.js";
 
-const ADAPTER_NAME = "opencode";
+const ADAPTER_NAME = "opencode-legacy-v1";
 
 const adapter: Adapter = {
   name: ADAPTER_NAME,

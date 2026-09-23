@@ -366,7 +366,7 @@ describe("observes is declared on the adapter", () => {
       import("../../src/adapters/codex/index.js"),
       import("../../src/adapters/gemini/index.js"),
       import("../../src/adapters/goose/index.js"),
-      import("../../src/adapters/opencode/index.js"),
+      import("../../src/adapters/opencode-legacy-v1/index.js"),
       import("../../src/adapters/copilot-cli/index.js"),
       import("../../src/adapters/tmux/index.js"),
       import("../../src/adapters/screen/index.js"),

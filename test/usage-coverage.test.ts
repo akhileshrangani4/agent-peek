@@ -153,7 +153,7 @@ describe("adapter capability tables agree", () => {
     // rather than remembering to update the second place.
     const { adapterObserves, adapterAttributes } = await import("../src/agents/builtin.js");
     const adapters = [
-      "claude-code", "codex", "gemini", "goose", "opencode", "copilot-cli", "tmux", "screen",
+      "claude-code", "codex", "gemini", "goose", "opencode-legacy-v1", "copilot-cli", "tmux", "screen",
     ];
     for (const adapter of adapters) {
       const observes = adapterObserves(adapter);
