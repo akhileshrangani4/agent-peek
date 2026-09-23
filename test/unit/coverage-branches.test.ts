@@ -555,7 +555,7 @@ describe("createEngine factory branches", () => {
     const { home, cleanup } = await makeTmpHome();
     try {
       // Use empty HOME so adapter scans return [].
-      await withEnv({ HOME: home }, async () => {
+      await withEnv({ HOME: home, XDG_DATA_HOME: join(home, ".local", "share") }, async () => {
         const e = await createEngine({ home });
         const l = await e.list();
         expect(l).toEqual([]); // no sessions in the tmp home

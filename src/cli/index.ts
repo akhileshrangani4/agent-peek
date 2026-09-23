@@ -1070,7 +1070,7 @@ async function listAdapters(): Promise<void> {
 
 const ADAPTER_ALIASES: Record<string, string> = {
   claude: "claude-code", "claude-code": "claude-code", codex: "codex", gemini: "gemini",
-  copilot: "copilot-cli", "copilot-cli": "copilot-cli", opencode: "opencode-legacy-v1", "opencode-legacy-v1": "opencode-legacy-v1", goose: "goose", tmux: "tmux", screen: "screen",
+  copilot: "copilot-cli", "copilot-cli": "copilot-cli", opencode: "opencode", "opencode-legacy-v1": "opencode-legacy-v1", goose: "goose", tmux: "tmux", screen: "screen",
 };
 function adapterNameFromSelectorMessage(message: string): string | undefined {
   const selector = /selector: (\S+)/.exec(message)?.[1]?.toLowerCase();
@@ -2283,6 +2283,7 @@ async function doctorRows(): Promise<DoctorRow[]> {
     ? join(process.env.APPDATA, "Block", "goose", "data", "sessions", "sessions.db")
     : join(home, ".local", "share", "goose", "sessions", "sessions.db");
   const opencodeStorage = join(xdgData, "opencode", "storage");
+  const opencodeDb = join(xdgData, "opencode", "opencode.db");
   const rows: DoctorRow[] = [
     pathRow("claude-code", "file", join(home, ".claude", "projects")),
     pathRow("codex", "file", join(home, ".codex", "sessions")),
@@ -2293,6 +2294,12 @@ async function doctorRows(): Promise<DoctorRow[]> {
       command: "sqlite3",
       status: existsSync(gooseDb) ? await commandExists("sqlite3") ? "ready" : "needs command" : "not found",
       note: existsSync(gooseDb) ? "sqlite3 required to query Goose sessions" : undefined,
+    },
+    {
+      ...pathRow("opencode", "database", opencodeDb),
+      command: "sqlite3",
+      status: existsSync(opencodeDb) ? await commandExists("sqlite3") ? "ready" : "needs command" : "not found",
+      note: existsSync(opencodeDb) ? "sqlite3 required to query OpenCode V2 sessions" : undefined,
     },
     pathRow("opencode-legacy-v1", "directory", opencodeStorage),
     {

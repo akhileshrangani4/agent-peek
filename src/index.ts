@@ -4,7 +4,7 @@ import packageJson from "../package.json" with { type: "json" };
 export const VERSION = packageJson.version;
 
 export type {
-  SessionEntry, SessionStatus, Activity, FileClaim,
+  SessionEntry, SessionStatus, SessionExecution, SessionOutcome, Activity, FileClaim,
   RawMessage, ToolCall,
   Cursor, CursorData,
   Snapshot, RawSnapshot, StructuredSnapshot, BriefSnapshot, SummarySnapshot, HandoffSnapshot,
@@ -106,6 +106,7 @@ import codex from "./adapters/codex/index.js";
 import copilotCli from "./adapters/copilot-cli/index.js";
 import gemini from "./adapters/gemini/index.js";
 import goose from "./adapters/goose/index.js";
+import opencode from "./adapters/opencode/index.js";
 import opencodeLegacyV1 from "./adapters/opencode-legacy-v1/index.js";
 import screen from "./adapters/screen/index.js";
 import tmux from "./adapters/tmux/index.js";
@@ -130,6 +131,7 @@ export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine>
     loader.register(copilotCli);
     loader.register(gemini);
     loader.register(goose);
+    loader.register(opencode);
     loader.register(opencodeLegacyV1);
     loader.register(screen);
     loader.register(tmux);

@@ -3,6 +3,15 @@
 export type SessionStatus = "active" | "idle" | "ended";
 export type Activity = "idle" | "thinking" | "tool-running";
 export type SessionSourceType = "file" | "directory" | "database" | "terminal" | "manual";
+export type SessionOutcome = "succeeded" | "failed" | "interrupted";
+
+/** A provider's latest execution state, when its storage exposes one. */
+export interface SessionExecution {
+  state: "running" | "idle";
+  outcome?: SessionOutcome;
+  at?: string;
+  sequence?: number;
+}
 
 export interface SessionEntry {
   id: string;             // adapter-prefixed, e.g. "claude-code:abc-123"
@@ -15,6 +24,7 @@ export interface SessionEntry {
   sourceType?: SessionSourceType;
   lastSeen: string;       // ISO timestamp
   status: SessionStatus;
+  execution?: SessionExecution;
   /**
    * Set when this session is a subagent spawned by another: the id of the session that
    * spawned it. Absent for top-level sessions.
