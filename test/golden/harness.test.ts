@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
-import { projectOntoBaseline, serialize, structure } from "./harness.js";
+import { projectOntoBaseline, projectOntoRecorded, serialize, structure } from "./harness.js";
 import { Normalizer, RUN_WINDOW_MS } from "./normalize.js";
 import { REPO_ROOT } from "./fixture-home.js";
 
@@ -104,5 +104,33 @@ describe("projectOntoBaseline", () => {
 
   it("records in baseline order, so reordering registration is not a change", () => {
     expect(serialize(projectOntoBaseline([b, a], baseline).recorded)).toBe(serialize(projectOntoBaseline([a, b], baseline).recorded));
+  });
+});
+
+// The D9.10 golden policy: a re-record may add keys and nothing else.
+describe("projectOntoRecorded", () => {
+  const recorded = { snapshot: { mode: "brief", currentTask: "run tests", tools: ["Bash", { name: "Read" }] }, eof: true };
+  const same = (live: unknown): boolean => serialize(projectOntoRecorded(live, recorded)) === serialize(recorded);
+
+  it("accepts added keys at any depth, including inside array elements", () => {
+    expect(same({ eof: true, snapshot: { goal: "run tests", mode: "brief", currentTask: "run tests", tools: ["Bash", { name: "Read", id: "t1" }] } })).toBe(true);
+  });
+
+  it("rejects a changed value", () => {
+    expect(same({ snapshot: { mode: "brief", currentTask: "other", tools: ["Bash", { name: "Read" }] }, eof: true })).toBe(false);
+  });
+
+  it("rejects a removed key", () => {
+    expect(same({ snapshot: { mode: "brief", tools: ["Bash", { name: "Read" }] }, eof: true })).toBe(false);
+  });
+
+  it("rejects a list that grew, shrank or reordered", () => {
+    expect(same({ snapshot: { mode: "brief", currentTask: "run tests", tools: ["Bash", { name: "Read" }, "Edit"] }, eof: true })).toBe(false);
+    expect(same({ snapshot: { mode: "brief", currentTask: "run tests", tools: ["Bash"] }, eof: true })).toBe(false);
+    expect(same({ snapshot: { mode: "brief", currentTask: "run tests", tools: [{ name: "Read" }, "Bash"] }, eof: true })).toBe(false);
+  });
+
+  it("rejects a value whose type changed", () => {
+    expect(same({ snapshot: "brief", eof: true })).toBe(false);
   });
 });

@@ -10,6 +10,7 @@
 // Vitest refuses to create a missing golden, so an unrecorded case fails instead of
 // silently passing.
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { assertDistFresh as assertBuiltDistFresh } from "../helpers/fresh-dist.js";
@@ -76,8 +77,44 @@ export function serialize(record: unknown): string {
   return `${JSON.stringify(record, null, 2)}\n`;
 }
 
+/**
+ * The golden policy (spec D9.10): a golden may be re-recorded only to add keys. Before the
+ * comparison (and before `-u` overwrites anything) the live record is projected onto the
+ * checked-in golden's keys, and that projection must serialise byte-identically to the
+ * golden. A changed, removed or reordered-array value fails here even under `-u`.
+ */
 export async function expectGolden(suite: "cli" | "mcp", name: string, record: unknown): Promise<void> {
-  await expect(serialize(record)).toMatchFileSnapshot(join(SNAPSHOT_DIR, suite, `${name}.json`));
+  const path = join(SNAPSHOT_DIR, suite, `${name}.json`);
+  if (existsSync(path)) {
+    const recorded: unknown = JSON.parse(readFileSync(path, "utf8"));
+    expect(serialize(projectOntoRecorded(record, recorded)), `${suite}/${name}: a re-record may only add keys`)
+      .toBe(serialize(recorded));
+  }
+  await expect(serialize(record)).toMatchFileSnapshot(path);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * `live` restricted to the keys `recorded` has, recursively, in `recorded`'s key order.
+ * Arrays project element-wise only when their lengths match: a list that grew or shrank
+ * is a changed value, so it is returned whole and the comparison fails. A key `recorded`
+ * has and `live` lacks is left out, which also fails the comparison.
+ */
+export function projectOntoRecorded(live: unknown, recorded: unknown): unknown {
+  if (Array.isArray(recorded) && Array.isArray(live) && live.length === recorded.length) {
+    return live.map((value, index) => projectOntoRecorded(value, recorded[index]));
+  }
+  if (isPlainObject(recorded) && isPlainObject(live)) {
+    const projected: Record<string, unknown> = {};
+    for (const key of Object.keys(recorded)) {
+      if (key in live) projected[key] = projectOntoRecorded(live[key], recorded[key]);
+    }
+    return projected;
+  }
+  return live;
 }
 
 export interface SurfaceProjection<T extends { name: string }> {
