@@ -15,6 +15,7 @@
       "activity": "thinking",
       "brief": "Task: refactor auth Last assistant: Found it. Will rewrite next.",
       "currentTask": "refactor auth",
+      "goal": "refactor auth",
       "lastAssistantMessage": "Found it. Will rewrite next.",
       "pendingTools": [],
       "recentTools": [

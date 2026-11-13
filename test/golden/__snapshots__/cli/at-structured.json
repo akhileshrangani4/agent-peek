@@ -15,6 +15,7 @@
       "lastUserMessage": "refactor auth",
       "lastAssistantMessage": "Found it. Will rewrite next.",
       "currentTask": "refactor auth",
+      "goal": "refactor auth",
       "touchedFiles": [
         "/tmp/repo/auth.ts"
       ],

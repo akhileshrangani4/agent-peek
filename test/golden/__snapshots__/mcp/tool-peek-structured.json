@@ -17,6 +17,7 @@
             "lastUserMessage": "refactor auth",
             "lastAssistantMessage": "Found it. Will rewrite next.",
             "currentTask": "refactor auth",
+            "goal": "refactor auth",
             "touchedFiles": [],
             "writingFiles": [],
             "pendingToolCalls": [],

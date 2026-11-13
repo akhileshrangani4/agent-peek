@@ -17,6 +17,7 @@
             "activity": "tool-running",
             "brief": "Task: run tests Pending tools: Bash",
             "currentTask": "run tests",
+            "goal": "run tests",
             "pendingTools": [
               "Bash"
             ],
