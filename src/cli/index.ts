@@ -3,7 +3,7 @@ import { cac } from "cac";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createEngine, VERSION } from "../index.js";
 import type { Engine } from "../core/engine.js";
@@ -41,6 +41,7 @@ import { buildUsageReport } from "../usage/report.js";
 import type { GroupBy, UsageRow } from "../usage/index.js";
 import type { PostType } from "../feed/schema.js";
 import { resolveAuthor } from "../feed/identity.js";
+import { opencodeDatabases } from "../adapters/opencode/index.js";
 
 const execFileAsync = promisify(execFile);
 const TERMINAL_ADAPTERS = new Set(["tmux", "screen"]);
@@ -1070,7 +1071,7 @@ async function listAdapters(): Promise<void> {
 
 const ADAPTER_ALIASES: Record<string, string> = {
   claude: "claude-code", "claude-code": "claude-code", codex: "codex", gemini: "gemini",
-  copilot: "copilot-cli", "copilot-cli": "copilot-cli", opencode: "opencode", "opencode-legacy-v1": "opencode-legacy-v1", goose: "goose", tmux: "tmux", screen: "screen",
+  copilot: "copilot-cli", "copilot-cli": "copilot-cli", opencode: "opencode", "opencode-legacy-v1": "opencode", goose: "goose", tmux: "tmux", screen: "screen",
 };
 function adapterNameFromSelectorMessage(message: string): string | undefined {
   const selector = /selector: (\S+)/.exec(message)?.[1]?.toLowerCase();
@@ -2283,7 +2284,6 @@ async function doctorRows(): Promise<DoctorRow[]> {
     ? join(process.env.APPDATA, "Block", "goose", "data", "sessions", "sessions.db")
     : join(home, ".local", "share", "goose", "sessions", "sessions.db");
   const opencodeStorage = join(xdgData, "opencode", "storage");
-  const opencodeDb = join(xdgData, "opencode", "opencode.db");
   const rows: DoctorRow[] = [
     pathRow("claude-code", "file", join(home, ".claude", "projects")),
     pathRow("codex", "file", join(home, ".codex", "sessions")),
@@ -2295,13 +2295,9 @@ async function doctorRows(): Promise<DoctorRow[]> {
       status: existsSync(gooseDb) ? await commandExists("sqlite3") ? "ready" : "needs command" : "not found",
       note: existsSync(gooseDb) ? "sqlite3 required to query Goose sessions" : undefined,
     },
-    {
-      ...pathRow("opencode", "database", opencodeDb),
-      command: "sqlite3",
-      status: existsSync(opencodeDb) ? await commandExists("sqlite3") ? "ready" : "needs command" : "not found",
-      note: existsSync(opencodeDb) ? "sqlite3 required to query OpenCode V2 sessions" : undefined,
-    },
-    pathRow("opencode-legacy-v1", "directory", opencodeStorage),
+    // The 0.6.0 row (legacy filesystem storage) keeps its shape; V2 gets an added row.
+    pathRow("opencode", "directory", opencodeStorage),
+    opencodeDatabaseRow(),
     {
       adapter: "tmux",
       source: "terminal",
@@ -2318,6 +2314,25 @@ async function doctorRows(): Promise<DoctorRow[]> {
     },
   ];
   return rows;
+}
+
+/**
+ * OpenCode V2's database, resolved as the adapter resolves it (OPENCODE_DB, then
+ * opencode.db plus channel databases). Read through node:sqlite: no command needed.
+ */
+function opencodeDatabaseRow(): DoctorRow {
+  const { primary, existing } = opencodeDatabases();
+  if (!primary) {
+    return { adapter: "opencode", source: "database", status: "not found", note: "OPENCODE_DB=:memory: keeps no database on disk" };
+  }
+  const channels = existing.filter((path) => path !== primary).map((path) => basename(path));
+  return {
+    adapter: "opencode",
+    source: "database",
+    path: primary,
+    status: existing.length ? "ready" : "not found",
+    note: channels.length ? `also reading ${channels.join(", ")}` : undefined,
+  };
 }
 
 function pathRow(adapter: string, source: string, path: string): DoctorRow {

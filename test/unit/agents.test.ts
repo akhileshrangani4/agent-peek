@@ -367,12 +367,11 @@ describe("observes is declared on the adapter", () => {
       import("../../src/adapters/gemini/index.js"),
       import("../../src/adapters/goose/index.js"),
       import("../../src/adapters/opencode/index.js"),
-      import("../../src/adapters/opencode-legacy-v1/index.js"),
       import("../../src/adapters/copilot-cli/index.js"),
       import("../../src/adapters/tmux/index.js"),
       import("../../src/adapters/screen/index.js"),
     ]);
-    expect(adapters).toHaveLength(9);
+    expect(adapters).toHaveLength(8);
     for (const mod of adapters) {
       const adapter = mod.default;
       expect(adapterObserves(adapter.name)).toEqual(adapter.observes ?? []);

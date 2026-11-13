@@ -1,52 +1,54 @@
 // src/adapters/opencode-legacy-v1/index.ts
+//
+// OpenCode's pre-V2 filesystem storage (storage/{session,message,part}), as 0.6.0 read
+// it. This is not an adapter of its own: the `opencode` adapter merges it with V2's
+// opencode.db, so a legacy session keeps the exact `opencode:<id>` selector, the
+// `adapter: "opencode"` field and the msgIndex cursor it had in 0.6.0.
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
-import type { Adapter, AdapterReadResult } from "../types.js";
+import type { AdapterReadResult } from "../types.js";
 import type { Cursor, RawMessage, SessionEntry, ToolCall } from "../../core/types.js";
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
 import { extractText, homeDir, statusFromMtime, toolCallFromPart, walkFiles } from "../common.js";
 
-const ADAPTER_NAME = "opencode-legacy-v1";
+/** The id namespace and cursor adapter legacy sessions have always carried. */
+const ADAPTER_NAME = "opencode";
 
-const adapter: Adapter = {
-  name: ADAPTER_NAME,
+/** Sessions in the legacy filesystem storage, shaped exactly as 0.6.0 listed them. */
+export async function scanLegacyStorage(): Promise<SessionEntry[]> {
+  const sessionRoot = join(opencodeStorageRoot(), "session");
+  if (!existsSync(sessionRoot)) return [];
+  const files = (await walkFiles(sessionRoot)).filter((path) => path.endsWith(".json"));
+  const out: SessionEntry[] = [];
+  for (const path of files) {
+    let session: Record<string, unknown>;
+    try { session = JSON.parse(await readFile(path, "utf8")); } catch { continue; }
+    const id = typeof session.id === "string" ? session.id : basename(path, ".json");
+    const updated = timeFromSession(session);
+    out.push({
+      id: `${ADAPTER_NAME}:${id}`,
+      adapter: ADAPTER_NAME,
+      transcriptPath: path,
+      name: typeof session.title === "string" ? sanitizeName(session.title) : undefined,
+      cwd: typeof session.directory === "string" ? session.directory : undefined,
+      sourceType: "directory",
+      lastSeen: new Date(updated).toISOString(),
+      status: statusFromMtime(updated),
+    });
+  }
+  return out;
+}
 
-  observes: ["tool_call"],
-
-  async scan(): Promise<SessionEntry[]> {
-    const sessionRoot = join(opencodeStorageRoot(), "session");
-    if (!existsSync(sessionRoot)) return [];
-    const files = (await walkFiles(sessionRoot)).filter((path) => path.endsWith(".json"));
-    const out: SessionEntry[] = [];
-    for (const path of files) {
-      let session: Record<string, unknown>;
-      try { session = JSON.parse(await readFile(path, "utf8")); } catch { continue; }
-      const id = typeof session.id === "string" ? session.id : basename(path, ".json");
-      const updated = timeFromSession(session);
-      out.push({
-        id: `${ADAPTER_NAME}:${id}`,
-        adapter: ADAPTER_NAME,
-        transcriptPath: path,
-        name: typeof session.title === "string" ? sanitizeName(session.title) : undefined,
-        cwd: typeof session.directory === "string" ? session.directory : undefined,
-        sourceType: "directory",
-        lastSeen: new Date(updated).toISOString(),
-        status: statusFromMtime(updated),
-      });
-    }
-    return out;
-  },
-
-  async read(entry: SessionEntry, cursor?: Cursor): Promise<AdapterReadResult> {
-    let priorIndex = 0;
-    if (cursor) priorIndex = decodeCursor(cursor, ADAPTER_NAME).msgIndex;
-    const sessionId = entry.id.slice(ADAPTER_NAME.length + 1);
-    const messages = await readMessages(sessionId, dirname(dirname(entry.transcriptPath)));
-    const nextCursor = encodeCursor({ adapter: ADAPTER_NAME, byteOffset: messages.length, msgIndex: messages.length });
-    return { messages: messages.slice(Math.min(priorIndex, messages.length)), nextCursor, eof: true };
-  },
-};
+/** Read a legacy session; `transcriptPath` is its storage/session/<project>/<id>.json. */
+export async function readLegacyStorage(entry: SessionEntry, cursor?: Cursor): Promise<AdapterReadResult> {
+  let priorIndex = 0;
+  if (cursor) priorIndex = decodeCursor(cursor, ADAPTER_NAME).msgIndex;
+  const sessionId = entry.id.slice(ADAPTER_NAME.length + 1);
+  const messages = await readMessages(sessionId, dirname(dirname(entry.transcriptPath)));
+  const nextCursor = encodeCursor({ adapter: ADAPTER_NAME, byteOffset: messages.length, msgIndex: messages.length });
+  return { messages: messages.slice(Math.min(priorIndex, messages.length)), nextCursor, eof: true };
+}
 
 async function readMessages(sessionId: string, sessionRoot: string): Promise<RawMessage[]> {
   const storageRoot = dirname(sessionRoot);
@@ -126,5 +128,3 @@ function readNestedNumber(obj: Record<string, unknown>, path: string[]): number 
   }
   return typeof cur === "number" ? cur : undefined;
 }
-
-export default adapter;
