@@ -99,3 +99,15 @@ export class NotAProjectError extends Error {
     super(`Not a usable project directory: ${dir}`);
   }
 }
+
+/**
+ * A payload about to leave the machine holds something ADR 0002 keeps local. The message
+ * names the field by JSON pointer and never echoes its value: the value is the thing that
+ * must not travel, and error messages end up in logs and tool results.
+ */
+export class NonExportableFieldError extends Error {
+  readonly name = "NonExportableFieldError";
+  constructor(public kind: string, public pointer: string, public reason: string) {
+    super(`Refusing to export ${kind}: ${pointer || "/"} ${reason}.`);
+  }
+}
