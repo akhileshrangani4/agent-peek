@@ -242,9 +242,10 @@ describe("snapshot.toHandoff", () => {
       { role: "assistant", toolCalls: [{ name: "exec_command", input: { cmd: "curl https://example.com/foo/bar && echo Content-Type: application/json" }, status: "pending" }], raw: {} },
     ], process.cwd());
     expect(s.mode).toBe("handoff");
-    expect(s.decisions).toContain("Implemented MCP resources.");
+    // A bare outcome is not a decision, and the assistant's reply answered the ask (D9.3).
+    expect(s.decisions).toEqual([]);
     expect(s.nextActions).toContain("Next I will add prompts.");
-    expect(s.openQuestions).toContain("Can you add resources?");
+    expect(s.openQuestions).toEqual([]);
     expect(s.openQuestions).not.toContain("AskUserQuestion/Question: present choices?");
     expect(s.touchedFiles).toEqual([`${process.cwd()}/src/core/engine.ts`, `${process.cwd()}/src/mcp/index.ts`]);
     expect(s.recentTools).toContain("Read");
