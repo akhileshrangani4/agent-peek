@@ -49,6 +49,26 @@ describe("codex adapter", () => {
     expect(r.eof).toBe(true);
   });
 
+  // D3.7: `call_id` is what joins a function_call to its function_call_output. Before
+  // this fix the parser dropped it, so neither normalised ToolCall carried an `id`.
+  it("keeps call_id as ToolCall.id on both the call and its output", async () => {
+    const r = await codex.read(entry(fixture("multi-turn")));
+    const call = r.messages[3]!.toolCalls?.[0];
+    const result = r.messages[4]!.toolCalls?.[0];
+    expect(call?.id).toBe("call_abc123");
+    expect(result?.id).toBe("call_abc123");
+  });
+
+  it("omits ToolCall.id when a record has no call_id", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "co-noid-"));
+    const path = join(dir, "rollout.jsonl");
+    await writeFile(path,
+      `{"timestamp":"2026-01-01T00:00:00Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}"}}\n`,
+      "utf8");
+    const r = await codex.read(entry(path));
+    expect(r.messages[0]!.toolCalls?.[0]).not.toHaveProperty("id");
+  });
+
   it("returns empty for empty fixture", async () => {
     const r = await codex.read(entry(fixture("empty")));
     expect(r.messages.length).toBe(0);
