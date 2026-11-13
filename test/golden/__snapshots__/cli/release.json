@@ -1,0 +1,28 @@
+{
+  "argv": [
+    "release",
+    "src/verify.ts",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "released": 1,
+    "claims": [
+      {
+        "id": "<ID:1>",
+        "files": [
+          "<HOME>/repo/src/verify.ts"
+        ],
+        "owner": "golden-agent",
+        "creator": "<USER>@<HOST>:<HOME>/repo",
+        "cwd": "<HOME>/repo",
+        "createdAt": "<NOW>",
+        "expiresAt": "<NOW>"
+      }
+    ],
+    "files": [
+      "<HOME>/repo/src/verify.ts"
+    ]
+  },
+  "stderr": null
+}

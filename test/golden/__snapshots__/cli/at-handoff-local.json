@@ -1,0 +1,43 @@
+{
+  "argv": [
+    "at",
+    "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+    "--mode",
+    "handoff",
+    "--local",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "snapshot": {
+      "mode": "handoff",
+      "sessionId": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+      "messageCount": 6,
+      "activity": "thinking",
+      "currentTask": "refactor auth",
+      "lastAssistantMessage": "Found it. Will rewrite next.",
+      "decisions": [],
+      "openQuestions": [],
+      "nextActions": [
+        "Will rewrite next."
+      ],
+      "touchedFiles": [],
+      "pendingTools": [],
+      "recentTools": [
+        "exec_command"
+      ],
+      "target": "generic",
+      "document": "> regex handoff (--local): fields below are pattern-extracted, not model-written.\n\n# Handoff\n\n## Goal\nrefactor auth\n\n## Current state\nactivity: thinking; 6 messages.\nLast assistant message: Found it. Will rewrite next.\n\n## Decisions and why\n(none found)\n\n## Files\n(none found)\n\n## Open questions / blockers\n(none found)\n\n## Next actions\n- Will rewrite next.\n\n## Gotchas\nUnknown: not extractable without a model. The recent commands below show what was tried.\n\n## Environment\ncwd: /tmp/repo\nrecent tools: exec_command\n\nRecent commands (oldest first), with how their output read:\n- `cat auth.ts` -> ok",
+      "provider": "local"
+    },
+    "nextCursor": {
+      "$cursor": {
+        "adapter": "codex",
+        "byteOffset": 1204,
+        "msgIndex": 6
+      }
+    },
+    "eof": true
+  },
+  "stderr": null
+}

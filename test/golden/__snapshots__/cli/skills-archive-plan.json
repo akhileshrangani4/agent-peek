@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "skills",
+    "archive",
+    "idle-skill",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": [
+    "would archive idle-skill:",
+    "  move    (this is the content)  claude-code  ~/.claude/skills/idle-skill",
+    "",
+    "nothing has changed. Re-run with --yes to execute."
+  ],
+  "stderr": null
+}

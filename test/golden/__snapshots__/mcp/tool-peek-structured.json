@@ -1,0 +1,47 @@
+{
+  "tool": "peek_session",
+  "arguments": {
+    "selector": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+    "mode": "structured"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "snapshot": {
+            "mode": "structured",
+            "sessionId": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+            "messageCount": 6,
+            "lastUserMessage": "refactor auth",
+            "lastAssistantMessage": "Found it. Will rewrite next.",
+            "currentTask": "refactor auth",
+            "touchedFiles": [],
+            "writingFiles": [],
+            "pendingToolCalls": [],
+            "lastToolCalls": [
+              {
+                "name": "exec_command",
+                "input": {
+                  "cmd": "cat auth.ts"
+                },
+                "status": "pending",
+                "id": "call_abc123"
+              }
+            ],
+            "activity": "thinking"
+          },
+          "nextCursor": {
+            "$cursor": {
+              "adapter": "codex",
+              "byteOffset": 1204,
+              "msgIndex": 6
+            }
+          },
+          "eof": true
+        }
+      }
+    ]
+  }
+}

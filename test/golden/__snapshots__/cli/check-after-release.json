@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "check",
+    "src/verify.ts",
+    "--include-self",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "ok": true,
+    "files": [
+      {
+        "file": "<HOME>/repo/src/verify.ts",
+        "conflicts": []
+      }
+    ],
+    "conflictCount": 0
+  },
+  "stderr": null
+}
