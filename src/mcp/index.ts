@@ -1,4 +1,7 @@
 // src/mcp/index.ts
+//
+// The stdio MCP server: tools from the shared registry, plus the prompts and resources
+// only a local client uses. Every handler goes through the app services.
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -6,231 +9,11 @@ import {
   ListResourceTemplatesRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createEngine, VERSION } from "../index.js";
-import type { PeekResult, SessionEntry, SnapshotMode } from "../core/types.js";
-import { displayNames } from "../core/names.js";
-import {
-  AmbiguousSelectorError, InvalidCursorError, NotAProjectError,
-  PostNotFoundError, PostRejectedError, SessionNotFoundError,
-} from "../core/errors.js";
-import { expandPost, postToFeed, readFeed } from "../feed/index.js";
-import {
-  usageTool, skillsTool, skillDetailTool, archivePlanTool, agentsTool,
-  DEFAULT_LIMIT, MAX_LIMIT,
-} from "./skills.js";
-import { ArchiveRefusedError } from "../skills/archive.js";
-import type { PostInput, PostType } from "../feed/index.js";
-import { HANDOFF_TARGETS, parseHandoffTarget } from "../core/handoff.js";
-
-const tools = [
-  {
-    name: "peek_session",
-    description: "Read a snapshot of another agent's chat session. For \"what is that agent doing\" use mode=brief or structured. mode=handoff does not spawn anything: the result's `material` string is a complete prompt (writing instructions and the eight section headings, heuristic hints, then the compressed transcript between `--- transcript ---` and `--- end transcript ---`); you are the harness, so answer that prompt yourself and the markdown you produce is the handoff. `document` in that result is only a regex stub.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        selector: { type: "string", description: "Session displayName, id, tag, or cwd." },
-        mode: {
-          type: "string",
-          enum: ["raw", "structured", "brief", "summary", "handoff"],
-          default: "raw",
-          description: "raw: transcript messages (windowed). structured: stable fields (currentTask, activity, writingFiles, pending tools). brief: one-paragraph status; use this for \"what is that agent doing\". summary: prose. handoff: `material` for you to write a handoff document from.",
-        },
-        target: { type: "string", description: "handoff mode: who the handoff is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat). Chat targets get code inlined; CLI targets get paths." },
-        since: { type: "string", description: "Cursor returned by a prior peek." },
-        limit: { type: "number", description: "Max raw messages (default 200)." },
-        first: { type: "number", description: "Show the first N raw messages." },
-        last: { type: "number", description: "Show the last N raw messages." },
-        around: { type: "number", description: "Show raw messages around this 1-based message number." },
-        offset: { type: "number", description: "Skip N messages from the selected raw edge." },
-        reverse: { type: "boolean", description: "Return raw messages newest-first." },
-      },
-      required: ["selector"],
-    },
-  },
-  {
-    name: "list_sessions",
-    description: "List discovered agent sessions.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        adapter: { type: "string" },
-        status: { type: "string", enum: ["active", "idle", "ended"] },
-        includeEnded: { type: "boolean", description: "Include ended sessions when status is not provided." },
-        includeTerminal: { type: "boolean", description: "Include terminal capture adapters such as tmux and screen." },
-      },
-    },
-  },
-  {
-    name: "coordination_digest",
-    description: "Summarize nearby agent activity, changes since a prior digest, and possible overlap.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        cwd: { type: "string", description: "Working directory to summarize. Omit to include all active sessions." },
-        adapter: { type: "string" },
-        status: { type: "string", enum: ["active", "idle", "ended"] },
-        writingOnly: { type: "boolean", description: "Only include sessions with recent write intent." },
-        since: { type: "string", description: "Coordination cursor returned by a prior digest." },
-        includeEnded: { type: "boolean", description: "Include ended sessions." },
-        includeTerminal: { type: "boolean", description: "Include terminal capture adapters such as tmux and screen." },
-      },
-    },
-  },
-  {
-    name: "tag_session",
-    description: "Give a session a friendly tag for easier addressing.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "string" },
-        tag: { type: "string" },
-      },
-      required: ["id", "tag"],
-    },
-  },
-];
-
-const FEED_TOOLS = [
-  {
-    name: "post_to_feed",
-    description: "Publish a token-budgeted context post (finding, intent, warning, question, answer, handoff, status) to this project's feed so other agents can ingest it instead of re-exploring.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        type: { type: "string", enum: ["finding", "intent", "warning", "question", "answer", "handoff", "status"] },
-        title: { type: "string", description: "Max 80 chars" },
-        text: { type: "string", description: "Max ~150 tokens; link evidence instead of inlining" },
-        dir: { type: "string", description: "Project directory; defaults to server cwd" },
-        paths: { type: "array", items: { type: "string" }, description: "Repo-relative paths (required for finding/warning)" },
-        topics: { type: "array", items: { type: "string" } },
-        reply_to: { type: "string" },
-        supersedes: { type: "string" },
-        mentions: { type: "array", items: { type: "string" } },
-        ttl_ms: { type: "number" },
-        as: { type: "string", description: "Author identity override" },
-      },
-      required: ["type", "title", "text"],
-    },
-  },
-  {
-    name: "read_feed",
-    description: "Read this project's context feed: posts from other agents ranked by relevance to your working set and packed to a token budget. Call before exploring the repo.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        dir: { type: "string" },
-        budget: { type: "number", description: "Token budget, default 600" },
-        context_paths: { type: "array", items: { type: "string" }, description: "Paths you are working on (improves ranking)" },
-        since: { type: "string", description: "Cursor from a prior read_feed" },
-        types: { type: "array", items: { type: "string" } },
-        reader: { type: "string", description: "Your session identity (boosts mentions)" },
-        include_derived: { type: "boolean", description: "Include derived status/overlap posts, default true" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "expand_post",
-    description: "Fetch one feed post in full, including evidence references, before trusting or acting on it.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        post_id: { type: "string" },
-        dir: { type: "string" },
-      },
-      required: ["post_id"],
-    },
-  },
-  {
-    name: "usage_report",
-    description:
-      "Which skills and tools have actually been invoked, across every agent, from peek's "
-      + "durable index. Returns an envelope carrying the observed window, per-adapter "
-      + "windows, and the agents peek cannot see — counts are meaningless without them.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        groupBy: {
-          type: "string",
-          description: "Dimension(s), comma-separated: skill|tool|agent|adapter|day|cwd|sourceKind|sidechain|attributionAgent. Default skill.",
-        },
-        skill: { type: "string", description: "Only this skill or command name." },
-        agent: { type: "string", description: "Only this agent slug." },
-        adapter: { type: "string" },
-        tool: { type: "string", description: "Only invocations of this tool. Default: skills only." },
-        allTools: { type: "boolean", description: "Every tool, not just skills." },
-        sourceKind: { type: "string", enum: ["tool_call", "slash_command"] },
-        sidechain: { type: "boolean", description: "true for subagent calls only, false for main loop only." },
-        attributionAgent: { type: "string", description: "Subagent type that made the call." },
-        since: { type: "string", description: "ISO instant, inclusive." },
-        until: { type: "string", description: "ISO instant, exclusive." },
-        includeBuiltins: { type: "boolean", description: "Keep CLI built-ins like /clear, which are recorded but are not skills." },
-        limit: { type: "number", description: `Rows to return (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` },
-      },
-    },
-  },
-  {
-    name: "skills_report",
-    description:
-      "Skill inventory segmented by what can honestly be acted on: archivable, unknown "
-      + "usage, read-only, in use. Summary first with per-segment totals, then a capped "
-      + "slice. Needs the usage index; without it, segments are withheld rather than "
-      + "reporting every skill as unused.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        segment: {
-          type: "string",
-          enum: ["archivable", "unknown-usage", "read-only", "in-use"],
-          description: "Return rows for one segment only. Totals for every segment are always included.",
-        },
-        limit: { type: "number", description: `Rows per segment (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` },
-      },
-    },
-  },
-  {
-    name: "skill_detail",
-    description:
-      "One skill: its installations per agent, what archiving each would do, per-agent "
-      + "usage coverage, and cost. Returns paths and flags, never SKILL.md content.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        skill: { type: "string", description: "Skill name or key, as returned by skills_report." },
-      },
-      required: ["skill"],
-    },
-  },
-  {
-    name: "archive_plan",
-    description:
-      "What archiving a skill WOULD do, plus the command a human runs to do it. Changes "
-      + "nothing: peek exposes no tool that can archive, because dry-run-by-default works "
-      + "by a person reading the plan.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        skill: { type: "string", description: "Skill name or key." },
-        agent: { type: "string", description: "Limit to one agent's installation." },
-        allAgents: { type: "boolean", description: "Retire from every mutable root." },
-      },
-      required: ["skill"],
-    },
-  },
-  {
-    name: "list_agents",
-    description:
-      "Coding agents peek knows: which are on this machine, whether each entry is verified "
-      + "or sourced from a third-party table, and what peek can observe and attribute for each.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        all: { type: "boolean", description: "Include agents peek knows of that are not installed here." },
-      },
-    },
-  },
-];
+import { VERSION } from "../index.js";
+import { createApp } from "../app/index.js";
+import { projectAt } from "../app/project.js";
+import { withDisplayNames, type SessionView } from "../app/sessions.js";
+import { callTool, toolListing, TOOLS, type ToolContext } from "./tools.js";
 
 const prompts = [
   {
@@ -255,13 +38,16 @@ const prompts = [
 ];
 
 export async function run(): Promise<void> {
-  const engine = await createEngine({ withExternal: true });
+  const app = await createApp({ withExternal: true });
+  // Feed tools and the feed resource fall back to the server's own directory: a local
+  // client launches the server inside the project it is working on.
+  const ctx: ToolContext = { app, defaultDir: () => process.cwd() };
   const server = new Server(
     { name: "agent-peek", version: VERSION },
     { capabilities: { tools: {}, resources: {}, prompts: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...tools, ...FEED_TOOLS] }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS.map(toolListing) }));
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts }));
   server.setRequestHandler(GetPromptRequestSchema, async (req) => {
     const args = req.params.arguments ?? {};
@@ -307,8 +93,7 @@ export async function run(): Promise<void> {
     throw new Error(`Unknown prompt: ${req.params.name}`);
   });
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    const list = await activeSessions(engine);
-    const named = withDisplayNames(list);
+    const named = withDisplayNames(await app.sessions.active());
     return {
       resources: [
         {
@@ -369,180 +154,21 @@ export async function run(): Promise<void> {
   server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
     const uri = String(req.params.uri);
     if (uri === "agent-peek://sessions") {
-      const list = await activeSessions(engine);
-      return jsonResource(uri, withDisplayNames(list));
+      return jsonResource(uri, withDisplayNames(await app.sessions.active()));
     }
     if (uri === "agent-peek://feed") {
-      const result = await readFeed({ dir: process.cwd(), budget: 600, engine });
+      const result = await app.feed.read(projectAt(ctx.defaultDir()), { budget: 600 });
       return jsonResource(uri, result);
     }
     const parsed = parseSessionResource(uri);
     if (!parsed) throw new Error(`Unknown resource: ${uri}`);
-    const result = await readSessionResource(engine, parsed.selector, parsed.view);
+    const result = await app.sessions.view(parsed.selector, parsed.view);
     return jsonResource(uri, result);
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
-    if (name === "peek_session") {
-      try {
-        const target = parseHandoffTarget(args.target);
-        if (!target) return feedToolError(new Error(`Unknown handoff target: ${String(args.target)}. Use one of ${HANDOFF_TARGETS.join(", ")}.`));
-        const r = await engine.peek(String(args.selector), {
-          mode: parseSnapshotMode(args.mode),
-          target,
-          produce: "material",
-          since: args.since ? String(args.since) : undefined,
-          limit: rawLimit(args),
-          offset: typeof args.offset === "number" ? args.offset : undefined,
-          around: typeof args.around === "number" ? args.around : undefined,
-          from: typeof args.first === "number" ? "start" : "end",
-          order: args.reverse === true ? "newest-first" : "oldest-first",
-        });
-        return { content: [{ type: "text", text: JSON.stringify(r) }] };
-      } catch (error) {
-        return feedToolError(error);
-      }
-    }
-    if (name === "list_sessions") {
-      try {
-        const status = parseStatus(args.status);
-        let list = await engine.list({
-          adapter: args.adapter ? String(args.adapter) : undefined,
-          status,
-          includeTerminal: args.includeTerminal === true || isTerminalAdapter(args.adapter),
-        });
-        if (!status && args.includeEnded !== true) {
-          list = list.filter((entry) => entry.status !== "ended");
-        }
-        return { content: [{ type: "text", text: JSON.stringify(withDisplayNames(list)) }] };
-      } catch (error) {
-        return feedToolError(error);
-      }
-    }
-    if (name === "coordination_digest") {
-      try {
-        const digest = await engine.coordinate({
-          cwd: args.cwd ? String(args.cwd) : undefined,
-          adapter: args.adapter ? String(args.adapter) : undefined,
-          status: parseStatus(args.status),
-          writingOnly: args.writingOnly === true,
-          since: args.since ? String(args.since) : undefined,
-          includeEnded: args.includeEnded === true,
-          includeTerminal: args.includeTerminal === true || isTerminalAdapter(args.adapter),
-        });
-        return { content: [{ type: "text", text: JSON.stringify(digest) }] };
-      } catch (error) {
-        return feedToolError(error);
-      }
-    }
-    if (name === "tag_session") {
-      try {
-        await engine.tag(String(args.id), String(args.tag));
-        return { content: [{ type: "text", text: "ok" }] };
-      } catch (error) {
-        return feedToolError(error);
-      }
-    }
-    if (name === "post_to_feed") {
-      try {
-        const post = await postToFeed({
-          dir: args.dir ? String(args.dir) : process.cwd(),
-          engine,
-          as: args.as ? String(args.as) : undefined,
-          input: {
-            type: String(args.type) as PostType,
-            title: String(args.title),
-            text: String(args.text),
-            paths: stringArray(args.paths),
-            topics: stringArray(args.topics),
-            replyTo: args.reply_to ? String(args.reply_to) : undefined,
-            supersedes: args.supersedes ? String(args.supersedes) : undefined,
-            mentions: stringArray(args.mentions),
-            ttlMs: typeof args.ttl_ms === "number" ? args.ttl_ms : undefined,
-          } satisfies Omit<PostInput, "project" | "author">,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(post) }] };
-      } catch (error) {
-        return feedToolError(error);
-      }
-    }
-    if (name === "read_feed") {
-      try {
-        const result = await readFeed({
-          dir: args.dir ? String(args.dir) : process.cwd(),
-          engine,
-          budget: typeof args.budget === "number" ? args.budget : undefined,
-          contextPaths: stringArray(args.context_paths),
-          since: args.since ? String(args.since) : undefined,
-          types: args.types ? (stringArray(args.types) as PostType[]) : undefined,
-          reader: args.reader ? String(args.reader) : undefined,
-          includeDerived: typeof args.include_derived === "boolean" ? args.include_derived : undefined,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
-      } catch (error) {
-        return feedToolError(error);
-      }
-    }
-    if (name === "expand_post") {
-      try {
-        const post = await expandPost({
-          dir: args.dir ? String(args.dir) : process.cwd(),
-          postId: String(args.post_id),
-        });
-        return { content: [{ type: "text", text: JSON.stringify(post) }] };
-      } catch (error) {
-        return feedToolError(error);
-      }
-    }
-    // Arguments are destructured field by field, never forwarded as an object: `home` is
-    // a test-only parameter on these functions, and passing the caller's arguments
-    // straight through would let an MCP client point peek at an arbitrary directory tree.
-    // No tool on this surface takes a path.
-    if (name === "usage_report") {
-      return json(await usageTool({
-        groupBy: args.groupBy === undefined ? undefined : String(args.groupBy),
-        skill: args.skill === undefined ? undefined : String(args.skill),
-        agent: args.agent === undefined ? undefined : String(args.agent),
-        adapter: args.adapter === undefined ? undefined : String(args.adapter),
-        tool: args.tool === undefined ? undefined : String(args.tool),
-        allTools: args.allTools === true,
-        sourceKind: args.sourceKind === undefined ? undefined : String(args.sourceKind),
-        sidechain: typeof args.sidechain === "boolean" ? args.sidechain : undefined,
-        attributionAgent: args.attributionAgent === undefined ? undefined : String(args.attributionAgent),
-        since: args.since === undefined ? undefined : String(args.since),
-        until: args.until === undefined ? undefined : String(args.until),
-        includeBuiltins: args.includeBuiltins === true,
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-      }));
-    }
-    if (name === "skills_report") {
-      return json(await skillsTool({
-        segment: args.segment === undefined ? undefined : String(args.segment),
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-      }));
-    }
-    if (name === "skill_detail") {
-      try {
-        return json(await skillDetailTool({ skill: String(args.skill) }));
-      } catch (error) {
-        if (error instanceof ArchiveRefusedError) {
-          return json({ refused: { reason: error.reason, message: error.message, detail: error.detail } });
-        }
-        throw error;
-      }
-    }
-    if (name === "archive_plan") {
-      return json(await archivePlanTool({
-        skill: String(args.skill),
-        agent: args.agent ? String(args.agent) : undefined,
-        allAgents: args.allAgents === true,
-      }));
-    }
-    if (name === "list_agents") {
-      return json(await agentsTool({ all: args.all === true }));
-    }
-    throw new Error(`Unknown tool: ${name}`);
+    return callTool(TOOLS, name, args, ctx);
   });
 
   const transport = new StdioServerTransport();
@@ -565,16 +191,11 @@ function requirePromptArg(args: Record<string, unknown>, name: string): string {
   throw new Error(`Missing required prompt argument: ${name}`);
 }
 
-async function activeSessions(engine: Awaited<ReturnType<typeof createEngine>>): Promise<SessionEntry[]> {
-  const list = await engine.list({ includeTerminal: false });
-  return list.filter((entry) => entry.status !== "ended");
-}
-
-function sessionResourceUri(selector: string, view: "brief" | "handoff" | "tail"): string {
+function sessionResourceUri(selector: string, view: SessionView): string {
   return `agent-peek://session/${encodeURIComponent(selector)}/${view}`;
 }
 
-function parseSessionResource(uri: string): { selector: string; view: "brief" | "handoff" | "tail" } | undefined {
+function parseSessionResource(uri: string): { selector: string; view: SessionView } | undefined {
   let parsed: URL;
   try {
     parsed = new URL(uri);
@@ -589,21 +210,6 @@ function parseSessionResource(uri: string): { selector: string; view: "brief" | 
   return { selector: decodeURIComponent(parts[0]!), view };
 }
 
-async function readSessionResource(
-  engine: Awaited<ReturnType<typeof createEngine>>,
-  selector: string,
-  view: "brief" | "handoff" | "tail",
-): Promise<PeekResult> {
-  if (view === "brief") return engine.peek(selector, { mode: "brief" });
-  if (view === "handoff") return engine.peek(selector, { mode: "handoff", produce: "material" });
-  return engine.peek(selector, { mode: "raw", limit: 50 });
-}
-
-/** Tool results travel as one JSON text block, matching the existing tools. */
-function json(value: unknown): { content: { type: "text"; text: string }[] } {
-  return { content: [{ type: "text", text: JSON.stringify(value) }] };
-}
-
 function jsonResource(uri: string, value: unknown): { contents: { uri: string; mimeType: string; text: string }[] } {
   return {
     contents: [{
@@ -612,52 +218,6 @@ function jsonResource(uri: string, value: unknown): { contents: { uri: string; m
       text: JSON.stringify(value),
     }],
   };
-}
-
-function rawLimit(args: Record<string, unknown>): number | undefined {
-  if (typeof args.first === "number") return args.first;
-  if (typeof args.last === "number") return args.last;
-  if (typeof args.limit === "number") return args.limit;
-  return undefined;
-}
-
-function withDisplayNames<T extends { id: string; name?: string; tag?: string; adapter: string; cwd?: string }>(
-  list: T[],
-): (T & { displayName: string })[] {
-  const names = displayNames(list);
-  return list.map((entry, i) => ({ ...entry, displayName: names[i]! }));
-}
-
-function parseStatus(value: unknown): SessionEntry["status"] | undefined {
-  if (value === undefined) return undefined;
-  if (value === "active" || value === "idle" || value === "ended") return value;
-  throw new Error(`invalid status: ${String(value)}`);
-}
-
-function parseSnapshotMode(value: unknown): SnapshotMode {
-  if (value === undefined) return "raw";
-  if (value === "raw" || value === "structured" || value === "brief" || value === "summary" || value === "handoff") {
-    return value;
-  }
-  throw new Error(`invalid mode: ${String(value)}`);
-}
-
-function isTerminalAdapter(adapter: unknown): boolean {
-  return adapter === "tmux" || adapter === "screen";
-}
-
-function stringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  return value.map((v) => String(v));
-}
-
-function feedToolError(error: unknown): { isError: true; content: { type: "text"; text: string }[] } {
-  if (error instanceof PostRejectedError || error instanceof PostNotFoundError || error instanceof NotAProjectError
-      || error instanceof InvalidCursorError || error instanceof SessionNotFoundError
-      || error instanceof AmbiguousSelectorError) {
-    return { isError: true, content: [{ type: "text", text: error.message }] };
-  }
-  throw error;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

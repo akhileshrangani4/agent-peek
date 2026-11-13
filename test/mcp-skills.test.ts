@@ -3,7 +3,6 @@
 // The MCP surface (ticket 08). Every test runs against a mkdtemp home: nothing here
 // reads or writes a real skill root, and nothing builds an index outside the fixture.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +12,7 @@ import {
   usageTool, skillsTool, skillDetailTool, archivePlanTool, agentsTool,
   indexState, clampLimit, parseGroupBy, parseSegment, summarize, DEFAULT_LIMIT, MAX_LIMIT,
 } from "../src/mcp/skills.js";
+import { usageToolArgs } from "../src/mcp/tools.js";
 import type { SkillsReport } from "../src/skills/report.js";
 
 /**
@@ -277,14 +277,13 @@ describe("the surface takes no path", () => {
     expect(parseSegment(undefined)).toBeUndefined();
   });
 
-  it("ignores a home argument supplied by an MCP caller", async () => {
-    // `home` exists for tests. The handler destructures arguments field by field, so a
-    // client cannot point peek at an arbitrary directory tree; this asserts the handler's
-    // argument list, which is the thing that enforces it.
-    const src = await readFile(new URL("../src/mcp/index.ts", import.meta.url), "utf8");
-    const handler = src.slice(src.indexOf('if (name === "usage_report")'), src.indexOf('if (name === "skill_detail")'));
-    expect(handler).not.toMatch(/home/);
-    expect(handler).toMatch(/args\.groupBy/);
+  it("ignores a home argument supplied by an MCP caller", () => {
+    // `home` exists for tests. The registry copies usage_report arguments field by field,
+    // so a client cannot point peek at an arbitrary directory tree.
+    const args = usageToolArgs({ home: "/somewhere/else", groupBy: "tool", limit: 5 });
+    expect(args).not.toHaveProperty("home");
+    expect(args.groupBy).toBe("tool");
+    expect(args.limit).toBe(5);
   });
 });
 
