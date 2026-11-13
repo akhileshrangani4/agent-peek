@@ -1,12 +1,11 @@
 // src/adapters/opencode/index.ts
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { Cursor, RawMessage, SessionEntry, ToolCall } from "../../core/types.js";
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
-import { extractText, statusFromMtime, toolCallFromPart, walkFiles } from "../common.js";
+import { extractText, homeDir, statusFromMtime, toolCallFromPart, walkFiles } from "../common.js";
 
 const ADAPTER_NAME = "opencode";
 
@@ -104,7 +103,7 @@ function extractPartText(part: Record<string, unknown>): string | undefined {
 function opencodeStorageRoot(): string {
   const data = process.env.XDG_DATA_HOME
     ? join(process.env.XDG_DATA_HOME, "opencode")
-    : join(process.env.HOME ?? homedir(), ".local", "share", "opencode");
+    : join(homeDir(), ".local", "share", "opencode");
   return join(data, "storage");
 }
 

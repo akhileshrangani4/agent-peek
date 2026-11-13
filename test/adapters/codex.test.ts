@@ -8,6 +8,7 @@ import codex from "../../src/adapters/codex/index.js";
 import type { SessionEntry } from "../../src/core/types.js";
 import { encodeCursor } from "../../src/core/cursor.js";
 import { runAdapterConformance } from "../helpers/adapter-conformance.js";
+import { withEnv } from "../helpers/tmp-home.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string) => resolve(__dirname, "../fixtures/codex", name, "transcript.jsonl");
@@ -129,5 +130,23 @@ describe("codex adapter", () => {
     expect(sessions[0]!.id).toBe(`codex:${sessUuid}`);
     expect(sessions[0]!.cwd).toBe("/tmp/repo");
     expect(sessions[0]!.transcriptPath).toBe(tx);
+  });
+
+  // D3.7: CODEX_HOME relocates the whole Codex state dir, sessions included.
+  it("scan honours CODEX_HOME over $HOME/.codex", async () => {
+    const home = await mkdtemp(join(tmpdir(), "co-home-empty-"));
+    const codexHome = await mkdtemp(join(tmpdir(), "co-codexhome-"));
+    const dayDir = join(codexHome, "sessions", "2026", "04", "28");
+    await mkdir(dayDir, { recursive: true });
+    const sessUuid = "019cbabb-1261-7393-8ae4-007653e6c644";
+    const tx = join(dayDir, `rollout-2026-04-28T12-00-00-${sessUuid}.jsonl`);
+    await writeFile(tx,
+      `{"timestamp":"2026-04-28T12:00:00.000Z","type":"session_meta","payload":{"id":"${sessUuid}","cwd":"/tmp/repo"}}\n`,
+      "utf8");
+    await withEnv({ HOME: home, CODEX_HOME: codexHome }, async () => {
+      const sessions = await codex.scan();
+      expect(sessions.map((s) => s.id)).toEqual([`codex:${sessUuid}`]);
+      expect(sessions[0]!.transcriptPath).toBe(tx);
+    });
   });
 });

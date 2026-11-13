@@ -1,13 +1,12 @@
 // src/adapters/gemini/index.ts
 import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
-import { statusFromMtime } from "../common.js";
+import { homeDir, statusFromMtime } from "../common.js";
 import { parseSession, type RawGeminiSession } from "./parse.js";
 
 const ADAPTER_NAME = "gemini";
@@ -19,7 +18,7 @@ const adapter: Adapter = {
 
   async scan(): Promise<SessionEntry[]> {
     // Gemini CLI stores sessions at ~/.gemini/tmp/<project>/chats/session-*.json.
-    const root = join(process.env.HOME ?? homedir(), ".gemini", "tmp");
+    const root = join(homeDir(), ".gemini", "tmp");
     if (!existsSync(root)) return [];
     const out: SessionEntry[] = [];
     const projectMap = await readProjectsMap(root);

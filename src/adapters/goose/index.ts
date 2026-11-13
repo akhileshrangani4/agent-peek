@@ -1,13 +1,12 @@
 // src/adapters/goose/index.ts
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { readdir, readFile, stat } from "node:fs/promises";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { Cursor, RawMessage, SessionEntry } from "../../core/types.js";
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
-import { extractText, normalizeRole, statusFromMtime } from "../common.js";
+import { extractText, homeDir, normalizeRole, statusFromMtime } from "../common.js";
 import { sqliteJson } from "../sqlite.js";
 
 const ADAPTER_NAME = "goose";
@@ -148,14 +147,14 @@ function gooseDbPath(): string {
   if (process.platform === "win32" && process.env.APPDATA) {
     return join(process.env.APPDATA, "Block", "goose", "data", "sessions", "sessions.db");
   }
-  return join(process.env.HOME ?? homedir(), ".local", "share", "goose", "sessions", "sessions.db");
+  return join(homeDir(), ".local", "share", "goose", "sessions", "sessions.db");
 }
 
 function gooseSessionsDir(): string {
   if (process.platform === "win32" && process.env.APPDATA) {
     return join(process.env.APPDATA, "Block", "goose", "data", "sessions");
   }
-  return join(process.env.HOME ?? homedir(), ".local", "share", "goose", "sessions");
+  return join(homeDir(), ".local", "share", "goose", "sessions");
 }
 
 function parseJson(value: unknown): unknown {
