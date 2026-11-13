@@ -98,47 +98,10 @@ export type {
   PackedItem, PackedFeed, RankContext, FeedReadResult,
 } from "./feed/index.js";
 
-export { AdapterLoader, discoverExternal } from "./adapters/loader.js";
-export type { Adapter, AdapterReadResult, AdapterModule } from "./adapters/types.js";
+export { AdapterLoader, discoverExternal } from "./app/adapters.js";
+export type { Adapter, AdapterReadResult, AdapterModule, AdapterCatalog } from "./core/types.js";
 
-import claudeCode from "./adapters/claude-code/index.js";
-import codex from "./adapters/codex/index.js";
-import copilotCli from "./adapters/copilot-cli/index.js";
-import gemini from "./adapters/gemini/index.js";
-import goose from "./adapters/goose/index.js";
-import opencode from "./adapters/opencode/index.js";
-import screen from "./adapters/screen/index.js";
-import tmux from "./adapters/tmux/index.js";
-import { Engine } from "./core/engine.js";
-import { Registry } from "./core/registry.js";
-import { ClaimsStore } from "./core/claims.js";
-import { AdapterLoader, discoverExternal } from "./adapters/loader.js";
-
-export interface CreateEngineOpts {
-  home?: string;
-  withBuiltins?: boolean;
-  withExternal?: boolean;
-}
-
-export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine> {
-  const registry = new Registry({ home: opts.home });
-  const claims = new ClaimsStore({ home: opts.home });
-  const loader = new AdapterLoader();
-  if (opts.withBuiltins !== false) {
-    loader.register(claudeCode);
-    loader.register(codex);
-    loader.register(copilotCli);
-    loader.register(gemini);
-    loader.register(goose);
-    loader.register(opencode);
-    // The name lachieh's PR #12 gave legacy storage, kept as an alias only: legacy
-    // sessions are still listed by the opencode adapter as `opencode:<id>`.
-    loader.alias("opencode-legacy-v1", "opencode");
-    loader.register(screen);
-    loader.register(tmux);
-  }
-  if (opts.withExternal) await discoverExternal(loader);
-  return new Engine({ registry, loader, claims });
-}
+export { createEngine } from "./app/engine.js";
+export type { CreateEngineOpts } from "./app/engine.js";
 export { Row, Rows, Rule, state, num, overflow, padEnd, padStart, terminalWidth, colorEnabled, renderStatic, sparkline, sparklineBlank } from "./cli/render.js";
 export type { Role, Cell } from "./cli/render.js";
