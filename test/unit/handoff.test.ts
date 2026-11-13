@@ -119,7 +119,9 @@ describe("handoff.buildHandoff", () => {
     expect(s.document).toBe("# Handoff\n\nfrom fake");
     expect(seen).toContain("Add MCP resources for handoffs");
     // heuristic fields survive for existing consumers
-    expect(s.decisions).toContain("Implemented MCP resources.");
+    expect(s.nextActions).toContain("Next I will add prompts.");
+    // "Implemented MCP resources." is a bare outcome, not a decision (D9.3).
+    expect(s.decisions).toEqual([]);
     expect(s.touchedFiles).toEqual(["/work/repo/src/mcp/index.ts"]);
   });
 
@@ -139,12 +141,14 @@ describe("handoff.buildHandoff", () => {
       { role: "assistant", text: "Next I will wire the backoff. Want me to also add jitter?", raw: {} },
       { role: "user", text: "ci is failing on this", raw: { gitBranch: "avi/retries" } },
     ], { cwd: "/work/repo", target: "generic", produce: "local" });
-    expect(s.document).toMatch(/## Goal\nOriginal ask: Add retries to the uploader\.\nLatest ask: ci is failing on this/);
+    // D9.4: Goal is the session goal; the current ask, when it differs, leads Current state.
+    expect(s.document).toMatch(/## Goal\nAdd retries to the uploader\.\n\n## Current state\nCurrent ask: ci is failing on this\n/);
     expect(s.document).toMatch(/git branch: avi\/retries/);
     expect(s.document).toMatch(/Recent commands \(oldest first\), with how their output read:\n- `npm test -- uploader` -> unknown/);
     // The question moves to Open questions; it is not an action for the next session.
     expect(s.document).toMatch(/## Next actions\n- Next I will wire the backoff\.\n\n## Gotchas/);
-    expect(s.document).toMatch(/## Open questions \/ blockers\n(- .*\n)*- Want me to also add jitter\?/);
+    // The user's next turn answered it, so it is not open either (D9.3).
+    expect(s.document).toMatch(/## Open questions \/ blockers\n\(none found\)/);
   });
 
   it("open questions keep real questions and drop rhetoric and code fragments", async () => {
@@ -154,7 +158,67 @@ describe("handoff.buildHandoff", () => {
       { role: "assistant", text: "Why does this matter? Because the cache is shared.", raw: {} },
       { role: "assistant", text: "Do you want me to also add jitter?", raw: {} },
     ], { cwd: "/work/repo", target: "generic", produce: "local" });
-    expect(s.openQuestions).toEqual(["Should we keep the old flag or remove it?", "Do you want me to also add jitter?"]);
+    // The user's question was answered by the turns after it; the trailing offer was not.
+    expect(s.openQuestions).toEqual(["Do you want me to also add jitter?"]);
+  });
+
+  // D9.4 (Research E §6): goal and current ask stay distinct through the handoff.
+  it("carries goal separately from currentTask and renders both", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Land feature #1578 and the doc follow-ups.", raw: {} },
+      { role: "assistant", text: "I'll start with the prompt files.", raw: {} },
+      { role: "user", text: "the .env.local got committed", raw: {} },
+      { role: "assistant", text: "I'll remove it from tracking, gitignore it, and rewrite the commit.", raw: {} },
+      { role: "user", text: "yes", raw: {} },
+      { role: "assistant", text: "Right — let me use peek's own capability instead of hand-authoring.", raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.goal).toBe("Land feature #1578 and the doc follow-ups.");
+    expect(s.currentTask).toBe("the .env.local got committed");
+    expect(s.document).toMatch(/## Goal\nLand feature #1578 and the doc follow-ups\.\n\n## Current state\nCurrent ask: the \.env\.local got committed\n/);
+    // The assistant's narration never stands in for the goal or the ask.
+    expect(s.document).not.toContain("let me use peek's own capability\n\n## Current state");
+    expect(s.currentTask).not.toContain("let me use peek");
+  });
+
+  it("a single-ask handoff has no separate Current ask line", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Add retries to the uploader.", raw: {} },
+      { role: "assistant", text: "Working on it.", raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.goal).toBe(s.currentTask);
+    expect(s.document).toMatch(/## Goal\nAdd retries to the uploader\.\n\n## Current state\nactivity:/);
+    expect(s.document).not.toContain("Current ask:");
+  });
+
+  // D9.3 (Research E §1): a question the other party replied to is settled; an early
+  // blocker nobody replied to is still open, however much work followed it.
+  it("open questions are the unanswered ones: answered drop, an early unanswered blocker stays", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Move the plan doc somewhere sensible.", raw: {} },
+      { role: "assistant", text: "Should I put the plan under docs/superpowers/plans or docs/plans?", raw: {} },
+      { role: "user", text: "docs/plans", raw: {} },
+      { role: "assistant", text: "Moved it. What do you think?", raw: {} },
+      { role: "user", text: "looks good, ship it", raw: {} },
+      { role: "assistant", text: "Blocked: I need the staging deploy key before I can publish the docs site.", raw: {} },
+      { role: "assistant", toolCalls: [{ name: "Bash", input: { command: "npm run build" }, status: "completed" }], raw: {} },
+      { role: "assistant", text: "Built the site locally.", raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.openQuestions).toEqual(["Blocked: I need the staging deploy key before I can publish the docs site."]);
+  });
+
+  // D9.3 (Research E §2), with the owner's decision on trailing offers.
+  it("narration and bare outcomes are not decisions; an answered request is not open; a trailing offer is", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Write a handoff for this session.", raw: {} },
+      { role: "assistant", text: "Let me run peek at first.", raw: {} },
+      { role: "user", text: "can you not use peek to create a handoff?", raw: {} },
+      { role: "assistant", text: "Using peek to capture session context, then I'll write the handoff. I added the handoff file. Anything else? Would you like me to also commit it?", raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.decisions).toEqual([]);
+    expect(s.nextActions).toEqual([]);
+    expect(s.openQuestions).toEqual(["Would you like me to also commit it?"]);
+    expect(s.document).toMatch(/## Decisions and why\n\(none found\)/);
+    expect(s.document).toMatch(/## Open questions \/ blockers\n- Would you like me to also commit it\?\n\n/);
   });
 
   it("local handoff says how each recent command's output read, and lists failures as gotchas", async () => {
@@ -179,12 +243,12 @@ describe("handoff.buildHandoff", () => {
   it("next actions and decisions come from the current ask, not from finished tasks", async () => {
     const s = await buildHandoff("sid", [
       { role: "user", text: "Add the retry loop.", raw: {} },
-      { role: "assistant", text: "Implemented the retry loop. Next I will add jitter.", raw: {} },
+      { role: "assistant", text: "Implemented the retry loop rather than a queue. Next I will add jitter.", raw: {} },
       { role: "user", text: "Now fix the failing CI job.", raw: {} },
-      { role: "assistant", text: "Fixed the workflow matrix. Next I need to rerun CI.", raw: {} },
+      { role: "assistant", text: "Pinned the matrix to Node 24 because the runner image moved. Next I need to rerun CI.", raw: {} },
     ], { cwd: "/x", target: "generic", produce: "local" });
     expect(s.nextActions).toEqual(["Next I need to rerun CI."]);
-    expect(s.decisions).toEqual(["Fixed the workflow matrix."]);
+    expect(s.decisions).toEqual(["Pinned the matrix to Node 24 because the runner image moved."]);
   });
 
   it("a result flagged as an error is failed regardless of wording; chat targets keep longer excerpts", async () => {

@@ -5,6 +5,7 @@ import { delimiter, join } from "node:path";
 import type { HandoffSnapshot, HandoffTarget, RawMessage } from "./types.js";
 import { humanUserText, oneLine, toStructured, toolNames, uniqueStrings } from "./snapshot.js";
 import { inferTouchedFiles } from "./coordination.js";
+import { extractDecisions, extractNextActions, extractOpenQuestions, signalTurns } from "./handoff-signal.js";
 
 // A handoff is what a fresh session needs to continue this one without
 // re-exploring. Three ways to produce the document, in order of preference:
@@ -67,9 +68,6 @@ export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: strin
     .map((message) => message.text!);
   const assistantRecent = assistantTextOf(recent);
   const assistantText = assistantRecent.length ? assistantRecent : assistantTextOf(messages);
-  const allText = messages
-    .filter((message) => message.text && message.role !== "system")
-    .map((message) => message.text!);
 
   const snapshot: HandoffSnapshot = {
     mode: "handoff",
@@ -77,10 +75,13 @@ export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: strin
     messageCount: messages.length,
     activity: structured.activity,
     currentTask: structured.currentTask,
+    goal: structured.goal,
     lastAssistantMessage: structured.lastAssistantMessage,
-    decisions: extractLines(assistantText, /\b(decided|decision|chose|using|implemented|added|changed|fixed|removed)\b/i, 5),
-    openQuestions: extractQuestions(allText, 5),
-    nextActions: extractLines(assistantText, /\b(next|todo|remaining|follow[- ]?up|need to|will)\b/i, 5),
+    decisions: extractDecisions(assistantText),
+    // Questions are read over the whole transcript, so an early blocker nobody
+    // answered is kept; the turns after each one decide whether it is still open.
+    openQuestions: extractOpenQuestions(signalTurns(messages)),
+    nextActions: extractNextActions(assistantText),
     touchedFiles: inferTouchedFiles(messages, cwd),
     pendingTools: toolNames(structured.pendingToolCalls),
     recentTools: toolNames(structured.lastToolCalls),
@@ -387,10 +388,10 @@ export function localHandoffContext(messages: RawMessage[], cwd?: string): Local
 export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext | string | undefined): string {
   const c: LocalHandoffContext = typeof ctx === "string" || ctx === undefined ? { cwd: ctx } : ctx;
   const cwd = c.cwd;
-  const goal = [
-    ...(c.firstAsk && c.firstAsk !== s.currentTask ? [`Original ask: ${c.firstAsk}`] : []),
-    ...(s.currentTask ? [`${c.firstAsk && c.firstAsk !== s.currentTask ? "Latest ask: " : ""}${s.currentTask}`] : []),
-  ];
+  // The Goal is what the session is for; the current ask sits under Current state when
+  // the user has since moved on. `firstAsk` covers a snapshot built without `goal`.
+  const goal = s.goal ?? c.firstAsk ?? s.currentTask;
+  const currentAsk = s.currentTask && s.currentTask !== goal ? s.currentTask : undefined;
   // A question is something the previous session asked; it is not an action for the next one.
   const nextActions = s.nextActions.filter((line) => !line.trim().endsWith("?"));
   const out: string[] = [
@@ -399,9 +400,10 @@ export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext 
     "# Handoff",
     "",
     "## Goal",
-    ...(goal.length ? goal : ["Unknown: no clear task line found in the transcript."]),
+    goal ?? "Unknown: no clear task line found in the transcript.",
     "",
     "## Current state",
+    ...(currentAsk ? [`Current ask: ${currentAsk}`] : []),
     `activity: ${s.activity}; ${s.messageCount} messages.`,
     ...(s.lastAssistantMessage ? [`Last assistant message: ${oneLine(s.lastAssistantMessage, 400)}`] : []),
     ...(s.pendingTools.length ? [`Pending tools: ${s.pendingTools.join(", ")}`] : []),
@@ -546,46 +548,4 @@ function whichOnPath(bin: string): string | undefined {
     } catch { /* keep looking */ }
   }
   return undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Heuristic extractors (moved from snapshot.ts)
-
-function extractLines(values: string[], pattern: RegExp, max: number): string[] {
-  const lines: string[] = [];
-  for (const value of values) {
-    for (const line of splitCandidateLines(value)) {
-      if (pattern.test(line)) lines.push(oneLine(line, 220));
-    }
-  }
-  return uniqueStrings(lines).slice(-max);
-}
-
-function extractQuestions(values: string[], max: number): string[] {
-  const questions: string[] = [];
-  for (const value of values) {
-    for (const line of splitCandidateLines(value)) {
-      if (isOpenQuestion(line)) questions.push(oneLine(line, 220));
-    }
-  }
-  return uniqueStrings(questions).slice(-max);
-}
-
-/**
- * A question someone still needs answered, as opposed to a rhetorical one ("Why does
- * this matter? Because...") or a code fragment that happens to end in "?". It has to
- * address someone or ask for a decision, and carry no code.
- */
-function isOpenQuestion(line: string): boolean {
-  if (/\b(blocked|need input|open question)\b/i.test(line)) return true;
-  if (!line.endsWith("?") || line.includes("`") || line.length > 200) return false;
-  if (line.split(/\s+/).length < 4) return false;
-  return /\b(should|shall|want|do you|would you|could you|can you|ok(ay)? to|prefer|which|or)\b/i.test(line);
-}
-
-function splitCandidateLines(value: string): string[] {
-  return value
-    .split(/\n|(?<=[.!?])\s+/)
-    .map((line) => line.replace(/^[-*]\s+/, "").trim())
-    .filter((line) => line.length > 0);
 }

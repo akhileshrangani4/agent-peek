@@ -16,6 +16,7 @@
             "messageCount": 6,
             "activity": "thinking",
             "currentTask": "refactor auth",
+            "goal": "refactor auth",
             "lastAssistantMessage": "Found it. Will rewrite next.",
             "decisions": [],
             "openQuestions": [],
