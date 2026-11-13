@@ -12,7 +12,8 @@ const BIN = resolve(__dirname, "../../bin/peek.js");
 
 function runCli(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((res) => {
-    const p = spawn("node", [BIN, ...args], { env: { ...process.env, ...env } });
+    const childEnv = isolatedHomeEnv(env);
+    const p = spawn("node", [BIN, ...args], { env: childEnv });
     let out = "", err = "";
     p.stdout.on("data", (d) => { out += d.toString(); });
     p.stderr.on("data", (d) => { err += d.toString(); });
@@ -22,13 +23,19 @@ function runCli(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ code: nu
 
 function runCliWithStdin(args: string[], stdin: string, env: NodeJS.ProcessEnv = {}): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((res) => {
-    const p = spawn("node", [BIN, ...args], { env: { ...process.env, ...env } });
+    const p = spawn("node", [BIN, ...args], { env: isolatedHomeEnv(env) });
     let out = "", err = "";
     p.stdout.on("data", (d) => { out += d.toString(); });
     p.stderr.on("data", (d) => { err += d.toString(); });
     p.on("close", (code) => res({ code: code ?? 0, stdout: out, stderr: err }));
     p.stdin.end(stdin);
   });
+}
+
+function isolatedHomeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const childEnv = { ...process.env, ...env };
+  if (env.HOME && env.XDG_DATA_HOME === undefined) delete childEnv.XDG_DATA_HOME;
+  return childEnv;
 }
 
 beforeAll(() => assertDistFresh());

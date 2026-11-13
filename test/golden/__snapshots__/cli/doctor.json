@@ -44,6 +44,12 @@
         "status": "not found"
       },
       {
+        "adapter": "opencode",
+        "source": "database",
+        "path": "<HOME>/.local/share/opencode/opencode.db",
+        "status": "not found"
+      },
+      {
         "adapter": "tmux",
         "source": "terminal",
         "command": "tmux",

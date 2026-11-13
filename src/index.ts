@@ -4,7 +4,7 @@ import packageJson from "../package.json" with { type: "json" };
 export const VERSION = packageJson.version;
 
 export type {
-  SessionEntry, SessionStatus, Activity, FileClaim,
+  SessionEntry, SessionStatus, SessionExecution, SessionOutcome, Activity, FileClaim,
   RawMessage, ToolCall,
   Cursor, CursorData,
   Snapshot, RawSnapshot, StructuredSnapshot, BriefSnapshot, SummarySnapshot, HandoffSnapshot,
@@ -131,6 +131,9 @@ export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine>
     loader.register(gemini);
     loader.register(goose);
     loader.register(opencode);
+    // The name lachieh's PR #12 gave legacy storage, kept as an alias only: legacy
+    // sessions are still listed by the opencode adapter as `opencode:<id>`.
+    loader.alias("opencode-legacy-v1", "opencode");
     loader.register(screen);
     loader.register(tmux);
   }

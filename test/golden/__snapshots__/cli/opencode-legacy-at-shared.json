@@ -1,0 +1,54 @@
+{
+  "argv": [
+    "at",
+    "opencode:ses_shared",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "snapshot": {
+      "mode": "raw",
+      "sessionId": "opencode:ses_shared",
+      "messages": [
+        {
+          "role": "user",
+          "text": "legacy copy of the shared session",
+          "raw": {
+            "info": {
+              "id": "msg_s1",
+              "sessionID": "ses_shared",
+              "role": "user",
+              "time": {
+                "created": 1769990000000
+              }
+            },
+            "parts": [
+              {
+                "id": "prt_s1",
+                "messageID": "msg_s1",
+                "type": "text",
+                "text": "legacy copy of the shared session"
+              }
+            ]
+          },
+          "timestamp": "2026-02-01T23:53:20.000Z"
+        }
+      ],
+      "totalMessageCount": 1,
+      "window": {
+        "start": 0,
+        "end": 1,
+        "order": "oldest-first"
+      }
+    },
+    "nextCursor": {
+      "$cursor": {
+        "adapter": "opencode",
+        "byteOffset": 1,
+        "msgIndex": 1
+      }
+    },
+    "eof": true
+  },
+  "stderr": null
+}
