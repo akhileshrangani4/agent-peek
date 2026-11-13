@@ -55,6 +55,7 @@ export function parseRecord(rec: RawCodexRecord): RawMessage {
       name: typeof p.name === "string" ? p.name : "?",
       input: args,
       status: "pending",
+      ...callId(p.call_id),
     };
     return { role: "assistant", toolCalls: [tc], raw: rec, timestamp: ts };
   }
@@ -64,6 +65,7 @@ export function parseRecord(rec: RawCodexRecord): RawMessage {
       name: "(result)",
       output: p.output,
       status: "completed",
+      ...callId(p.call_id),
     };
     return { role: "tool", toolCalls: [tc], raw: rec, timestamp: ts };
   }
@@ -86,6 +88,15 @@ export function parseRecord(rec: RawCodexRecord): RawMessage {
 
   // Unknown response_item subtype; keep raw, mark as system.
   return { role: "system", raw: rec, timestamp: ts };
+}
+
+/**
+ * `call_id` is the only key joining a function_call to its function_call_output, so it
+ * becomes `ToolCall.id` on both. Absent ids stay absent rather than becoming undefined
+ * keys, matching how the other adapters build ToolCall.
+ */
+function callId(value: unknown): { id?: string } {
+  return typeof value === "string" && value.length > 0 ? { id: value } : {};
 }
 
 function parseArgs(s: unknown): unknown {

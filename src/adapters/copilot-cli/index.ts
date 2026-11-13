@@ -1,12 +1,11 @@
 // src/adapters/copilot-cli/index.ts
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, readdir, stat } from "node:fs/promises";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { Cursor, RawMessage, SessionEntry } from "../../core/types.js";
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
-import { extractText, newestMtime, normalizeRole, statusFromMtime, walkFiles } from "../common.js";
+import { extractText, homeDir, newestMtime, normalizeRole, statusFromMtime, walkFiles } from "../common.js";
 
 const ADAPTER_NAME = "copilot-cli";
 
@@ -136,7 +135,7 @@ function parseJson(text: string | undefined): unknown {
 }
 
 function copilotStateRoot(): string {
-  return join(process.env.HOME ?? homedir(), ".copilot", "session-state");
+  return join(homeDir(), ".copilot", "session-state");
 }
 
 export default adapter;

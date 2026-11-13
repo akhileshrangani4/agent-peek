@@ -1,7 +1,31 @@
 // src/adapters/common.ts
 import { open, readdir, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RawMessage, ToolCall } from "../core/types.js";
+
+/**
+ * The one place adapters resolve the user's home. `$HOME` wins so tests and
+ * containerised harnesses can relocate it; the OS lookup is the fallback.
+ */
+export function homeDir(): string {
+  return process.env.HOME ?? homedir();
+}
+
+/** A set but blank override counts as unset, matching skill-root resolution. */
+function envDir(name: string): string | undefined {
+  return process.env[name]?.trim() || undefined;
+}
+
+/** Claude Code's config root: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
+export function claudeConfigDir(): string {
+  return envDir("CLAUDE_CONFIG_DIR") ?? join(homeDir(), ".claude");
+}
+
+/** Codex's state root: `$CODEX_HOME`, else `~/.codex`. */
+export function codexHome(): string {
+  return envDir("CODEX_HOME") ?? join(homeDir(), ".codex");
+}
 
 export function statusFromMtime(ms: number): "active" | "idle" | "ended" {
   const ageMs = Date.now() - ms;

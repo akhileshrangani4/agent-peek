@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     testTimeout: 10_000,
+    // Adapters honour these overrides ahead of $HOME. Blank them so tests that relocate
+    // HOME (and the CLI processes they spawn) never read a developer's real sessions;
+    // a blank value counts as unset.
+    env: { CLAUDE_CONFIG_DIR: "", CODEX_HOME: "" },
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
