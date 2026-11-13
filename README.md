@@ -692,8 +692,7 @@ console.log(result.nextCursor);
 - `copilot-cli`: reads GitHub Copilot CLI session-state directories in `~/.copilot/session-state/*`
 - `gemini`: reads Gemini CLI transcripts in `~/.gemini/tmp/<project>/chats/session-*.json`
 - `goose`: reads Goose session records in `~/.local/share/goose/sessions/sessions.db`
-- `opencode`: reads OpenCode V2 SQLite storage in `~/.local/share/opencode/opencode.db`
-- `opencode-legacy-v1`: reads the pre-V2 filesystem storage in `~/.local/share/opencode/storage/{session,message,part}`
+- `opencode`: reads OpenCode V2 SQLite storage in `~/.local/share/opencode/opencode.db` (or `$OPENCODE_DB`, plus any `opencode-<channel>.db`) and the pre-V2 filesystem storage in `~/.local/share/opencode/storage/{session,message,part}`. Both list as `opencode:<id>`; a session in both is listed once, from V2. `opencode-legacy-v1` is accepted as an alias for `opencode`. V2 sessions carry `execution` (`state`, `outcome`, `at`, `sequence`).
 - `screen`: captures GNU screen scrollback via `hardcopy -h`
 - `tmux`: captures tmux pane output
 
