@@ -17,8 +17,19 @@ export {
   SessionNotFoundError, AmbiguousSelectorError, AdapterError,
   AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
   TranscriptUnreadableError, TranscriptCorruptError, SummaryUnavailableError,
-  PostRejectedError, PostNotFoundError, NotAProjectError,
+  PostRejectedError, PostNotFoundError, NotAProjectError, NonExportableFieldError,
 } from "./core/errors.js";
+
+// ADR 0002: the one guard every outbound payload passes through.
+export {
+  assertExportable, containsHomePath, isRepoRelativePath, EXPORT_KINDS, EXPORTABLE_NODE_KINDS,
+  EXPORTABLE_EDGE_KINDS, EXPORTABLE_EDGE_ORIGINS, STATUS_SUMMARY_MAX_CHARS, CLAIM_NOTE_MAX_CHARS,
+  GRAPH_BATCH_MAX_ROWS,
+} from "./export/assert-exportable.js";
+export type {
+  ExportKind, ExportPayload, ExportablePost, ExportableClaim, ExportableStatus,
+  ExportableGraphBatch, ExportableGraphNode, ExportableGraphEdge,
+} from "./export/assert-exportable.js";
 
 export {
   addAgent, adapterObserves, builtinAgents, isPresent, listAgents, mergeAgents,

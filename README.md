@@ -706,6 +706,22 @@ Set `AGENT_PEEK_ADAPTER_PATH` to a colon-separated list of adapter modules.
 Each module's default export must implement the `Adapter` interface from
 `agent-peek/adapter`.
 
+## Privacy
+
+Transcripts never leave your machine. Anything `agent-peek` sends off the machine
+is limited to structure (ids, kinds, timestamps, pointers into a transcript),
+repo-relative paths, commit SHAs, skill keys, branch, adapter and model names,
+feed posts with their token-capped bodies, and short structured status. Message
+text, tool input and output, prompt text, absolute paths and hostnames are never
+sent. A full-text index over your own transcripts is opt-in and stays local.
+
+One guard, `assertExportable`, enforces this with a whitelist per payload kind
+and refuses anything outside it. The full boundary, and why it is a whitelist
+rather than a redaction pass, is recorded in
+[ADR 0002: graph and network retention](docs/adr/0002-graph-and-network-retention.md).
+The usage index's own boundary is
+[ADR 0001](docs/adr/0001-usage-index-stores-whitelisted-arguments.md).
+
 ## Security Model
 
 `agent-peek` is same-user, same-machine only.
