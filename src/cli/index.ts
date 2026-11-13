@@ -1,13 +1,24 @@
 // src/cli/index.ts
 import { cac } from "cac";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir, hostname, userInfo } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { createEngine, VERSION } from "../index.js";
-import type { Engine } from "../core/engine.js";
-import { ClaimsStore } from "../core/claims.js";
+import { VERSION } from "../index.js";
+import { claimsService, createApp, feedService } from "../app/index.js";
+import { builtinAdapterNamed, createAdapterLoader } from "../app/adapters.js";
+import {
+  parseCoordinationFields, projectCoordinationDigest,
+} from "../app/coordination.js";
+import { doctorRows, probeStateDir } from "../app/doctor.js";
+import { parseEvidenceRefs, splitList as splitItems } from "../app/feed.js";
+import { resolveSelf } from "../app/identity.js";
+import { parsePathList, resolveTargets } from "../app/paths.js";
+import { projectAt } from "../app/project.js";
+import { isSessionStatus, withDisplayNames } from "../app/sessions.js";
+import { parseDuration, resolveInstant, type DurationProblem } from "../app/time.js";
+import { parseGroupByList, UsageService } from "../app/usage.js";
 import {
   SessionNotFoundError, AmbiguousSelectorError,
   AdapterError, AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError, StateUnwritableError,
@@ -16,14 +27,13 @@ import {
 import type {
   CoordinationDigest, PeekResult, RawOrder, RawWindowFrom, SessionEntry, SnapshotMode,
 } from "../core/types.js";
-import { displayNames } from "../core/names.js";
 import { HANDOFF_TARGETS, parseHandoffTarget, renderTranscriptLine } from "../core/handoff.js";
 import {
   addAgent, isPresent, listAgents, removeAgent, sharedLibraryRoot, AGENT_TABLE_SOURCE,
 } from "../agents/index.js";
 import type { SkillRoot } from "../agents/index.js";
 import {
-  buildInventory, buildNameIndex, builtinRowFilter, discoverProjects,
+  buildInventory, discoverProjects,
   buildSkillsReport, expandSkill, joinUsage, usageSeries,
   planArchive, executeArchive, executeRestore, readArchiveLog, findArchive,
   manifestDivergence, ArchiveRefusedError,
@@ -36,15 +46,11 @@ import { renderAgents } from "./agents-report.js";
 import { renderList } from "./list-report.js";
 import { renderDoctor } from "./doctor-report.js";
 import type { Inventory } from "../skills/types.js";
-import { UsageStore, usageDbPath, scanAll, GROUP_BY_DIMENSIONS, usageSeriesFor } from "../usage/index.js";
-import { buildUsageReport } from "../usage/report.js";
-import type { GroupBy, UsageRow } from "../usage/index.js";
+import { UsageStore, usageDbPath, GROUP_BY_DIMENSIONS, usageSeriesFor } from "../usage/index.js";
+import type { GroupBy } from "../usage/index.js";
 import type { PostType } from "../feed/schema.js";
-import { resolveAuthor } from "../feed/identity.js";
-import { opencodeDatabases } from "../adapters/opencode/index.js";
 
 const execFileAsync = promisify(execFile);
-const TERMINAL_ADAPTERS = new Set(["tmux", "screen"]);
 
 export async function run(argv: string[] = process.argv): Promise<number> {
   const cli = cac("peek");
@@ -136,30 +142,23 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         });
       }
       const status = parseStatus(opts.status);
-      const engine = await createEngine({ withExternal: true });
-      let list = await engine.list({
+      const app = await createApp({ withExternal: true });
+      const list = await app.sessions.list({
         adapter: opts.adapter,
         status,
-        includeTerminal: opts.terminals || isTerminalAdapter(opts.adapter),
+        includeEnded: Boolean(opts.all),
+        includeTerminal: Boolean(opts.terminals),
+        hideSubagents: !opts.includeSubagents,
       });
-      if (!status && !opts.all) {
-        list = list.filter((entry) => entry.status !== "ended");
-      }
-      // Discovery is truthful, the view is opinionated: subagents are found, tracked,
-      // and fed to coordination and the usage index, but they would roughly triple a
-      // machine's session list, so the default view hides them.
-      if (!opts.includeSubagents) {
-        list = list.filter((entry) => entry.parentSessionId === undefined);
-      }
       if (opts.files) {
-        const digest = await engine.coordinate({
+        const digest = await app.coordination.digest({
           adapter: opts.adapter,
           status,
           includeEnded: Boolean(opts.all),
           // Same rows as plain list, plus columns: a session with no task or files yet
           // is still a session, so it shows with "-" rather than vanishing.
           includeLowSignal: true,
-          includeTerminal: opts.terminals || isTerminalAdapter(opts.adapter),
+          includeTerminal: Boolean(opts.terminals),
         });
         // The same default as plain list: subagents are hidden unless asked for.
         const sessions = opts.includeSubagents
@@ -169,8 +168,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         printListWithFiles(sessions, { showIds: Boolean(opts.ids) });
         return;
       }
-      if (opts.json) { console.log(JSON.stringify(withDisplayNames(list), null, 2)); return; }
-      await renderList(withDisplayNames(list), {
+      const named = withDisplayNames(list, { fillName: true });
+      if (opts.json) { console.log(JSON.stringify(named, null, 2)); return; }
+      await renderList(named, {
         showIds: Boolean(opts.ids),
         limit: opts.limit === undefined ? undefined : parsePositiveInt(opts.limit, "--limit"),
         color: Boolean(opts.color),
@@ -196,38 +196,27 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
-      const engine = await createEngine({ withExternal: true });
+      const app = await createApp({ withExternal: true });
       // Your own claim is not a conflict with you. Two reviewers in a row claimed a file,
       // ran check, and were told to retry with a flag; the default is now the useful one.
-      let ignoredOwner: string | undefined = opts.as ? String(opts.as) : undefined;
-      if (!ignoredOwner && !opts.includeSelf) {
-        const self = await resolveSelf(engine, cwd);
-        ignoredOwner = self.owner;
-        if (self.note && opts.ignoreSelf) console.error(`identity: ${self.note}`);
-      }
-      const digest = await engine.coordinate({
+      // A session's own edits are not a conflict either: the reviewer that surfaced this
+      // had only run `node bin/peek.js` and was told it was writing bin/peek.js.
+      const identity = await app.coordination.identity({
         cwd,
-        adapter: opts.adapter,
-        includeTerminal: Boolean(opts.terminals) || isTerminalAdapter(opts.adapter),
+        as: opts.as ? String(opts.as) : undefined,
+        includeSelf: Boolean(opts.includeSelf),
+        ignoreSelf: Boolean(opts.ignoreSelf),
+        ignoreSession: opts.ignoreSession ? String(opts.ignoreSession) : undefined,
       });
-      // A session's own edits are not a conflict. The reviewer that surfaced this had
-      // only run `node bin/peek.js` and was told it was writing bin/peek.js.
-      const ignoredSessions = new Set<string>();
-      if (opts.ignoreSession) ignoredSessions.add(String(opts.ignoreSession));
-      if (opts.ignoreSelf) {
-        const author = await resolveAuthor({ cwd, engine });
-        if (!author.anonymous) ignoredSessions.add(author.session);
-      }
-      const files = targets.map((target) => ({
-        file: target,
-        conflicts: activeFileConflicts(digest, target, ignoredOwner, ignoredSessions),
-      }));
-      const conflictCount = files.reduce((count, item) => count + item.conflicts.length, 0);
-      const result = {
-        ok: conflictCount === 0,
-        files,
-        conflictCount,
-      };
+      if (identity.ownerNote && opts.ignoreSelf) console.error(`identity: ${identity.ownerNote}`);
+      const result = await app.coordination.check({
+        cwd,
+        targets,
+        identity,
+        adapter: opts.adapter,
+        includeTerminal: Boolean(opts.terminals),
+      });
+      const { files, conflictCount } = result;
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
       } else if (conflictCount) {
@@ -257,18 +246,18 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .action(async (file, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
       const targets = checkTargets(file, opts.filesFrom, cwd);
-      const claims = new ClaimsStore();
-      const self = await resolveSelf(await createEngine({ withExternal: true }), cwd);
+      const app = await createApp({ withExternal: true });
+      const self = await resolveSelf(app.engine, cwd);
       if (self.note && !opts.as) console.error(`identity: ${self.note}`);
-      const claim = await claims.claim({
-        files: targets,
+      const claim = await app.claims.claim({
         cwd,
-        owner: opts.as ? String(opts.as) : self.owner,
-        creator: self.owner,
+        files: targets,
+        self,
+        as: opts.as ? String(opts.as) : undefined,
         ttlMs: parseDurationMs(opts.ttl, "--ttl"),
       });
       if (opts.json) {
-        console.log(JSON.stringify(self.note ? { ...claim, identityNote: self.note } : claim, null, 2));
+        console.log(JSON.stringify(claim, null, 2));
         return;
       }
       console.log(`claimed ${claim.files.length} file${claim.files.length === 1 ? "" : "s"} until ${claim.expiresAt}`);
@@ -287,17 +276,16 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--json", "Output machine-readable release result")
     .action(async (claimOrFile, opts) => {
       const cwd = resolve(String(opts.cwd ?? process.cwd()));
-      const rawSelector = String(claimOrFile);
-      const selector = opts.claimId || /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(rawSelector)
-        ? rawSelector
-        : resolve(cwd, rawSelector);
-      const partialFiles = opts.filesFrom === undefined ? undefined : readFilesFrom(String(opts.filesFrom)).map((file) => resolve(cwd, file));
-      const releasedClaims = await new ClaimsStore().release(selector, { files: partialFiles });
-      const result = {
-        released: releasedClaims.length,
-        claims: releasedClaims,
-        files: [...new Set(releasedClaims.flatMap((claim) => claim.files))].sort(),
-      };
+      // The list's whitespace splitting and missing-file warning have always been judged
+      // from the process directory, not --cwd; kept as shipped in 0.6.
+      const partialFiles = opts.filesFrom === undefined ? undefined : readPathList(String(opts.filesFrom), process.cwd());
+      const app = claimsService();
+      const { selector, ...result } = await app.release({
+        cwd,
+        selector: String(claimOrFile),
+        claimId: Boolean(opts.claimId),
+        files: partialFiles,
+      });
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
         return;
@@ -307,7 +295,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       } else {
         console.log(`released ${result.released} claim${result.released === 1 ? "" : "s"}`);
       }
-      for (const claim of releasedClaims) {
+      for (const claim of result.claims) {
         console.log(indent(`${claim.id} (${claim.owner}) ${claim.files.length} file${claim.files.length === 1 ? "" : "s"}`));
       }
     });
@@ -339,14 +327,14 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         since: opts.since,
         sinceFile,
       });
-      const engine = await createEngine({ withExternal: true });
-      const digest = await engine.coordinate({
+      const app = await createApp({ withExternal: true });
+      const digest = await app.coordination.digest({
         cwd,
         adapter: opts.adapter,
         status,
         since,
         includeEnded: Boolean(opts.all),
-        includeTerminal: Boolean(opts.terminals) || isTerminalAdapter(opts.adapter),
+        includeTerminal: Boolean(opts.terminals),
         writingOnly: Boolean(opts.writing),
       });
       const cursorLocation = writeCoordinationCursor(digest.nextCursor, {
@@ -356,7 +344,7 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const omitCursor = Boolean(cursorLocation || opts.cursorStderr);
       if (opts.json) {
         console.log(JSON.stringify(projectCoordinationDigest(digest, {
-          fields: opts.fields,
+          fields: opts.fields === undefined ? undefined : coordinationFields(opts.fields),
           omitCursor,
           cursorLocation,
         }), null, 2));
@@ -406,36 +394,23 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         });
       }
       const rawOpts = parseRawOpts(opts);
-      const engine = await createEngine({ withExternal: true });
+      const app = await createApp({ withExternal: true });
       const showTools = Boolean(opts.tools || opts.verbose || opts.json);
-      const peekOnce = (limit: number | undefined) => engine.peek(selector, {
+      // `--last 20` means twenty messages the reader will see; the service widens the
+      // window past hidden tool-only rows, and the header then covers the wider span.
+      const { result: r, widened } = await app.sessions.peekVisible(selector, {
         mode,
         target,
         produce: opts.local ? "local" : "harness",
         onStatus: (line) => { if (!opts.json) console.error(line); },
         since: opts.since,
-        limit,
+        limit: rawOpts.limit,
         offset: rawOpts.offset,
         around: rawOpts.around,
         from: rawOpts.from,
         order: rawOpts.order,
-      });
-      let r = await peekOnce(rawOpts.limit);
-      // `--last 20` means twenty messages the reader will see. Tool-only rows are hidden
-      // unless --tools, so widen the window until enough visible rows fit, or the
-      // transcript runs out; the header then covers the wider span it took.
-      if (r.snapshot.mode === "raw" && !showTools && rawOpts.limit !== undefined && rawOpts.around === undefined) {
-        const wanted = rawOpts.limit;
-        let limit = wanted;
-        let snap = r.snapshot;
-        while (snap.messages.filter((m) => m.text).length < wanted && snap.messages.length < snap.totalMessageCount && limit < 5000) {
-          limit = Math.min(5000, limit * 3);
-          r = await peekOnce(limit);
-          if (r.snapshot.mode !== "raw") break;
-          snap = r.snapshot;
-        }
-        if (limit !== wanted && !opts.json) console.error(`(window widened to ${snap.messages.length} messages to show ${wanted} visible ones; --tools shows all)`);
-      }
+      }, { showTools });
+      if (widened && !opts.json) console.error(`(window widened to ${widened.messages} messages to show ${widened.wanted} visible ones; --tools shows all)`);
       if (r.snapshot.mode === "handoff" && opts.out) {
         writeFileSync(resolve(String(opts.out)), `${r.snapshot.document}\n`);
         if (!opts.json) console.error(`wrote ${resolve(String(opts.out))}`);
@@ -458,16 +433,16 @@ export async function run(argv: string[] = process.argv): Promise<number> {
           next: ["peek tag <selector> as <name>", "peek list --ids"],
         });
       }
-      const engine = await createEngine();
-      await engine.tag(id, name);
+      const app = await createApp();
+      await app.sessions.tag(id, name);
       console.log(`tagged ${id} as ${name}`);
     });
 
   cli.command("untag <selector>", "Remove a previously assigned session tag.")
     .example("peek untag main")
     .action(async (id) => {
-      const engine = await createEngine();
-      await engine.untag(id);
+      const app = await createApp();
+      await app.sessions.untag(id);
       console.log(`untagged ${id}`);
     });
 
@@ -497,8 +472,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
         });
       }
       const adapter = id.slice(0, colon);
-      const engine = await createEngine();
-      await engine.register({
+      const app = await createApp();
+      await app.sessions.register({
         id, adapter, transcriptPath: path,
         tag: opts.as || undefined,
         cwd: opts.cwd || undefined,
@@ -509,8 +484,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
   cli.command("forget <id>", "Remove a manually registered or cached registry entry by raw id.")
     .example("peek forget custom:worker-1")
     .action(async (id) => {
-      const engine = await createEngine();
-      await engine.unregister(id);
+      const app = await createApp();
+      await app.sessions.forget(id);
       console.log(`forgot ${id}`);
     });
 
@@ -716,7 +691,6 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--dir <path>", "Project directory. Defaults to cwd.")
     .option("--json", "Output the stored post as JSON")
     .action(async (type, title, opts) => {
-      const { postToFeed } = await import("../feed/index.js");
       const dir = resolve(String(opts.dir ?? process.cwd()));
       if (opts.text === undefined) {
         throw new PostRejectedError("--text is required. Provide the post body (<= 150 tokens).");
@@ -728,24 +702,19 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       if (typeof opts.text !== "string") {
         throw new PostRejectedError("--text requires a single string value. Provide the post body (<= 150 tokens).");
       }
-      const engine = await createEngine({ withExternal: true });
-      const post = await postToFeed({
-        dir,
-        engine,
-        as: opts.as ? String(opts.as) : undefined,
-        input: {
-          type: String(type) as PostType,
-          title: String(title),
-          text: String(opts.text),
-          paths: splitList(opts.paths),
-          topics: splitList(opts.topics),
-          evidence: parseEvidence(opts.evidence),
-          replyTo: opts.replyTo ? String(opts.replyTo) : undefined,
-          supersedes: opts.supersedes ? String(opts.supersedes) : undefined,
-          mentions: splitList(opts.mention),
-          ttlMs: opts.ttl ? parseDurationMs(opts.ttl, "--ttl") : undefined,
-        },
-      });
+      const app = await createApp({ withExternal: true });
+      const post = await app.feed.post(projectAt(dir), {
+        type: String(type) as PostType,
+        title: String(title),
+        text: String(opts.text),
+        paths: splitList(opts.paths),
+        topics: splitList(opts.topics),
+        evidence: parseEvidence(opts.evidence),
+        replyTo: opts.replyTo ? String(opts.replyTo) : undefined,
+        supersedes: opts.supersedes ? String(opts.supersedes) : undefined,
+        mentions: splitList(opts.mention),
+        ttlMs: opts.ttl ? parseDurationMs(opts.ttl, "--ttl") : undefined,
+      }, { as: opts.as ? String(opts.as) : undefined });
       if (opts.json) { console.log(JSON.stringify(post, null, 2)); return; }
       console.log(`posted ${post.type} ${post.id} (expires ${relativeTime(post.lifecycle.expiresAt)})`);
     });
@@ -764,10 +733,9 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--stats", "Print feed usage stats instead of the feed")
     .option("--json", "Machine-readable output")
     .action(async (dirArg, opts) => {
-      const { readFeed, feedStats } = await import("../feed/index.js");
-      const dir = resolve(String(dirArg ?? process.cwd()));
+      const project = projectAt(resolve(String(dirArg ?? process.cwd())));
       if (opts.stats) {
-        const stats = await feedStats({ dir });
+        const stats = await feedService().stats(project);
         if (opts.json) { console.log(JSON.stringify(stats, null, 2)); return; }
         console.log(`project: ${stats.projectLabel}`);
         console.log(indent(`posts: ${stats.posts} (${Object.entries(stats.byType).map(([t, n]) => `${t} ${n}`).join(", ") || "none"})`));
@@ -777,10 +745,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
       const since = opts.cursorFile && existsSync(String(opts.cursorFile))
         ? readFileSync(String(opts.cursorFile), "utf8").trim() || undefined
         : opts.since ? String(opts.since) : undefined;
-      const engine = await createEngine({ withExternal: true });
-      const result = await readFeed({
-        dir,
-        engine,
+      const app = await createApp({ withExternal: true });
+      const result = await app.feed.read(project, {
         budget: Number(opts.budget),
         contextPaths: splitList(opts.contextPaths),
         since,
@@ -811,9 +777,8 @@ export async function run(argv: string[] = process.argv): Promise<number> {
     .option("--dir <path>", "Project directory. Defaults to cwd.")
     .option("--json", "Machine-readable output")
     .action(async (postId, opts) => {
-      const { expandPost } = await import("../feed/index.js");
-      const dir = resolve(String(opts.dir ?? process.cwd()));
-      const post = await expandPost({ dir, postId: String(postId) });
+      const project = projectAt(resolve(String(opts.dir ?? process.cwd())));
+      const post = await feedService().expand(project, String(postId));
       if (opts.json) { console.log(JSON.stringify(post, null, 2)); return; }
       console.log(`[${post.type}] ${post.body.title}`);
       console.log(indent(`author: ${post.author.name ?? post.author.session} (${relativeTime(post.lifecycle.createdAt)}, validity: ${post.lifecycle.validity})`));
@@ -918,13 +883,8 @@ function expandHome(path: string): string {
 }
 
 async function adaptersWithSessions(): Promise<Set<string>> {
-  try {
-    const engine = await createEngine({ withExternal: true });
-    const sessions = await engine.list({});
-    return new Set(sessions.map((s) => s.adapter));
-  } catch {
-    return new Set();
-  }
+  const app = await createApp({ withExternal: true });
+  return app.sessions.adaptersWithSessions();
 }
 
 async function printAgentsCommand(opts: { all: boolean; json: boolean; color?: boolean; width?: number }): Promise<void> {
@@ -1065,17 +1025,13 @@ async function resolveProjectSurvey(
 }
 
 async function listAdapters(): Promise<void> {
-  const engine = await createEngine({ withExternal: true });
-  console.log(engine.adapterNames().join("\n"));
+  const app = await createApp({ withExternal: true });
+  console.log(app.sessions.adapterNames().join("\n"));
 }
 
-const ADAPTER_ALIASES: Record<string, string> = {
-  claude: "claude-code", "claude-code": "claude-code", codex: "codex", gemini: "gemini",
-  copilot: "copilot-cli", "copilot-cli": "copilot-cli", opencode: "opencode", "opencode-legacy-v1": "opencode", goose: "goose", tmux: "tmux", screen: "screen",
-};
 function adapterNameFromSelectorMessage(message: string): string | undefined {
-  const selector = /selector: (\S+)/.exec(message)?.[1]?.toLowerCase();
-  return selector ? ADAPTER_ALIASES[selector] : undefined;
+  const selector = /selector: (\S+)/.exec(message)?.[1];
+  return selector ? builtinAdapterNamed(selector) : undefined;
 }
 
 function handleError(e: unknown): number {
@@ -1227,50 +1183,10 @@ function printListWithFiles(
   for (const row of rows) console.log(fmt(row));
 }
 
-function activeFileConflicts(
-  digest: CoordinationDigest,
-  target: string,
-  ignoredOwner?: string,
-  ignoredSessions: Set<string> = new Set(),
-): {
-  id: string;
-  displayName: string;
-  creator?: string;
-  adapter: string;
-  status: string;
-  currentTask?: string;
-  lastWritingAt?: string;
-}[] {
-  return digest.sessions
-    .filter((session) => session.activeWritingFiles.includes(target))
-    .filter((session) => !ignoredOwner || session.adapter !== "claim"
-      || (session.displayName !== `claim-${ignoredOwner}` && session.creator !== ignoredOwner))
-    // A subagent's writes count as its parent's: the parent asked for them.
-    .filter((session) => !isIgnoredSession(session, ignoredSessions))
-    .map((session) => ({
-      id: session.id,
-      displayName: session.displayName,
-      ...(session.creator ? { creator: session.creator } : {}),
-      adapter: session.adapter,
-      status: session.status,
-      currentTask: session.currentTask,
-      lastWritingAt: session.writingFileEvents.find((event) => event.file === target && event.active)?.lastWritingAt,
-    }));
-}
-
-function isIgnoredSession(
-  session: { id: string; displayName: string; parentSessionId?: string },
-  ignored: Set<string>,
-): boolean {
-  if (!ignored.size) return false;
-  if (ignored.has(session.id) || ignored.has(session.displayName)) return true;
-  return session.parentSessionId !== undefined && ignored.has(session.parentSessionId);
-}
-
 function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] {
   const values: string[] = [];
   if (file !== undefined) values.push(String(file));
-  if (filesFrom !== undefined) values.push(...readFilesFrom(String(filesFrom), cwd));
+  if (filesFrom !== undefined) values.push(...readPathList(String(filesFrom), cwd));
   if (values.length === 0) {
     fail({
       code: 5,
@@ -1280,21 +1196,13 @@ function checkTargets(file: unknown, filesFrom: unknown, cwd: string): string[] 
       next: ["peek check src/core/engine.ts", "peek check --files-from changed-files.txt"],
     });
   }
-  return [...new Set(values.map((value) => resolve(cwd, value)))].sort();
+  return resolveTargets(values, cwd);
 }
 
-function readFilesFrom(path: string, cwd: string = process.cwd()): string[] {
-  const raw = path === "-"
-    ? readFileSync(0, "utf8")
-    : readFileSync(path, "utf8");
-  const entries = raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    // The format is one path per line, but a space-separated line that names no file
-    // is several paths, not one; checking "a b" as a single path silently passes.
-    .flatMap((line) => (/\s/.test(line) && !existsSync(resolve(cwd, line)) ? line.split(/\s+/) : [line]));
-  const missing = entries.filter((entry) => !existsSync(resolve(cwd, entry)));
+/** `--files-from <path|->`: the list rules are shared; the stdin read and warning are the CLI's. */
+function readPathList(path: string, cwd: string): string[] {
+  const raw = path === "-" ? readFileSync(0, "utf8") : readFileSync(path, "utf8");
+  const { entries, missing } = parsePathList(raw, cwd);
   if (missing.length) {
     console.error(`warning: ${missing.length} path${missing.length === 1 ? " is" : "s are"} not on disk: ${missing.join(", ")} (checked anyway; a typo here passes as "ok")`);
   }
@@ -1311,23 +1219,16 @@ function readFilesFrom(path: string, cwd: string = process.cwd()): string[] {
 async function runUsage(dimension: unknown, opts: Record<string, unknown>): Promise<void> {
   const store = new UsageStore({});
   try {
+    const usage = new UsageService({ store });
     if (opts.scan !== false) {
-      const engine = await createEngine({ withExternal: true });
-      const adapters = engine.adapters();
-      // adapter -> agent slug. They are orthogonal (ticket 02): an adapter may belong
-      // to no agent, so an unmapped adapter records a null agent rather than guessing.
-      const agentByAdapter = new Map<string, string>();
-      for (const agent of await listAgents()) {
-        if (agent.adapter) agentByAdapter.set(agent.adapter, agent.slug);
-      }
-      const wasEmpty = store.isEmpty();
-      if (wasEmpty && !opts.json) {
+      // The index scans every adapter and needs no registry, so this builds the adapter
+      // set alone rather than a whole engine.
+      const adapters = (await createAdapterLoader({ withExternal: true })).all();
+      if (usage.isEmpty() && !opts.json) {
         // Bootstrap parses every transcript once; later scans resume from a watermark.
         console.error("[agent-peek] first run: indexing existing transcripts, this happens once.");
       }
-      const result = await scanAll(adapters, store, {
-        agentFor: (entry) => agentByAdapter.get(entry.adapter) ?? null,
-      });
+      const result = await usage.scan(adapters);
       for (const err of result.errors.slice(0, 3)) {
         console.error(`[agent-peek] ${err.sourcePath}: ${err.message}`);
       }
@@ -1339,11 +1240,6 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
     // the command name in `tool`, so filtering by tool name drops every slash-only
     // skill — 14 of them on the machine this was built against.
     const skillsOnly = !opts.allTools && explicitTool === undefined;
-    // Built-in resolution is a row predicate handed to the report, not a pass over its
-    // output: filtering after the limit would silently trim the tail a second time.
-    const keepRow = skillsOnly && !opts.includeBuiltins
-      ? await cliBuiltinRowFilter(groupBy)
-      : undefined;
     const filter = {
       ...(skillsOnly ? { skillsOnly: true } : {}),
       ...(explicitTool ? { tool: explicitTool } : {}),
@@ -1357,11 +1253,12 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
       ...(opts.mainLoop ? { sidechain: false } : {}),
       ...(opts.attributionAgent ? { attributionAgent: String(opts.attributionAgent) } : {}),
     };
-    const report = await buildUsageReport(store, {
-      ...filter,
+    const report = await usage.report({
+      filter,
       groupBy,
       limit: parseLimit(opts.limit),
-    }, keepRow ? { keepRow } : {});
+      includeBuiltins: Boolean(opts.includeBuiltins),
+    });
 
     if (opts.json) {
       console.log(JSON.stringify(report, null, 2));
@@ -1389,55 +1286,34 @@ async function runUsage(dimension: unknown, opts: Record<string, unknown>): Prom
   }
 }
 
-/**
- * A row predicate dropping names that resolve to a CLI built-in. The index records
- * every slash command verbatim, built-ins included — ticket 01 deliberately left "is
- * this a skill" to the inventory rather than freezing an answer into the schema, and
- * this is where that resolution happens.
- *
- * Only a grouping that names something can be resolved; any other passes everything
- * through rather than filtering on a name its rows do not carry.
- */
-async function cliBuiltinRowFilter(groupBy: GroupBy[]): Promise<((row: UsageRow) => boolean) | undefined> {
-  // The rule itself lives in src/skills/resolve.ts, shared with the MCP surface: two
-  // copies of a coverage rule is how one of them starts reporting `/clear` as a skill.
-  const dim = groupBy.length === 1 ? groupBy[0] : undefined;
-  return builtinRowFilter<UsageRow>(buildNameIndex(await buildInventory({})), dim);
-}
-
 function parseDimensions(dimension: unknown, by: unknown): GroupBy[] {
   const raw = by !== undefined ? String(by) : dimension !== undefined ? String(dimension) : "skill";
-  const dims = raw.split(",").map((d) => d.trim()).filter(Boolean);
-  const invalid = dims.filter((d) => !GROUP_BY_DIMENSIONS.includes(d as GroupBy));
-  if (invalid.length > 0) {
+  const parsed = parseGroupByList(raw);
+  if (!parsed.ok) {
     fail({
       code: 5,
       error: "invalid_dimension",
-      message: `Unknown usage dimension: ${invalid.join(", ")}`,
+      message: `Unknown usage dimension: ${parsed.invalid.join(", ")}`,
       hint: `Valid dimensions: ${GROUP_BY_DIMENSIONS.join(", ")}.`,
       next: ["peek usage skill", "peek usage attributionAgent --sidechain"],
     });
   }
-  return dims as GroupBy[];
+  return parsed.dims;
 }
 
 /** Accepts a duration (30d, 24h) or an ISO date, since the retention window makes both natural. */
 function parseWhen(value: unknown, flag: string): string {
   const text = String(value ?? "").trim();
-  if (/^\d+(ms|s|m|h|d)?$/i.test(text)) {
-    return new Date(Date.now() - parseDurationMs(text, flag)).toISOString();
-  }
-  const parsed = Date.parse(text);
-  if (Number.isNaN(parsed)) {
-    fail({
-      code: 5,
-      error: "invalid_time",
-      message: `Invalid ${flag}: ${text}`,
-      hint: "Use a duration like 7d or 24h, or an ISO date like 2026-08-01.",
-      next: ["peek usage --since 7d", "peek usage --since 2026-08-01"],
-    });
-  }
-  return new Date(parsed).toISOString();
+  const at = resolveInstant(text, new Date());
+  if (at.ok) return at.iso;
+  if (at.problem !== "invalid-date") failDuration(text, flag, at.problem);
+  fail({
+    code: 5,
+    error: "invalid_time",
+    message: `Invalid ${flag}: ${text}`,
+    hint: "Use a duration like 7d or 24h, or an ISO date like 2026-08-01.",
+    next: ["peek usage --since 7d", "peek usage --since 2026-08-01"],
+  });
 }
 
 function parseLimit(value: unknown): number {
@@ -1575,69 +1451,28 @@ function printSkillExpansion(name: string, rows: InstallationRow[]): void {
 
 function parseDurationMs(value: unknown, flag: string): number {
   const text = String(value ?? "").trim();
-  const match = text.match(/^(\d+)(ms|s|m|h|d)?$/i);
-  if (!match) {
-    fail({
-      code: 5,
-      error: "invalid_duration",
-      message: `Invalid ${flag}: ${text}`,
-      hint: "Use a duration like 30s, 2m, 1h, or 7d.",
-      next: ["peek claim src/core/engine.ts --ttl 2m"],
-    });
-  }
-  const amount = Number(match[1]);
-  const unit = (match[2] ?? "s").toLowerCase();
-  const factor = unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : unit === "s" ? 1000 : 1;
-  const ms = amount * factor;
-  if (!Number.isSafeInteger(ms) || ms <= 0) {
-    fail({
-      code: 5,
-      error: "invalid_duration",
-      message: `Invalid ${flag}: ${text}`,
-      hint: "Duration must be positive.",
-      next: ["peek claim src/core/engine.ts --ttl 2m"],
-    });
-  }
-  return ms;
+  const parsed = parseDuration(text);
+  if (!parsed.ok) failDuration(text, flag, parsed.problem);
+  return parsed.ms;
 }
 
-function splitList(value: unknown): string[] {
-  if (value === undefined) return [];
-  return String(value).split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-function parseEvidence(value: unknown): { kind: "file" | "commit" | "session"; path?: string; line?: number; ref?: string }[] {
-  return splitList(value).map((entry) => {
-    const [kind, ...rest] = entry.split(":");
-    if (kind === "file") {
-      const line = rest.length > 1 && /^\d+$/.test(rest[rest.length - 1]!) ? Number(rest.pop()) : undefined;
-      return { kind: "file" as const, path: rest.join(":"), line };
-    }
-    if (kind === "commit" || kind === "session") return { kind, ref: rest.join(":") };
-    throw new PostRejectedError(`evidence "${entry}" must start with file:, commit:, or session:`);
+function failDuration(text: string, flag: string, problem: DurationProblem): never {
+  fail({
+    code: 5,
+    error: "invalid_duration",
+    message: `Invalid ${flag}: ${text}`,
+    hint: problem === "format" ? "Use a duration like 30s, 2m, 1h, or 7d." : "Duration must be positive.",
+    next: ["peek claim src/core/engine.ts --ttl 2m"],
   });
 }
 
-/**
- * Who "you" are to peek: CLAUDE_SESSION_ID when the harness sets it, else the session
- * whose cwd is this directory. No pid of any kind: every peek call is a new process,
- * and for an agent every shell command is a new shell too, so neither pid nor parent
- * pid ever matched again and --ignore-self could not recognise a claim made a second
- * earlier. Untracked agents fall back to user, host and directory.
- */
-/** The owner string plus, when peek had to fall back, why: printed so the caller can
- * pass --as or set CLAUDE_SESSION_ID instead of trusting a guess. */
-async function resolveSelf(engine: Engine | undefined, cwd: string): Promise<{ owner: string; note?: string }> {
-  const author = await resolveAuthor({ cwd, engine });
-  if (!author.anonymous) return { owner: author.session };
-  const owner = `${userInfo().username || "agent"}@${hostname()}:${cwd}`;
-  if (author.ambiguousSessions?.length) {
-    return {
-      owner,
-      note: `could not tell which of ${author.ambiguousSessions.length} live sessions in this directory is you (${author.ambiguousSessions.join(", ")}); using ${owner}. Set CLAUDE_SESSION_ID or pass --as <name> for a stable identity.`,
-    };
-  }
-  return { owner, note: `no tracked session found for this directory; using ${owner}.` };
+/** cac hands numeric-looking values over as numbers, and repeated flags as arrays. */
+function splitList(value: unknown): string[] {
+  return splitItems(value === undefined ? undefined : String(value));
+}
+
+function parseEvidence(value: unknown) {
+  return parseEvidenceRefs(splitList(value));
 }
 
 function printCoordinationDigest(
@@ -1774,75 +1609,21 @@ function writeCoordinationCursor(
   return cursorLocation;
 }
 
-function projectCoordinationDigest(
-  digest: CoordinationDigest,
-  opts: { fields?: unknown; omitCursor?: boolean; cursorLocation?: string },
-): Record<string, unknown> {
-  const projected: Record<string, unknown> = { ...digest };
-  if (opts.fields !== undefined) {
-    const fields = parseCoordinationFields(opts.fields);
-    projected.sessions = digest.sessions.map((session) => projectCoordinationSession(session, fields));
-  }
-  if (opts.omitCursor) delete projected.nextCursor;
-  if (opts.cursorLocation) projected.cursorFile = opts.cursorLocation;
-  return projected;
-}
-
-const COORDINATION_IDENTITY_FIELDS = ["id", "displayName", "adapter", "status", "lastSeen"] as const;
-const COORDINATION_SESSION_FIELDS = new Set([
-  ...COORDINATION_IDENTITY_FIELDS,
-  "activity",
-  "cwd",
-  "sourceType",
-  "messageCount",
-  "changedMessageCount",
-  "currentTask",
-  "lastAssistantMessage",
-  "pendingTools",
-  "recentTools",
-  "intent",
-  "recentFiles",
-  "knownFiles",
-  "hotFiles",
-  "activeWritingFiles",
-  "recentWritingFiles",
-  "writingFileEvents",
-  "writingFiles",
-  "writingFilesLastSeen",
-  "touchedFiles",
-  "error",
-]);
-
-function parseCoordinationFields(value: unknown): string[] {
-  const fields = String(value)
-    .split(",")
-    .map((field) => field.trim())
-    .filter(Boolean);
-  const invalid = fields.filter((field) => !COORDINATION_SESSION_FIELDS.has(field));
-  if (fields.length === 0 || invalid.length) {
+/** `--fields`: identity fields are always kept; an unknown or empty list is a usage error. */
+function coordinationFields(value: unknown): string[] {
+  const parsed = parseCoordinationFields(String(value));
+  if (!parsed.ok) {
     fail({
       code: 5,
       error: "invalid_fields",
-      message: invalid.length
-        ? `Unknown coordination field(s): ${invalid.join(", ")}`
+      message: parsed.invalid.length
+        ? `Unknown coordination field(s): ${parsed.invalid.join(", ")}`
         : "At least one coordination field is required.",
       hint: `Use comma-separated session fields such as: currentTask,intent,activeWritingFiles,pendingTools.`,
       next: ["peek coord . --json --fields currentTask,intent,activeWritingFiles,pendingTools"],
     });
   }
-  return [...new Set([...COORDINATION_IDENTITY_FIELDS, ...fields])];
-}
-
-function projectCoordinationSession(
-  session: CoordinationDigest["sessions"][number],
-  fields: string[],
-): Record<string, unknown> {
-  const projected: Record<string, unknown> = {};
-  const record = session as unknown as Record<string, unknown>;
-  for (const field of fields) {
-    if (record[field] !== undefined) projected[field] = record[field];
-  }
-  return projected;
+  return parsed.fields;
 }
 
 function sameStringSet(a: string[], b: string[]): boolean {
@@ -1851,17 +1632,9 @@ function sameStringSet(a: string[], b: string[]): boolean {
   return a.every((item) => bSet.has(item));
 }
 
-function withDisplayNames<T extends { id: string; name?: string; tag?: string; adapter: string; cwd?: string }>(
-  list: T[],
-): (T & { displayName: string })[] {
-  const names = displayNames(list);
-  // Some adapters leave `name` empty; a JSON consumer should be able to key on one field.
-  return list.map((entry, i) => ({ ...entry, name: entry.name ?? names[i]!, displayName: names[i]! }));
-}
-
 function parseStatus(value: unknown): SessionEntry["status"] | undefined {
   if (value === undefined) return undefined;
-  if (value === "active" || value === "idle" || value === "ended") return value;
+  if (isSessionStatus(value)) return value;
   fail({
     code: 5,
     error: "invalid_status",
@@ -2253,118 +2026,6 @@ function compareVersions(a: string, b: string): number {
     if (l !== r) return l > r ? 1 : -1;
   }
   return 0;
-}
-
-interface DoctorRow {
-  adapter: string;
-  source: string;
-  status: "ready" | "not found" | "needs command" | "opt-in";
-  path?: string;
-  command?: string;
-  note?: string;
-}
-
-function probeStateDir(): { path: string; writable: boolean; error?: string } {
-  const dir = join(process.env.HOME ?? homedir(), ".agent-peek");
-  const probe = join(dir, `.write-probe-${process.pid}`);
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(probe, "");
-    unlinkSync(probe);
-    return { path: dir, writable: true };
-  } catch (e) {
-    return { path: dir, writable: false, error: (e as { code?: string }).code ?? (e as Error).message };
-  }
-}
-
-async function doctorRows(): Promise<DoctorRow[]> {
-  const home = process.env.HOME ?? homedir();
-  const xdgData = process.env.XDG_DATA_HOME ?? join(home, ".local", "share");
-  const gooseDb = process.platform === "win32" && process.env.APPDATA
-    ? join(process.env.APPDATA, "Block", "goose", "data", "sessions", "sessions.db")
-    : join(home, ".local", "share", "goose", "sessions", "sessions.db");
-  const opencodeStorage = join(xdgData, "opencode", "storage");
-  const rows: DoctorRow[] = [
-    pathRow("claude-code", "file", join(home, ".claude", "projects")),
-    pathRow("codex", "file", join(home, ".codex", "sessions")),
-    pathRow("copilot-cli", "directory", join(home, ".copilot", "session-state")),
-    pathRow("gemini", "file", join(home, ".gemini", "tmp")),
-    {
-      ...pathRow("goose", "database", gooseDb),
-      command: "sqlite3",
-      status: existsSync(gooseDb) ? await commandExists("sqlite3") ? "ready" : "needs command" : "not found",
-      note: existsSync(gooseDb) ? "sqlite3 required to query Goose sessions" : undefined,
-    },
-    // The 0.6.0 row (legacy filesystem storage) keeps its shape; V2 gets an added row.
-    pathRow("opencode", "directory", opencodeStorage),
-    opencodeDatabaseRow(),
-    {
-      adapter: "tmux",
-      source: "terminal",
-      command: "tmux",
-      status: await commandExists("tmux") ? "opt-in" : "needs command",
-      note: "Use `peek list --terminals` or `--adapter tmux`; captures terminal scrollback.",
-    },
-    {
-      adapter: "screen",
-      source: "terminal",
-      command: "screen",
-      status: await commandExists("screen") ? "opt-in" : "needs command",
-      note: "Use `peek list --terminals` or `--adapter screen`; captures terminal scrollback.",
-    },
-  ];
-  return rows;
-}
-
-/**
- * OpenCode V2's database, resolved as the adapter resolves it (OPENCODE_DB, then
- * opencode.db plus channel databases). Read through node:sqlite: no command needed.
- */
-function opencodeDatabaseRow(): DoctorRow {
-  const { primary, existing } = opencodeDatabases();
-  if (!primary) {
-    return { adapter: "opencode", source: "database", status: "not found", note: "OPENCODE_DB=:memory: keeps no database on disk" };
-  }
-  const channels = existing.filter((path) => path !== primary).map((path) => basename(path));
-  return {
-    adapter: "opencode",
-    source: "database",
-    path: primary,
-    status: existing.length ? "ready" : "not found",
-    note: channels.length ? `also reading ${channels.join(", ")}` : undefined,
-  };
-}
-
-function pathRow(adapter: string, source: string, path: string): DoctorRow {
-  return {
-    adapter,
-    source,
-    path,
-    status: existsSync(path) ? "ready" : "not found",
-  };
-}
-
-async function commandExists(command: string): Promise<boolean> {
-  try {
-    await execFileAsync(command, ["--version"], { encoding: "utf8", timeout: 1500 });
-    return true;
-  } catch {
-    try {
-      await execFileAsync("sh", ["-lc", `command -v ${shellQuote(command)}`], { encoding: "utf8", timeout: 1500 });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-
-function isTerminalAdapter(adapter: unknown): boolean {
-  return typeof adapter === "string" && TERMINAL_ADAPTERS.has(adapter);
 }
 
 
