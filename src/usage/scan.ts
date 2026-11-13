@@ -1,5 +1,6 @@
 // src/usage/scan.ts
 import { stat } from "node:fs/promises";
+import { walkFiles } from "../adapters/common.js";
 import type { Adapter } from "../adapters/types.js";
 import type { SessionEntry } from "../core/types.js";
 import { decodeCursor } from "../core/cursor.js";
@@ -101,6 +102,27 @@ export function sourceKey(entry: SessionEntry): string {
   return entry.sourceType === "database" ? `${entry.transcriptPath}#${entry.id}` : entry.transcriptPath;
 }
 
+interface SourceStat {
+  size: number;
+  mtimeMs: number;
+}
+
+/**
+ * Size and mtime that change whenever the session does. A directory's own mtime moves
+ * only when entries are added or removed, not when a file inside it is appended to, so
+ * a directory source uses the newest mtime and total size of the files it contains.
+ */
+async function sourceStat(entry: SessionEntry): Promise<SourceStat> {
+  const st = await stat(entry.transcriptPath);
+  if (!st.isDirectory()) return { size: st.size, mtimeMs: st.mtimeMs };
+  const files = await Promise.all((await walkFiles(entry.transcriptPath)).map((f) => stat(f)));
+  if (files.length === 0) return { size: 0, mtimeMs: st.mtimeMs };
+  return {
+    size: files.reduce((sum, f) => sum + f.size, 0),
+    mtimeMs: Math.max(...files.map((f) => f.mtimeMs)),
+  };
+}
+
 /** Returns the number of invocations recorded, or null if the source was unchanged. */
 async function scanSource(
   adapter: Adapter,
@@ -110,7 +132,7 @@ async function scanSource(
   now: Date,
 ): Promise<number | null> {
   const path = sourceKey(entry);
-  const st = await stat(entry.transcriptPath);
+  const st = await sourceStat(entry);
   const prior = store.getWatermark(path);
 
   // A shrink means truncation or rotation: the stored byte offset is now past EOF, so
