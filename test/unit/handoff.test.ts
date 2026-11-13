@@ -141,7 +141,8 @@ describe("handoff.buildHandoff", () => {
       { role: "assistant", text: "Next I will wire the backoff. Want me to also add jitter?", raw: {} },
       { role: "user", text: "ci is failing on this", raw: { gitBranch: "avi/retries" } },
     ], { cwd: "/work/repo", target: "generic", produce: "local" });
-    expect(s.document).toMatch(/## Goal\nOriginal ask: Add retries to the uploader\.\nLatest ask: ci is failing on this/);
+    // D9.4: Goal is the session goal; the current ask, when it differs, leads Current state.
+    expect(s.document).toMatch(/## Goal\nAdd retries to the uploader\.\n\n## Current state\nCurrent ask: ci is failing on this\n/);
     expect(s.document).toMatch(/git branch: avi\/retries/);
     expect(s.document).toMatch(/Recent commands \(oldest first\), with how their output read:\n- `npm test -- uploader` -> unknown/);
     // The question moves to Open questions; it is not an action for the next session.
@@ -159,6 +160,34 @@ describe("handoff.buildHandoff", () => {
     ], { cwd: "/work/repo", target: "generic", produce: "local" });
     // The user's question was answered by the turns after it; the trailing offer was not.
     expect(s.openQuestions).toEqual(["Do you want me to also add jitter?"]);
+  });
+
+  // D9.4 (Research E §6): goal and current ask stay distinct through the handoff.
+  it("carries goal separately from currentTask and renders both", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Land feature #1578 and the doc follow-ups.", raw: {} },
+      { role: "assistant", text: "I'll start with the prompt files.", raw: {} },
+      { role: "user", text: "the .env.local got committed", raw: {} },
+      { role: "assistant", text: "I'll remove it from tracking, gitignore it, and rewrite the commit.", raw: {} },
+      { role: "user", text: "yes", raw: {} },
+      { role: "assistant", text: "Right — let me use peek's own capability instead of hand-authoring.", raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.goal).toBe("Land feature #1578 and the doc follow-ups.");
+    expect(s.currentTask).toBe("the .env.local got committed");
+    expect(s.document).toMatch(/## Goal\nLand feature #1578 and the doc follow-ups\.\n\n## Current state\nCurrent ask: the \.env\.local got committed\n/);
+    // The assistant's narration never stands in for the goal or the ask.
+    expect(s.document).not.toContain("let me use peek's own capability\n\n## Current state");
+    expect(s.currentTask).not.toContain("let me use peek");
+  });
+
+  it("a single-ask handoff has no separate Current ask line", async () => {
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Add retries to the uploader.", raw: {} },
+      { role: "assistant", text: "Working on it.", raw: {} },
+    ], { cwd: "/x", target: "generic", produce: "local" });
+    expect(s.goal).toBe(s.currentTask);
+    expect(s.document).toMatch(/## Goal\nAdd retries to the uploader\.\n\n## Current state\nactivity:/);
+    expect(s.document).not.toContain("Current ask:");
   });
 
   // D9.3 (Research E §1): a question the other party replied to is settled; an early

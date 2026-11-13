@@ -75,6 +75,7 @@ export function toHandoff(sessionId: string, messages: RawMessage[], cwd?: strin
     messageCount: messages.length,
     activity: structured.activity,
     currentTask: structured.currentTask,
+    goal: structured.goal,
     lastAssistantMessage: structured.lastAssistantMessage,
     decisions: extractDecisions(assistantText),
     // Questions are read over the whole transcript, so an early blocker nobody
@@ -387,10 +388,10 @@ export function localHandoffContext(messages: RawMessage[], cwd?: string): Local
 export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext | string | undefined): string {
   const c: LocalHandoffContext = typeof ctx === "string" || ctx === undefined ? { cwd: ctx } : ctx;
   const cwd = c.cwd;
-  const goal = [
-    ...(c.firstAsk && c.firstAsk !== s.currentTask ? [`Original ask: ${c.firstAsk}`] : []),
-    ...(s.currentTask ? [`${c.firstAsk && c.firstAsk !== s.currentTask ? "Latest ask: " : ""}${s.currentTask}`] : []),
-  ];
+  // The Goal is what the session is for; the current ask sits under Current state when
+  // the user has since moved on. `firstAsk` covers a snapshot built without `goal`.
+  const goal = s.goal ?? c.firstAsk ?? s.currentTask;
+  const currentAsk = s.currentTask && s.currentTask !== goal ? s.currentTask : undefined;
   // A question is something the previous session asked; it is not an action for the next one.
   const nextActions = s.nextActions.filter((line) => !line.trim().endsWith("?"));
   const out: string[] = [
@@ -399,9 +400,10 @@ export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext 
     "# Handoff",
     "",
     "## Goal",
-    ...(goal.length ? goal : ["Unknown: no clear task line found in the transcript."]),
+    goal ?? "Unknown: no clear task line found in the transcript.",
     "",
     "## Current state",
+    ...(currentAsk ? [`Current ask: ${currentAsk}`] : []),
     `activity: ${s.activity}; ${s.messageCount} messages.`,
     ...(s.lastAssistantMessage ? [`Last assistant message: ${oneLine(s.lastAssistantMessage, 400)}`] : []),
     ...(s.pendingTools.length ? [`Pending tools: ${s.pendingTools.join(", ")}`] : []),

@@ -204,14 +204,65 @@ describe("snapshot.toStructured", () => {
     expect(s.writingFiles).toEqual([`${here}/src/brand-new.ts`]);
   });
 
-  it("currentTask falls back to the assistant's objective when the user turn is not actionable", () => {
+  // D9.4: an acknowledgement approves the ask before it, so that ask stays the task. This
+  // fixture once expected the assistant's line; the spec's walk-back rule supersedes that.
+  it("currentTask walks back to the previous human ask when the user turn is not actionable", () => {
     const s = toStructured("sid", [
       { role: "user", text: "Add a retry to the uploader.", raw: {} },
       { role: "assistant", text: "I'll add a retry loop to the uploader.", raw: {} },
       { role: "user", text: "yes", raw: {} },
       { role: "assistant", text: "Now I need to update the tests for the retry.", raw: {} },
     ]);
+    expect(s.currentTask).toBe("Add a retry to the uploader.");
+  });
+
+  it("currentTask falls back to the assistant's objective only when no human turn is an ask", () => {
+    const s = toStructured("sid", [
+      { role: "user", text: "continue", raw: {} },
+      { role: "assistant", text: "Now I need to update the tests for the retry.", raw: {} },
+    ]);
     expect(s.currentTask).toBe("Now I need to update the tests for the retry.");
+    expect(s.goal).toBeUndefined();
+  });
+
+  // D9.4 (Research E §6, issue #6 example 2).
+  describe("goal", () => {
+    const issue6 = (): RawMessage[] => [
+      { role: "user", text: "Land feature #1578 and the doc follow-ups.", raw: {} },
+      { role: "assistant", text: "I'll start with the prompt files.", raw: {} },
+      { role: "user", text: "<system-reminder>todo list changed</system-reminder>", raw: {} },
+      { role: "user", text: "the .env.local got committed", raw: {} },
+      { role: "assistant", text: "I'll remove it from tracking, gitignore it, and rewrite the commit.", raw: {} },
+      { role: "user", text: "yes", raw: {} },
+      { role: "assistant", text: "Right — let me use peek's own capability instead of hand-authoring.", raw: {} },
+    ];
+
+    it("is the first substantive ask; currentTask stays the current ask, never an assistant line", () => {
+      const s = toStructured("sid", issue6());
+      expect(s.goal).toBe("Land feature #1578 and the doc follow-ups.");
+      expect(s.currentTask).toBe("the .env.local got committed");
+    });
+
+    it("is carried on the brief", () => {
+      const b = toBrief("sid", issue6());
+      expect(b.goal).toBe("Land feature #1578 and the doc follow-ups.");
+      expect(b.currentTask).toBe("the .env.local got committed");
+    });
+
+    it("skips leading acknowledgements and harness wrappers", () => {
+      const s = toStructured("sid", [
+        { role: "user", text: "<command-name>/clear</command-name>", raw: {} },
+        { role: "user", text: "ok", raw: {} },
+        { role: "user", text: "<system-reminder>noise</system-reminder>\nFix the flaky upload test.", raw: {} },
+      ]);
+      expect(s.goal).toBe("Fix the flaky upload test.");
+    });
+
+    it("equals currentTask for a single-ask session", () => {
+      const s = toStructured("sid", msgs());
+      expect(s.goal).toBe(s.currentTask);
+      expect(s.goal).toBe("do X");
+    });
   });
 
   it("currentTask comes from last user message (heuristic)", () => {

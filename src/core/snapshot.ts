@@ -83,7 +83,8 @@ export function toStructured(sessionId: string, messages: RawMessage[], cwd?: st
   }
   const pendingToolCalls = computePending(messages);
   const activity = computeActivity(messages, pendingToolCalls);
-  const currentTask = inferCurrentTask(messages, lastUserMessage);
+  const asks = humanAsks(messages);
+  const currentTask = inferCurrentTask(messages, lastUserMessage, asks);
   return {
     mode: "structured",
     sessionId,
@@ -91,6 +92,7 @@ export function toStructured(sessionId: string, messages: RawMessage[], cwd?: st
     lastUserMessage,
     lastAssistantMessage,
     currentTask,
+    goal: asks[0],
     touchedFiles: inferTouchedFiles(messages, cwd),
     writingFiles: inferWritingFiles(messages, cwd),
     pendingToolCalls,
@@ -117,6 +119,7 @@ export function toBrief(sessionId: string, messages: RawMessage[]): BriefSnapsho
     activity: structured.activity,
     brief: parts.join(" "),
     currentTask: structured.currentTask,
+    goal: structured.goal,
     lastAssistantMessage: structured.lastAssistantMessage,
     pendingTools: toolNames(structured.pendingToolCalls),
     recentTools: toolNames(structured.lastToolCalls),
@@ -153,12 +156,15 @@ function computeActivity(messages: RawMessage[], pending: ToolCall[]): "idle" | 
  * The task is what the user asked for. The assistant's own "Let me see how..."
  * lines are steps toward it, and reading them as the task turned every brief,
  * structured view and handoff Goal into the last thing the agent happened to
- * be doing. Only when the latest user turn is not actionable ("yes", "go ahead")
- * does the assistant's stated objective stand in.
+ * be doing. When the latest user turn is not actionable ("yes", "go ahead") it
+ * approved the ask before it, so that ask is still the task. Only a session with no
+ * real ask at all lets the assistant's stated objective stand in.
  */
-function inferCurrentTask(messages: RawMessage[], fallback: string | undefined): string | undefined {
+function inferCurrentTask(messages: RawMessage[], fallback: string | undefined, asks: string[]): string | undefined {
   const asked = objectiveFromUserText(fallback);
   if (asked && !isAcknowledgement(asked)) return asked;
+  const previousAsk = asks.at(-1);
+  if (previousAsk) return previousAsk;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
     if (message.role !== "assistant" || !message.text) continue;
@@ -166,6 +172,21 @@ function inferCurrentTask(messages: RawMessage[], fallback: string | undefined):
     if (candidate) return candidate;
   }
   return asked;
+}
+
+/**
+ * Every substantive ask the human made, oldest first. Acknowledgements and harness
+ * injections are not asks. The first is the session's goal; the latest is what the
+ * user wants now when their last turn only said "yes".
+ */
+function humanAsks(messages: RawMessage[]): string[] {
+  const asks: string[] = [];
+  for (const message of messages) {
+    if (message.role !== "user" || !message.text || message.toolCalls?.length) continue;
+    const ask = objectiveFromUserText(message.text);
+    if (ask && !isAcknowledgement(ask)) asks.push(ask);
+  }
+  return asks;
 }
 
 /** "yes", "go ahead", "ok do it": the user handed the turn back without restating the task. */

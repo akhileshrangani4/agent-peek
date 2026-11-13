@@ -102,6 +102,9 @@ export interface StructuredSnapshot {
   lastUserMessage?: string;
   lastAssistantMessage?: string;
   currentTask?: string;
+  /** The session's first substantive human ask: what the whole session is for. `currentTask`
+   * is what the user wants now; for a single-ask session the two are equal. Local only. */
+  goal?: string;
   touchedFiles: string[];
   writingFiles: string[];
   pendingToolCalls: ToolCall[];
@@ -125,6 +128,9 @@ export interface BriefSnapshot {
   activity: Activity;
   brief: string;
   currentTask?: string;
+  /** The session's first substantive human ask: what the whole session is for. `currentTask`
+   * is what the user wants now; for a single-ask session the two are equal. Local only. */
+  goal?: string;
   lastAssistantMessage?: string;
   pendingTools: string[];
   recentTools: string[];
@@ -140,6 +146,9 @@ export interface HandoffSnapshot {
   messageCount: number;
   activity: Activity;
   currentTask?: string;
+  /** The session's first substantive human ask: what the whole session is for. `currentTask`
+   * is what the user wants now; for a single-ask session the two are equal. Local only. */
+  goal?: string;
   lastAssistantMessage?: string;
   decisions: string[];
   openQuestions: string[];
