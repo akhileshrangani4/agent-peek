@@ -107,7 +107,6 @@ import copilotCli from "./adapters/copilot-cli/index.js";
 import gemini from "./adapters/gemini/index.js";
 import goose from "./adapters/goose/index.js";
 import opencode from "./adapters/opencode/index.js";
-import opencodeLegacyV1 from "./adapters/opencode-legacy-v1/index.js";
 import screen from "./adapters/screen/index.js";
 import tmux from "./adapters/tmux/index.js";
 import { Engine } from "./core/engine.js";
@@ -132,7 +131,9 @@ export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine>
     loader.register(gemini);
     loader.register(goose);
     loader.register(opencode);
-    loader.register(opencodeLegacyV1);
+    // The name lachieh's PR #12 gave legacy storage, kept as an alias only: legacy
+    // sessions are still listed by the opencode adapter as `opencode:<id>`.
+    loader.alias("opencode-legacy-v1", "opencode");
     loader.register(screen);
     loader.register(tmux);
   }

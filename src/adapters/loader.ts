@@ -5,22 +5,41 @@ import { AdapterNotFoundError } from "../core/errors.js";
 
 export class AdapterLoader {
   private readonly adapters = new Map<string, Adapter>();
+  /** Extra names that resolve to a registered adapter. Never listed by `names()`. */
+  private readonly aliases = new Map<string, string>();
 
   register(adapter: Adapter): void {
-    if (this.adapters.has(adapter.name)) {
+    if (this.adapters.has(adapter.name) || this.aliases.has(adapter.name)) {
       throw new Error(`Adapter "${adapter.name}" already registered`);
     }
     this.adapters.set(adapter.name, adapter);
   }
 
+  /**
+   * Accept `alias` wherever an adapter name is accepted (`--adapter`, a selector prefix).
+   * Sessions keep the target's name and id namespace: an alias never renames anything.
+   */
+  alias(alias: string, target: string): void {
+    if (this.adapters.has(alias) || this.aliases.has(alias)) {
+      throw new Error(`Adapter "${alias}" already registered`);
+    }
+    if (!this.adapters.has(target)) throw new AdapterNotFoundError(target);
+    this.aliases.set(alias, target);
+  }
+
+  /** The registered adapter name `name` stands for: itself, or an alias's target. */
+  canonical(name: string): string {
+    return this.aliases.get(name) ?? name;
+  }
+
   get(name: string): Adapter {
-    const a = this.adapters.get(name);
+    const a = this.adapters.get(this.canonical(name));
     if (!a) throw new AdapterNotFoundError(name);
     return a;
   }
 
   has(name: string): boolean {
-    return this.adapters.has(name);
+    return this.adapters.has(this.canonical(name));
   }
 
   names(): string[] {

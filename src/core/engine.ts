@@ -82,8 +82,9 @@ export class Engine {
 
   async list(filter?: ListFilter): Promise<SessionEntry[]> {
     const { registry, loader } = this.deps;
-    const adapters = filter?.adapter
-      ? loader.has(filter.adapter) ? [loader.get(filter.adapter)] : []
+    const adapterName = filter?.adapter ? loader.canonical(filter.adapter) : undefined;
+    const adapters = adapterName
+      ? loader.has(adapterName) ? [loader.get(adapterName)] : []
       : loader.all().filter((adapter) => filter?.includeTerminal !== false || !isTerminalAdapter(adapter.name));
     const scans = await Promise.allSettled(adapters.map((a) => a.scan()));
     for (let i = 0; i < scans.length; i++) {
@@ -95,13 +96,14 @@ export class Engine {
       }
     }
     let list = await registry.list();
-    if (filter?.adapter) list = list.filter((e) => e.adapter === filter.adapter);
+    if (adapterName) list = list.filter((e) => e.adapter === adapterName);
     else if (filter?.includeTerminal === false) list = list.filter((e) => !isTerminalSession(e));
     if (filter?.status) list = list.filter((e) => e.status === filter.status);
     return list.sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
   }
 
   async peek(selector: string, opts: PeekOpts = {}): Promise<PeekResult> {
+    selector = this.canonicalSelector(selector);
     const adapterHint = this.adapterNameFromSelector(selector);
     await this.list(adapterHint ? { adapter: adapterHint } : { includeTerminal: false });
     const entry = await this.resolve(selector);
@@ -323,10 +325,20 @@ export class Engine {
     const colon = selector.indexOf(":");
     if (colon <= 0) return undefined;
     const adapter = selector.slice(0, colon);
-    return this.deps.loader.has(adapter) ? adapter : undefined;
+    return this.deps.loader.has(adapter) ? this.deps.loader.canonical(adapter) : undefined;
+  }
+
+  /** `<alias>:<id>` becomes `<adapter>:<id>`, the id the session is stored under. */
+  private canonicalSelector(selector: string): string {
+    const colon = selector.indexOf(":");
+    if (colon <= 0) return selector;
+    const prefix = selector.slice(0, colon);
+    const canonical = this.deps.loader.canonical(prefix);
+    return canonical === prefix ? selector : `${canonical}${selector.slice(colon)}`;
   }
 
   private async resolveForMutation(selector: string): Promise<SessionEntry> {
+    selector = this.canonicalSelector(selector);
     const exact = await this.deps.registry.get(selector);
     if (exact) return exact;
     await this.list({ includeTerminal: false });

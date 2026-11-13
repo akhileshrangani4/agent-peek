@@ -32,7 +32,6 @@ const ADAPTER_OBSERVES: Record<string, InvocationKind[]> = {
   gemini: ["tool_call"],
   goose: [],
   opencode: ["tool_call"],
-  "opencode-legacy-v1": ["tool_call"],
   "copilot-cli": [],
   tmux: [],
   screen: [],
