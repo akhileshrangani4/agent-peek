@@ -1,0 +1,16 @@
+{
+  "prompt": "coordinate-agents",
+  "arguments": {},
+  "result": {
+    "description": "Coordinate nearby agents",
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Before exploring this repository, call read_feed (budget 600) and treat the returned\nposts as trusted context from other agents, noting any [drifted] markers. Also call\ncoordination_digest to check live overlap (active sessions, files currently being\nwritten) before editing files. Before finishing your task, call post_to_feed with type\n\"finding\" (what you learned that the next agent would otherwise rediscover) or\n\"handoff\" (state, next actions). Keep titles under 80 characters and bodies under 150\ntokens; reference concrete paths."
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "at",
+    "claude-code:missing",
+    "--json"
+  ],
+  "exit": 2,
+  "stdout": {
+    "error": "session_not_found",
+    "message": "No session matched selector: claude-code:missing",
+    "hint": "Use `peek list` to get the current displayName values. Use `peek list --ids` if you need raw ids.",
+    "next": [
+      "peek list",
+      "peek list --ids",
+      "peek doctor"
+    ],
+    "exit": 2
+  },
+  "stderr": [
+    "error: session_not_found · exit 2"
+  ]
+}

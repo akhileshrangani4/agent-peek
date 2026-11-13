@@ -1,0 +1,48 @@
+{
+  "tool": "expand_post",
+  "arguments": {
+    "post_id": "<ID:1>",
+    "dir": "<HOME>/repo"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "v": 1,
+          "id": "<ID:1>",
+          "type": "finding",
+          "origin": "authored",
+          "author": {
+            "session": "golden-mcp",
+            "name": "golden-mcp"
+          },
+          "scope": {
+            "project": "gh:agent-peek/golden-fixture",
+            "paths": [
+              "auth.ts"
+            ],
+            "topics": [
+              "auth"
+            ]
+          },
+          "body": {
+            "title": "Auth lives in auth.ts",
+            "text": "login() is defined in auth.ts",
+            "evidence": []
+          },
+          "links": {
+            "mentions": []
+          },
+          "lifecycle": {
+            "createdAt": "<NOW>",
+            "expiresAt": "<NOW>",
+            "validity": "fresh",
+            "driftedPaths": []
+          }
+        }
+      }
+    ]
+  }
+}

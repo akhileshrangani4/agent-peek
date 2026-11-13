@@ -1,0 +1,30 @@
+{
+  "argv": [
+    "check",
+    "src/verify.ts",
+    "--include-self",
+    "--json"
+  ],
+  "exit": 1,
+  "stdout": {
+    "ok": false,
+    "files": [
+      {
+        "file": "<HOME>/repo/src/verify.ts",
+        "conflicts": [
+          {
+            "id": "claim:<ID:1>",
+            "displayName": "claim-golden-agent",
+            "creator": "<USER>@<HOST>:<HOME>/repo",
+            "adapter": "claim",
+            "status": "active",
+            "currentTask": "Claimed 1 file until <NOW>",
+            "lastWritingAt": "<NOW>"
+          }
+        ]
+      }
+    ],
+    "conflictCount": 1
+  },
+  "stderr": null
+}

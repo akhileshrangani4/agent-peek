@@ -1,0 +1,29 @@
+[
+  {
+    "name": "coordinate-agents",
+    "description": "Check nearby agents before starting or continuing work.",
+    "arguments": []
+  },
+  {
+    "name": "session-handoff",
+    "description": "Prepare a concise handoff from another agent session.",
+    "arguments": [
+      {
+        "name": "selector",
+        "description": "Session displayName, id, tag, or cwd.",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "avoid-overlap",
+    "description": "Look for session overlap before editing files.",
+    "arguments": [
+      {
+        "name": "cwd",
+        "description": "Working directory to inspect for overlap.",
+        "required": false
+      }
+    ]
+  }
+]

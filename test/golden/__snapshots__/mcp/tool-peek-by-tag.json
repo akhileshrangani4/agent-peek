@@ -1,0 +1,38 @@
+{
+  "tool": "peek_session",
+  "arguments": {
+    "selector": "mcp-main",
+    "mode": "brief"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "snapshot": {
+            "mode": "brief",
+            "sessionId": "claude-code:s1",
+            "messageCount": 5,
+            "activity": "thinking",
+            "brief": "Task: refactor auth Last assistant: Found it. Will rewrite next.",
+            "currentTask": "refactor auth",
+            "lastAssistantMessage": "Found it. Will rewrite next.",
+            "pendingTools": [],
+            "recentTools": [
+              "Read"
+            ]
+          },
+          "nextCursor": {
+            "$cursor": {
+              "adapter": "claude-code",
+              "byteOffset": 2308,
+              "msgIndex": 5
+            }
+          },
+          "eof": true
+        }
+      }
+    ]
+  }
+}
