@@ -7,7 +7,7 @@ import type { Cursor, RawMessage, SessionEntry } from "../../core/types.js";
 import { decodeCursor, encodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
 import { extractText, homeDir, normalizeRole, statusFromMtime } from "../common.js";
-import { sqliteJson } from "../sqlite.js";
+import { queryReadOnly } from "../sqlite.js";
 
 const ADAPTER_NAME = "goose";
 
@@ -22,8 +22,7 @@ const adapter: Adapter = {
     const out: SessionEntry[] = [];
     const db = gooseDbPath();
     if (existsSync(db)) {
-      const rows = await sqliteJson<GooseSessionRow>(db,
-        "SELECT id, name, description, working_dir, COALESCE(updated_at, created_at) AS updated_at FROM sessions ORDER BY updated_at DESC");
+      const rows = scanDbSessions(db);
       if (rows) {
         for (const row of rows) {
           if (!row.id) continue;
@@ -55,26 +54,46 @@ const adapter: Adapter = {
   },
 };
 
+// node:sqlite returns SQL NULL as `null`, so every optional column admits it.
 interface GooseSessionRow {
-  id?: string;
-  name?: string;
-  description?: string;
-  working_dir?: string;
-  updated_at?: string | number;
+  id?: string | null;
+  name?: string | null;
+  description?: string | null;
+  working_dir?: string | null;
+  updated_at?: string | number | null;
 }
 
 interface GooseMessageRow {
-  role?: string;
-  content_json?: string;
-  timestamp?: string | number;
-  created_timestamp?: number;
+  role?: string | null;
+  content_json?: string | null;
+  timestamp?: string | number | null;
+  created_timestamp?: number | null;
+}
+
+/**
+ * Sessions in Goose's database, or undefined when it can't be read. Scan must not
+ * fail the whole adapter over one unreadable file (legacy JSONL sessions are still
+ * listable), so the cause is surfaced as a warning rather than thrown.
+ */
+function scanDbSessions(db: string): GooseSessionRow[] | undefined {
+  try {
+    return queryReadOnly<GooseSessionRow>(db,
+      "SELECT id, name, description, working_dir, COALESCE(updated_at, created_at) AS updated_at FROM sessions ORDER BY updated_at DESC");
+  } catch (e) {
+    console.warn(`[agent-peek] cannot read Goose sessions from ${db}: ${e instanceof Error ? e.message : String(e)}`);
+    return undefined;
+  }
 }
 
 async function readDb(db: string, sessionId: string): Promise<RawMessage[]> {
-  const escaped = sessionId.replaceAll("'", "''");
-  const rows = await sqliteJson<GooseMessageRow>(db,
-    `SELECT role, content_json, timestamp, created_timestamp FROM messages WHERE session_id = '${escaped}' ORDER BY created_timestamp, id`);
-  if (!rows) throw new TranscriptUnreadableError(ADAPTER_NAME, `cannot query ${db}; sqlite3 is required`);
+  let rows: GooseMessageRow[];
+  try {
+    rows = queryReadOnly<GooseMessageRow>(db,
+      "SELECT role, content_json, timestamp, created_timestamp FROM messages WHERE session_id = ? ORDER BY created_timestamp, id",
+      [sessionId]);
+  } catch (e) {
+    throw new TranscriptUnreadableError(ADAPTER_NAME, `cannot query ${db}`, e);
+  }
   return rows.map((row) => {
     const content = parseJson(row.content_json);
     return {
