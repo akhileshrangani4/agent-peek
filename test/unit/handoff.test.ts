@@ -6,8 +6,13 @@ import {
   resolveHandoffRunner,
   parseHandoffTarget,
   isWrapperDir,
+  localHandoffContext,
 } from "../../src/core/handoff.js";
-import type { RawMessage } from "../../src/core/types.js";
+import { classifyFileEvents } from "../../src/core/file-events.js";
+import type { RawMessage, ToolCall } from "../../src/core/types.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 const msgs = (): RawMessage[] => [
   { role: "user", text: "Add MCP resources for handoffs", raw: {} },
@@ -318,5 +323,302 @@ describe("handoff.buildHandoff", () => {
     expect(s.material).toContain("## Next actions");
     expect(s.document).toMatch(/^> you are the harness: write the handoff from `material`/m);
     expect(s.document).not.toMatch(/Install claude/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D9.2 (#1) and D9.1 (#7): which files the session wrote versus only read, and
+// where each written file ended up, checked against the disk at handoff time.
+
+/** A temp checkout (a `.git` directory at its root) holding the given files. */
+function checkout(files: string[], dirs: string[] = []): string {
+  const root = mkdtempSync(join(tmpdir(), "ap-handoff-"));
+  mkdirSync(join(root, ".git"));
+  for (const dir of dirs) mkdirSync(join(root, dir), { recursive: true });
+  for (const file of files) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), "x\n");
+  }
+  return root;
+}
+
+const run = (name: string, input: unknown, extra: Partial<ToolCall> = {}): RawMessage => ({
+  role: "assistant",
+  toolCalls: [{ name, input, status: "completed", ...extra }],
+  raw: {},
+});
+
+const filesSection = (document: string) => document.split("## Files\n")[1]?.split("\n\n")[0];
+
+/** Research E §1: a plan written, then `git mv`'d; two questions, each answered next turn. */
+function section1Session(ws: string): RawMessage[] {
+  const plan = "docs/superpowers/plans/2026-06-25-buildy-content-prompt.md";
+  return [
+    { role: "user", text: "Write the content-prompt plan for buildy.", raw: {} },
+    { role: "assistant", text: "Should I put the plan under docs/superpowers/plans or docs/plans?", raw: {} },
+    { role: "user", text: "docs/plans", raw: {} },
+    run("Write", { file_path: join(ws, plan), content: "# Plan" }),
+    run("Bash", { command: `git mv ${plan} docs/plans/new-plan.md` }),
+    { role: "assistant", text: "Moved the plan to docs/plans/new-plan.md. What do you think?", raw: {} },
+    { role: "user", text: "looks good, ship it", raw: {} },
+  ];
+}
+
+describe("handoff file roles and end state (#1, D9.2)", () => {
+  it("lists a git mv'd plan once, at its destination, with the source marked moved", async () => {
+    // On disk after the session: the destination, and the emptied source directory.
+    const ws = checkout(["docs/plans/new-plan.md"], ["docs/superpowers/plans"]);
+    const source = join(ws, "docs/superpowers/plans/2026-06-25-buildy-content-prompt.md");
+    const destination = join(ws, "docs/plans/new-plan.md");
+    expect(classifyFileEvents(section1Session(ws), ws)).toEqual([
+      { path: destination, relPath: "docs/plans/new-plan.md", role: "wrote", state: "created" },
+      { path: source, relPath: "docs/superpowers/plans/2026-06-25-buildy-content-prompt.md", role: "wrote", state: "moved", movedTo: destination },
+    ]);
+    const s = await buildHandoff("sid", section1Session(ws), { cwd: ws, target: "generic", produce: "local" });
+    expect(filesSection(s.document)).toBe([
+      "- docs/plans/new-plan.md (created)",
+      "- docs/superpowers/plans/2026-06-25-buildy-content-prompt.md (moved to docs/plans/new-plan.md)",
+    ].join("\n"));
+    // Both questions were answered by the user's next turn (#1, questions half).
+    expect(s.openQuestions).toEqual([]);
+    // touchedFiles keeps its 0.6 meaning: every path any call touched.
+    expect(s.touchedFiles).toContain(destination);
+  });
+
+  it("still marks the source moved when its directory is gone too", () => {
+    // The session wrote the source itself, so the move needs no on-disk evidence for it.
+    const ws = checkout(["docs/plans/new-plan.md"]);
+    const destination = join(ws, "docs/plans/new-plan.md");
+    expect(classifyFileEvents(section1Session(ws), ws)).toEqual([
+      { path: destination, relPath: "docs/plans/new-plan.md", role: "wrote", state: "created" },
+      { path: join(ws, "docs/superpowers/plans/2026-06-25-buildy-content-prompt.md"), relPath: "docs/superpowers/plans/2026-06-25-buildy-content-prompt.md", role: "wrote", state: "moved", movedTo: destination },
+    ]);
+  });
+
+  it("ignores a move or delete of a path it has no evidence for", () => {
+    const ws = checkout([], ["src"]);
+    expect(classifyFileEvents([
+      run("Bash", { command: "mv gone/a.ts gone/b.ts && rm gone/c.ts" }),
+    ], ws)).toEqual([]);
+  });
+
+  it("folds a plain mv: the source is moved, the destination carries the write", () => {
+    const ws = checkout(["src/b.ts", "src/existing.ts"]);
+    const files = classifyFileEvents([
+      run("Write", { file_path: "src/a.ts", content: "x" }),
+      run("Bash", { command: "mv src/a.ts src/b.ts" }),
+      run("Edit", { file_path: "src/existing.ts", old_string: "a", new_string: "b" }),
+    ], ws);
+    expect(files).toEqual([
+      { path: join(ws, "src/a.ts"), relPath: "src/a.ts", role: "wrote", state: "moved", movedTo: join(ws, "src/b.ts") },
+      { path: join(ws, "src/b.ts"), relPath: "src/b.ts", role: "wrote", state: "created" },
+      { path: join(ws, "src/existing.ts"), relPath: "src/existing.ts", role: "wrote", state: "modified" },
+    ]);
+  });
+
+  it("follows a chain of moves to where the file ended up", () => {
+    const ws = checkout(["src/c.ts"]);
+    const files = classifyFileEvents([
+      run("Write", { file_path: "src/a.ts", content: "x" }),
+      run("Bash", { command: "git mv src/a.ts src/b.ts && git mv src/b.ts src/c.ts" }),
+    ], ws);
+    expect(files.find((file) => file.relPath === "src/a.ts")).toMatchObject({ state: "moved", movedTo: join(ws, "src/c.ts") });
+    expect(files.find((file) => file.relPath === "src/b.ts")).toMatchObject({ state: "moved", movedTo: join(ws, "src/c.ts") });
+    expect(files.find((file) => file.relPath === "src/c.ts")).toMatchObject({ role: "wrote", state: "created" });
+  });
+
+  it("marks a file written then rm'd as deleted, not live", async () => {
+    const ws = checkout(["src/keep.ts"]);
+    const messages: RawMessage[] = [
+      { role: "user", text: "Try a scratch file then clean up.", raw: {} },
+      run("Write", { file_path: "src/scratch.ts", content: "x" }),
+      run("Edit", { file_path: "src/keep.ts", old_string: "a", new_string: "b" }),
+      run("Bash", { command: "rm -f src/scratch.ts" }),
+    ];
+    expect(classifyFileEvents(messages, ws)).toEqual([
+      { path: join(ws, "src/keep.ts"), relPath: "src/keep.ts", role: "wrote", state: "modified" },
+      { path: join(ws, "src/scratch.ts"), relPath: "src/scratch.ts", role: "wrote", state: "deleted" },
+    ]);
+    const s = await buildHandoff("sid", messages, { cwd: ws, target: "generic", produce: "local" });
+    expect(filesSection(s.document)).toBe("- src/keep.ts (modified)\n- src/scratch.ts (deleted)");
+  });
+
+  it("marks a file edited then git rm'd as deleted; git rm --cached leaves it live", () => {
+    const ws = checkout(["src/cached.ts"], ["src"]);
+    const files = classifyFileEvents([
+      run("Edit", { file_path: "src/old.ts", old_string: "a", new_string: "b" }),
+      run("Bash", { command: "git rm -q src/old.ts" }),
+      run("Edit", { file_path: "src/cached.ts", old_string: "a", new_string: "b" }),
+      run("Bash", { command: "git rm --cached src/cached.ts" }),
+    ], ws);
+    expect(files).toEqual([
+      { path: join(ws, "src/cached.ts"), relPath: "src/cached.ts", role: "wrote", state: "modified" },
+      { path: join(ws, "src/old.ts"), relPath: "src/old.ts", role: "wrote", state: "deleted" },
+    ]);
+  });
+
+  it("lets the disk have the last word at handoff time", () => {
+    const ws = checkout(["src/back.ts"], ["src"]);
+    const files = classifyFileEvents([
+      // Written, then removed by something the transcript never shows.
+      run("Write", { file_path: "src/gone.ts", content: "x" }),
+      // Deleted, then restored the same way.
+      run("Bash", { command: "rm src/back.ts" }),
+    ], ws);
+    expect(files).toEqual([
+      { path: join(ws, "src/back.ts"), relPath: "src/back.ts", role: "wrote", state: "modified" },
+      { path: join(ws, "src/gone.ts"), relPath: "src/gone.ts", role: "wrote", state: "deleted" },
+    ]);
+  });
+
+  it("re-creates a file written where one was deleted, and keeps the first verdict on rewrites", () => {
+    const ws = checkout(["src/a.ts", "src/n.ts"]);
+    const files = classifyFileEvents([
+      run("Bash", { command: "rm src/a.ts" }),
+      run("Write", { file_path: "src/a.ts", content: "x" }),
+      run("Write", { file_path: "src/n.ts", content: "x" }),
+      run("Edit", { file_path: "src/n.ts", old_string: "x", new_string: "y" }),
+    ], ws);
+    expect(files.map((file) => [file.relPath, file.role === "wrote" ? file.state : file.role])).toEqual([
+      ["src/a.ts", "created"],
+      ["src/n.ts", "created"],
+    ]);
+  });
+
+  it("treats a file the session read first, then wrote, as modified", () => {
+    const ws = checkout(["src/a.ts"]);
+    const files = classifyFileEvents([
+      run("Read", { file_path: "src/a.ts" }),
+      run("Write", { file_path: "src/a.ts", content: "x" }),
+    ], ws);
+    expect(files).toEqual([{ path: join(ws, "src/a.ts"), relPath: "src/a.ts", role: "wrote", state: "modified" }]);
+  });
+
+  it("reads apply_patch headers: Add creates, Update modifies, Move to moves, Delete deletes", () => {
+    const ws = checkout(["src/new.ts", "src/edited.ts", "src/renamed.ts"], ["src"]);
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: src/new.ts",
+      "+x",
+      "*** Update File: src/edited.ts",
+      "@@",
+      "-a",
+      "+b",
+      "*** Update File: src/moved.ts",
+      "*** Move to: src/renamed.ts",
+      "*** Delete File: src/dead.ts",
+      "*** End Patch",
+    ].join("\n");
+    const files = classifyFileEvents([run("apply_patch", { patch })], ws);
+    expect(files.map((file) => [file.relPath, file.role === "wrote" ? file.state : file.role])).toEqual([
+      ["src/dead.ts", "deleted"],
+      ["src/edited.ts", "modified"],
+      ["src/moved.ts", "moved"],
+      ["src/new.ts", "created"],
+      ["src/renamed.ts", "modified"],
+    ]);
+  });
+
+  it("treats a move out of the checkout as a delete and a move in as a new file", () => {
+    const ws = checkout(["src/in.ts"], ["src"]);
+    const outside = mkdtempSync(join(tmpdir(), "ap-outside-"));
+    writeFileSync(join(outside, "from.ts"), "x\n");
+    const files = classifyFileEvents([
+      run("Bash", { command: `mv src/out.ts ${outside}/out.ts` }),
+      run("Bash", { command: `mv ${outside}/from.ts src/in.ts` }),
+    ], ws);
+    expect(files).toEqual([
+      { path: join(ws, "src/in.ts"), relPath: "src/in.ts", role: "wrote", state: "created" },
+      { path: join(ws, "src/out.ts"), relPath: "src/out.ts", role: "wrote", state: "deleted" },
+    ]);
+  });
+
+  it("renders written files first, then one capped line of reads", async () => {
+    const reads = Array.from({ length: 25 }, (_, i) => `docs/r${String(i).padStart(2, "0")}.md`);
+    const ws = checkout(["src/a.ts", ...reads]);
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Update a.ts after reading the docs.", raw: {} },
+      ...reads.map((file) => run("Read", { file_path: file })),
+      run("Edit", { file_path: "src/a.ts", old_string: "a", new_string: "b" }),
+    ], { cwd: ws, target: "generic", produce: "local" });
+    const section = filesSection(s.document)!;
+    expect(section.split("\n")[0]).toBe("- src/a.ts (modified)");
+    expect(section.split("\n")[1]).toBe(`Also read: ${reads.slice(0, 20).join(", ")} (+5 more)`);
+  });
+
+  it("says no files were written when the session only read", async () => {
+    const ws = checkout(["src/real.ts"]);
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Where is createApp defined?", raw: {} },
+      run("Bash", { command: "rg createApp src/real.ts" }),
+    ], { cwd: ws, target: "generic", produce: "local" });
+    expect(filesSection(s.document)).toBe("(no files written)\nAlso read: src/real.ts");
+  });
+
+  it("shows the absolute path for a file outside any repo", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ap-norepo-"));
+    writeFileSync(join(dir, "notes.md"), "x\n");
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Tidy the notes file.", raw: {} },
+      run("Edit", { file_path: "notes.md", old_string: "a", new_string: "b" }),
+    ], { cwd: dir, target: "generic", produce: "local" });
+    expect(filesSection(s.document)).toBe(`- ${join(dir, "notes.md")} (modified)`);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // Research E §7: the Files section reflects the per-call cwd fix end to end.
+  it("renders the section 7 session's real edits as written and its reads as read", async () => {
+    const ws = checkout(["apps/server/src/apps/service.ts", "apps/server/src/mcp/tools.ts", "docs/_template.md", "src/real.ts", "src/apps/service.ts"]);
+    const s = await buildHandoff("sid", [
+      { role: "user", text: "Rename createApp in the server.", raw: {} },
+      run("Read", { file_path: "docs/_template.md" }),
+      run("Bash", { command: "rg createApp src/real.ts" }),
+      run("Bash", { command: "cd apps/server && sed -i 's/old/new/' src/apps/service.ts" }),
+      run("exec_command", { cmd: "sed -i 's/old/new/' src/mcp/tools.ts", workdir: join(ws, "apps/server") }),
+    ], { cwd: ws, target: "generic", produce: "local" });
+    expect(filesSection(s.document)).toBe([
+      "- apps/server/src/apps/service.ts (modified)",
+      "- apps/server/src/mcp/tools.ts (modified)",
+      "Also read: docs/_template.md, src/real.ts",
+    ].join("\n"));
+    expect(s.document).not.toMatch(/^- src\/apps\/service\.ts/m);
+  });
+});
+
+// Command outcomes pair a result with its call by id where the adapter records one.
+describe("handoff command outcomes", () => {
+  const call = (command: string, id?: string): RawMessage => run("Bash", { command }, id ? { id, status: "pending" } : { status: "pending" });
+  const result = (output: string, id?: string, status: ToolCall["status"] = "completed"): RawMessage => ({
+    role: "tool",
+    toolCalls: [{ name: "(result)", output, status, ...(id ? { id } : {}) }],
+    raw: {},
+  });
+
+  it("pairs results by id even when they arrive out of order", () => {
+    const ctx = localHandoffContext([
+      call("npm test", "a"),
+      call("npm run lint", "b"),
+      result("lint ok", "b"),
+      result("Error: 2 tests failed", "a", "error"),
+    ]);
+    expect(ctx.recentCommands).toEqual([
+      { command: "npm test", outcome: "failed", detail: expect.any(String) },
+      { command: "npm run lint", outcome: "ok" },
+    ]);
+  });
+
+  it("falls back to order for results without ids, and for an id no call carries", () => {
+    const ctx = localHandoffContext([
+      call("first"),
+      call("second"),
+      result("one"),
+      result("two", "unknown-id"),
+    ]);
+    expect(ctx.recentCommands?.map((entry) => entry.outcome)).toEqual(["ok", "ok"]);
+  });
+
+  it("does not let an unmatched id settle a call that has its own id", () => {
+    const ctx = localHandoffContext([call("waiting", "a"), result("stray", "z")]);
+    expect(ctx.recentCommands).toEqual([{ command: "waiting", outcome: "unknown" }]);
   });
 });
