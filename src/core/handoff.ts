@@ -5,6 +5,7 @@ import { delimiter, join } from "node:path";
 import type { HandoffSnapshot, HandoffTarget, RawMessage } from "./types.js";
 import { humanUserText, oneLine, toStructured, toolNames, uniqueStrings } from "./snapshot.js";
 import { inferTouchedFiles } from "./coordination.js";
+import { classifyFileEvents, type SessionFile, type WrittenFile } from "./file-events.js";
 import { extractDecisions, extractNextActions, extractOpenQuestions, signalTurns } from "./handoff-signal.js";
 
 // A handoff is what a fresh session needs to continue this one without
@@ -331,6 +332,8 @@ export interface LocalHandoffContext {
   gitBranch?: string;
   firstAsk?: string;
   recentCommands?: CommandOutcome[];
+  /** What the session wrote (and where each file ended up) versus only read. */
+  files?: SessionFile[];
 }
 
 // A failure is the tool saying so (an error flag on the result) or output in a shape
@@ -354,8 +357,10 @@ export function localHandoffContext(messages: RawMessage[], cwd?: string): Local
   let gitBranch: string | undefined;
   let firstAsk: string | undefined;
   const commands: CommandOutcome[] = [];
-  // Shell calls waiting for their result; results follow their calls in order.
-  const pending: CommandOutcome[] = [];
+  // Calls waiting for their result. A result names its call by id where the adapter
+  // records one (several Codex code-mode calls share one); otherwise results follow
+  // their calls in order.
+  const pending: { id?: string; entry: CommandOutcome }[] = [];
   for (const m of messages) {
     const raw = m.raw as { gitBranch?: unknown } | undefined;
     if (raw && typeof raw.gitBranch === "string" && raw.gitBranch) gitBranch = raw.gitBranch;
@@ -365,24 +370,30 @@ export function localHandoffContext(messages: RawMessage[], cwd?: string): Local
     }
     for (const tc of m.toolCalls ?? []) {
       if (tc.name === "(result)") {
-        const waiting = pending.shift();
-        if (waiting) Object.assign(waiting, classifyCommandResult(tc.status, tc.output));
+        const outcome = classifyCommandResult(tc.status, tc.output);
+        // An id that matches no waiting call falls back to the oldest call recorded without one.
+        const byId = tc.id ? pending.filter((waiting) => waiting.id === tc.id) : [];
+        const answered = byId.length ? byId : pending.filter((waiting) => !tc.id || waiting.id === undefined).slice(0, 1);
+        for (const waiting of answered) {
+          Object.assign(waiting.entry, outcome);
+          pending.splice(pending.indexOf(waiting), 1);
+        }
         continue;
       }
       const input = tc.input as Record<string, unknown> | undefined;
       const command = input && typeof input === "object" ? input.command ?? input.cmd : undefined;
       if (typeof command !== "string" || !command.trim()) {
         // A non-shell tool still consumes the next result.
-        if (tc.output === undefined) pending.push({ command: "", outcome: "unknown" });
+        if (tc.output === undefined) pending.push({ id: tc.id, entry: { command: "", outcome: "unknown" } });
         continue;
       }
       const entry: CommandOutcome = { command: oneLine(command, 160), outcome: "unknown" };
       if (tc.output !== undefined) Object.assign(entry, classifyCommandResult(tc.status, tc.output));
-      else pending.push(entry);
+      else pending.push({ id: tc.id, entry });
       commands.push(entry);
     }
   }
-  return { cwd, gitBranch, firstAsk, recentCommands: commands.slice(-8) };
+  return { cwd, gitBranch, firstAsk, recentCommands: commands.slice(-8), files: classifyFileEvents(messages, cwd) };
 }
 
 export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext | string | undefined): string {
@@ -412,7 +423,7 @@ export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext 
     ...bullets(s.decisions),
     "",
     "## Files",
-    ...bullets(s.touchedFiles),
+    ...(c.files ? renderFiles(c.files) : bullets(s.touchedFiles)),
     "",
     "## Open questions / blockers",
     ...bullets(s.openQuestions),
@@ -440,6 +451,39 @@ export function renderLocalHandoff(s: HandoffSnapshot, ctx: LocalHandoffContext 
 
 function bullets(values: string[]): string[] {
   return values.length ? values.map((v) => `- ${v}`) : ["(none found)"];
+}
+
+const MAX_READ_FILES = 20;
+const STATE_ORDER: Record<WrittenFile["state"], number> = { created: 0, modified: 0, moved: 1, deleted: 2 };
+
+/**
+ * Written files first, each with where it ended up, live ones before moved and
+ * deleted ones; then one line of files the session only read. A resuming agent opens
+ * the first list; listing a file that was `git mv`'d away, or one that was only
+ * grepped, as if it were work in progress sent it to the wrong place (#1, #7).
+ */
+function renderFiles(files: SessionFile[]): string[] {
+  const written = files.filter((file): file is WrittenFile => file.role === "wrote");
+  const read = files.filter((file) => file.role === "read").map(displayPath);
+  if (!written.length && !read.length) return ["(none found)"];
+  const byPath = new Map(files.map((file) => [file.path, file]));
+  const shown = (path: string) => {
+    const file = byPath.get(path);
+    return file ? displayPath(file) : path;
+  };
+  const lines = [...written]
+    .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || displayPath(a).localeCompare(displayPath(b)))
+    .map((file) => `- ${displayPath(file)} (${file.state === "moved" && file.movedTo ? `moved to ${shown(file.movedTo)}` : file.state})`);
+  if (!lines.length) lines.push("(no files written)");
+  if (read.length) {
+    const more = read.length > MAX_READ_FILES ? ` (+${read.length - MAX_READ_FILES} more)` : "";
+    lines.push(`Also read: ${read.slice(0, MAX_READ_FILES).join(", ")}${more}`);
+  }
+  return lines;
+}
+
+function displayPath(file: SessionFile): string {
+  return file.relPath ?? file.path;
 }
 
 // ---------------------------------------------------------------------------
