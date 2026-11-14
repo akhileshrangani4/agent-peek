@@ -459,6 +459,47 @@ describe("Engine", () => {
     expect(cursor.sessions["fake:bad"]).toBeUndefined();
   });
 
+  // Adapter reads run concurrently; the cursor must not depend on which one finishes first,
+  // or the same digest encodes to different cursor bytes from run to run.
+  it("coordinate encodes the same cursor whichever session read finishes first", async () => {
+    const cursorWhenSlow = async (slow: string): Promise<string> => {
+      const registry2 = new Registry({
+        home,
+        lockRetries: { retries: 30, minTimeout: 20, maxTimeout: 200, factor: 1.5 },
+      });
+      const loader2 = new AdapterLoader();
+      loader2.register({
+        name: "fake",
+        async scan() {
+          return ["one", "two", "three"].map((id) => ({
+            id: `fake:${id}`,
+            adapter: "fake",
+            transcriptPath: `/tmp/${id}`,
+            cwd: "/work/repo",
+            lastSeen: "2026-11-13T00:00:00.000Z",
+            status: "active" as const,
+          }));
+        },
+        async read(entry) {
+          if (entry.id === slow) await new Promise((done) => setTimeout(done, 30));
+          return {
+            messages: [
+              { role: "user", text: `work on ${entry.id}`, raw: {} },
+              { role: "assistant", toolCalls: [{ name: "Read", input: { path: "src/core/engine.ts" } }], raw: {} },
+            ],
+            nextCursor: encodeCursor({ adapter: "fake", byteOffset: 0, msgIndex: 2 }),
+            eof: true,
+          };
+        },
+      });
+      return (await new Engine({ registry: registry2, loader: loader2 }).coordinate({ cwd: "/work" })).nextCursor;
+    };
+
+    const cursors = [await cursorWhenSlow("fake:one"), await cursorWhenSlow("fake:two"), await cursorWhenSlow("fake:three")];
+    expect(new Set(cursors).size).toBe(1);
+    expect(Object.keys(decodeCoordinationCursor(cursors[0]!).sessions).sort()).toEqual(["fake:one", "fake:three", "fake:two"]);
+  });
+
   it("SessionNotFoundError for unknown selector", async () => {
     await expect(engine.peek("nope")).rejects.toThrow(SessionNotFoundError);
   });

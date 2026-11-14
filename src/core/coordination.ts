@@ -1,4 +1,4 @@
-import { basename, dirname, extname, isAbsolute, normalize, resolve } from "node:path";
+import { dirname, normalize, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
 import type {
@@ -6,6 +6,8 @@ import type {
   Cursor, FileClaim, RawMessage, SessionEntry, StructuredSnapshot, ToolCall,
 } from "./types.js";
 import { InvalidCursorError } from "./errors.js";
+import { writtenPathOf } from "./shell.js";
+import { commandInput, isRelevantTouchedPath, isWriteTool, toolCallFileOps, toolCallPaths } from "./tool-paths.js";
 
 export interface CoordinationCursorData {
   version: 1;
@@ -356,14 +358,13 @@ export function inferTouchedFiles(messages: RawMessage[], cwd: string | undefine
   for (const message of messages) {
     for (const tool of message.toolCalls ?? []) {
       const fromCommand = commandInput(tool.input) !== undefined;
-      for (const path of extractPaths(tool)) {
-        const normalized = normalizePath(path, cwd);
-        if (!isRelevantTouchedPath(normalized, cwd)) continue;
+      for (const path of toolCallPaths(tool, cwd)) {
+        if (!isRelevantTouchedPath(path, cwd)) continue;
         // A path named as a tool argument was acted on. A path scraped out of a shell
         // command is a guess (an import specifier, a fixture in a heredoc, a quoted
         // example), so it counts only when the file is really there.
-        if (fromCommand && !existsSync(normalized)) continue;
-        files.add(normalized);
+        if (fromCommand && !existsSync(path)) continue;
+        files.add(path);
       }
     }
   }
@@ -385,17 +386,19 @@ function inferWritingFileEvents(
     for (const tool of message.toolCalls ?? []) {
       if (!isWriteTool(tool)) continue;
       const fromCommand = commandInput(tool.input) !== undefined;
-      for (const path of writePaths(tool)) {
-        const normalized = normalizePath(path, cwd);
-        if (!isRelevantTouchedPath(normalized, cwd)) continue;
+      // Paths resolve against the directory each command ran in (`cd apps/server && …`,
+      // Codex `workdir`), never the session cwd alone: that put real edits on a
+      // same-named file elsewhere in the repo and reported it in `check` (#7).
+      for (const path of new Set(toolCallFileOps(tool, cwd).map(writtenPathOf))) {
+        if (!isRelevantTouchedPath(path, cwd)) continue;
         // Same rule as touched paths, except a command may create or delete the file it
         // writes, so its parent directory existing is the evidence instead.
-        if (fromCommand && !existsSync(normalized) && !existsSync(dirname(normalized))) continue;
+        if (fromCommand && !existsSync(path) && !existsSync(dirname(path))) continue;
         const lastWritingAt = message.timestamp ?? fallbackTimestamp;
-        const previous = events.get(normalized);
+        const previous = events.get(path);
         if (previous && previous.lastWritingAt > lastWritingAt) continue;
-        events.set(normalized, {
-          file: normalized,
+        events.set(path, {
+          file: path,
           lastWritingAt,
           active: isActiveWritingTool(tool, messageIndex, lastMessageIndex),
           messageIndex,
@@ -480,82 +483,6 @@ function isFreshAt(value: string | undefined, now: Date, maxAgeMs: number): bool
   return Number.isFinite(then) && now.getTime() - then <= maxAgeMs;
 }
 
-function extractPaths(tool: ToolCall): string[] {
-  const paths: string[] = [];
-  collectPathValues(tool.input, "", paths);
-  return paths;
-}
-
-/**
- * The paths a write tool writes. A named editor writes every path it was given;
- * a shell command writes only its targets. Treating every path in a command as
- * written made `node bin/peek.js list > out.json` a write to bin/peek.js, so
- * any agent that ran a repo script showed up as writing it in `check`.
- */
-function writePaths(tool: ToolCall): string[] {
-  const command = commandInput(tool.input);
-  if (command === undefined) return extractPaths(tool);
-  return writeTargetsOfCommand(command);
-}
-
-const WRITE_OPERAND_TOOLS = /^(tee|touch|mkdir|rm|rmdir|unlink|truncate)$/;
-const WRITE_DEST_TOOLS = /^(mv|cp|install|ln)$/;
-const INPLACE_EDIT_TOOLS = /^(sed|perl)$/;
-
-export function writeTargetsOfCommand(command: string): string[] {
-  const targets: string[] = [];
-  const patchPattern = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
-  for (const match of command.matchAll(patchPattern)) {
-    const path = match[1]?.trim();
-    if (path) targets.push(path);
-  }
-  // Output redirects: `> file`, `>> file`, `2> file`, `&> file`; not `<`, `<<`, `2>&1`,
-  // and not the `>` inside `=>` or `->`, which is code quoted in the command, not a redirect.
-  const redirectPattern = /(?:^|[^<>=-])(?:\d?>>?|&>)\s*(['"]?)([^\s'"|;&<>]+)\1/g;
-  for (const match of command.matchAll(redirectPattern)) {
-    const path = match[2];
-    if (path && !path.startsWith("&") && path !== "/dev/null" && isPlausibleWriteTarget(path)) targets.push(path);
-  }
-  // Heredoc bodies are data, not commands: strip them before reading operands.
-  const body = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2(?=\n|$)/g, "");
-  for (const segment of body.split(/&&|\|\||[;|\n]/)) {
-    const words = shellWords(segment);
-    if (!words.length) continue;
-    const tool = words[0] === "sudo" ? words[1] : words[0];
-    const rest = (words[0] === "sudo" ? words.slice(2) : words.slice(1));
-    if (!tool) continue;
-    const name = basename(tool);
-    const operands = rest.filter((w) => !w.startsWith("-") && !/^\d?>>?/.test(w));
-    if (WRITE_OPERAND_TOOLS.test(name)) targets.push(...operands.filter(isPlausibleWriteTarget));
-    else if (WRITE_DEST_TOOLS.test(name) && operands.length >= 2) targets.push(...[operands[operands.length - 1]!].filter(isPlausibleWriteTarget));
-    else if (INPLACE_EDIT_TOOLS.test(name) && /(^|\s)-i\b/.test(segment)) {
-      // Operands after the script are files; the script is the first operand not consumed by -e/-i.
-      const files = operands.filter((w) => looksLikeCommandPath(w));
-      targets.push(...files);
-    }
-  }
-  return [...new Set(targets.filter((t) => t && !t.includes("://")))];
-}
-
-/** A write target is a path, not a code fragment or an unexpanded variable. */
-function isPlausibleWriteTarget(value: string): boolean {
-  if (!value || /[()[\]{}<>|;&=`\\]/.test(value)) return false;
-  if (value.includes("$")) return false;
-  return /^[\w.~@/-]+$/.test(value);
-}
-
-function shellWords(segment: string): string[] {
-  const out: string[] = [];
-  const pattern = /'([^']*)'|"((?:[^"\\]|\\.)*)"|(\S+)/g;
-  for (const match of segment.matchAll(pattern)) {
-    const word = match[1] ?? match[2] ?? match[3] ?? "";
-    // A redirect glued to its target (`>out`) is not an operand.
-    if (/^\d?>>?/.test(word) || word === ">" || word === ">>") continue;
-    out.push(word);
-  }
-  return out;
-}
-
 function addFileSession(map: Map<string, CoordinationSession[]>, file: string, session: CoordinationSession): void {
   const list = map.get(file) ?? [];
   list.push(session);
@@ -631,107 +558,6 @@ function latestLastSeen(sessions: CoordinationSession[]): string | undefined {
 function truncateCursorText(value: string | undefined): string | undefined {
   if (!value || value.length <= 240) return value;
   return `${value.slice(0, 237)}...`;
-}
-
-function collectPathValues(value: unknown, key: string, out: string[]): void {
-  if (typeof value === "string") {
-    if (isPathKey(key) && looksLikePath(value)) out.push(value);
-    if (isCommandKey(key)) out.push(...extractCommandPaths(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectPathValues(item, key, out);
-    return;
-  }
-  if (!value || typeof value !== "object") return;
-  for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
-    collectPathValues(childValue, childKey, out);
-  }
-}
-
-function isPathKey(key: string): boolean {
-  // file_path and notebook_path are what Claude Code's Read/Edit/Write/NotebookEdit send.
-  return /^(path|paths|file|files|filepath|file_path|notebook_path|filename|filenamePattern)$/i.test(key);
-}
-
-function isCommandKey(key: string): boolean {
-  return /^(cmd|command|script|patch)$/i.test(key);
-}
-
-function isWriteTool(tool: ToolCall): boolean {
-  if (/^(write|edit|multiedit|apply_patch|notebookedit|delete|move|rename|str_replace_editor)$/i.test(tool.name)) return true;
-  const command = commandInput(tool.input);
-  return command ? looksLikeWriteCommand(command) : false;
-}
-
-function commandInput(input: unknown): string | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const record = input as Record<string, unknown>;
-  const value = record.cmd ?? record.command ?? record.script ?? record.patch;
-  return typeof value === "string" ? value : undefined;
-}
-
-function looksLikeWriteCommand(command: string): boolean {
-  return /\b(apply_patch|tee|touch|mkdir|rm|mv|cp|install|add|commit)\b/.test(command)
-    || /\b(?:sed|perl)\s+-i\b/.test(command)
-    || /(^|[^<])>>?\s*[A-Za-z0-9_./-]+/.test(command);
-}
-
-function looksLikePath(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.includes("\n")) return false;
-  return trimmed.startsWith("/")
-    || trimmed.startsWith("./")
-    || trimmed.startsWith("../")
-    || trimmed.includes("/")
-    || /\.[A-Za-z0-9]{1,8}$/.test(trimmed);
-}
-
-function extractCommandPaths(value: string): string[] {
-  const paths: string[] = [];
-  const patchPattern = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
-  for (const match of value.matchAll(patchPattern)) {
-    const path = match[1]?.trim();
-    if (path) paths.push(path);
-  }
-  const tokenPattern = /(?:^|[\s'"])(\.{0,2}\/?[A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)+(?:\.[A-Za-z0-9]{1,12})?)(?=$|[\s'"]|[:,;)])/g;
-  for (const match of value.matchAll(tokenPattern)) {
-    // A path at the end of a sentence carries the sentence's punctuation.
-    const path = match[1]?.replace(/^['"]|['"]$/g, "").replace(/[.,;:]+$/, "");
-    if (path && looksLikeCommandPath(path) && !path.includes("://")) paths.push(path);
-  }
-  return paths;
-}
-
-function looksLikeCommandPath(value: string): boolean {
-  if (!looksLikePath(value)) return false;
-  if (value.includes("node_modules/")) return false;
-  if (value.startsWith("/") || value.startsWith("./") || value.startsWith("../")) return true;
-  const first = value.split("/")[0];
-  if (["bin", "docs", "skills", "src", "test"].includes(first ?? "")) return true;
-  return false;
-}
-
-function normalizePath(value: string, cwd: string | undefined): string {
-  const trimmed = value.trim();
-  if (isAbsolute(trimmed)) return normalize(trimmed);
-  if (cwd) return normalize(resolve(cwd, trimmed));
-  return normalize(trimmed);
-}
-
-function isRelevantTouchedPath(path: string, cwd: string | undefined): boolean {
-  if (path.includes("/node_modules/") || path.includes("/.git/")) return false;
-  if (!looksLikeFilePath(path)) return false;
-  if (!cwd) return true;
-  const root = normalize(resolve(cwd));
-  return path === root || path.startsWith(`${root}/`);
-}
-
-function looksLikeFilePath(path: string): boolean {
-  const name = basename(path);
-  if (!name || name === "." || name === "..") return false;
-  if (extname(name)) return true;
-  return /^(Dockerfile|Makefile|Rakefile|Gemfile|Procfile|LICENSE|NOTICE|CHANGELOG|README|AGENTS|CLAUDE)$/i.test(name);
 }
 
 function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {

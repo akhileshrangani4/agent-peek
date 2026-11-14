@@ -619,6 +619,38 @@ describe("CLI integration", () => {
     expect(withSubs.some((s: { parentSessionId?: string }) => s.parentSessionId === "check")).toBe(true);
   });
 
+  // D9.1 (#7): `cd apps/server && sed -i … src/apps/service.ts` writes the file under
+  // apps/server, not the same-named decoy at the session root.
+  it("check sees a cd-prefixed edit on the real file and not on a same-named decoy", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
+    const ws = await mkdtemp(join(tmpdir(), "ap-cli-ws-"));
+    await mkdir(join(ws, ".git"));
+    await mkdir(join(ws, "apps/server/src/apps"), { recursive: true });
+    await mkdir(join(ws, "src/apps"), { recursive: true });
+    await writeFile(join(ws, "apps/server/src/apps/service.ts"), "old\n", "utf8");
+    await writeFile(join(ws, "src/apps/service.ts"), "old\n", "utf8");
+    const projDir = join(home, ".claude", "projects", "-tmp-e1");
+    await mkdir(projDir, { recursive: true });
+    const now = new Date().toISOString();
+    await writeFile(join(projDir, "e1.jsonl"), [
+      JSON.stringify({ type: "user", sessionId: "e1", cwd: ws, timestamp: now, message: { role: "user", content: "rename createApp in the server" } }),
+      JSON.stringify({ type: "assistant", sessionId: "e1", cwd: ws, timestamp: now, message: { role: "assistant", content: [
+        { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "cd apps/server && sed -i 's/old/new/' src/apps/service.ts" } },
+      ] } }),
+    ].join("\n") + "\n", "utf8");
+
+    const real = await runCli(["check", "apps/server/src/apps/service.ts", "--cwd", ws, "--json"], { HOME: home });
+    expect(real.code).toBe(1);
+    const realJson = JSON.parse(real.stdout);
+    expect(realJson.files).toHaveLength(1);
+    expect(realJson.files[0].file).toBe(join(ws, "apps/server/src/apps/service.ts"));
+    expect(realJson.files[0].conflicts).toHaveLength(1);
+
+    const decoy = await runCli(["check", "src/apps/service.ts", "--cwd", ws], { HOME: home });
+    expect(decoy.code).toBe(0);
+    expect(decoy.stdout).toMatch(/ok: no active writing conflict/);
+  });
+
   it("claim adds temporary file ownership that check and coord can see", async () => {
     const home = await mkdtemp(join(tmpdir(), "ap-cli-"));
     const claimFiles = join(home, "claim-files.txt");
