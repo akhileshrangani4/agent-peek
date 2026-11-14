@@ -1,0 +1,35 @@
+{
+  "argv": [
+    "list",
+    "--adapter",
+    "opencode",
+    "--all",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": [
+    {
+      "id": "opencode:ses_legacy",
+      "adapter": "opencode",
+      "transcriptPath": "<HOME>/.local/share/opencode/storage/session/proj-1/ses_legacy.json",
+      "name": "legacy-work",
+      "cwd": "/tmp/repo",
+      "sourceType": "directory",
+      "lastSeen": "2026-02-02T02:40:02.000Z",
+      "status": "ended",
+      "displayName": "legacy-work"
+    },
+    {
+      "id": "opencode:ses_shared",
+      "adapter": "opencode",
+      "transcriptPath": "<HOME>/.local/share/opencode/storage/session/proj-1/ses_shared.json",
+      "name": "migrated-session",
+      "cwd": "/tmp/repo",
+      "sourceType": "directory",
+      "lastSeen": "2026-02-01T23:53:21.000Z",
+      "status": "ended",
+      "displayName": "migrated-session"
+    }
+  ],
+  "stderr": null
+}

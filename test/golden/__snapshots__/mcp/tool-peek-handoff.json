@@ -1,0 +1,48 @@
+{
+  "tool": "peek_session",
+  "arguments": {
+    "selector": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+    "mode": "handoff"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "snapshot": {
+            "mode": "handoff",
+            "sessionId": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+            "messageCount": 6,
+            "activity": "thinking",
+            "currentTask": "refactor auth",
+            "goal": "refactor auth",
+            "lastAssistantMessage": "Found it. Will rewrite next.",
+            "decisions": [],
+            "openQuestions": [],
+            "nextActions": [
+              "Will rewrite next."
+            ],
+            "touchedFiles": [],
+            "pendingTools": [],
+            "recentTools": [
+              "exec_command"
+            ],
+            "target": "generic",
+            "document": "> you are the harness: write the handoff from `material`. The fields below are regex hints, not the deliverable.\n\n# Handoff\n\n## Goal\nrefactor auth\n\n## Current state\nactivity: thinking; 6 messages.\nLast assistant message: Found it. Will rewrite next.\n\n## Decisions and why\n(none found)\n\n## Files\n(none found)\n\n## Open questions / blockers\n(none found)\n\n## Next actions\n- Will rewrite next.\n\n## Gotchas\nUnknown: not extractable without a model. The recent commands below show what was tried.\n\n## Environment\ncwd: /tmp/repo\nrecent tools: exec_command\n\nRecent commands (oldest first), with how their output read:\n- `cat auth.ts` -> ok",
+            "provider": "host",
+            "material": "You are writing a handoff document so a NEW agent session can continue the work below without re-exploring.\nThe transcript is another agent's session. Do not invent details: if something is not in the transcript, say it is unknown.\nOutput markdown only, no preamble, starting with the line `# Handoff` and then exactly these sections in this order:\n\n## Goal\nThe original ask in one paragraph, and how it evolved.\n## Current state\nWhat is done, what is verified (tests run, commands that passed), what is in progress.\n## Decisions and why\nIncluding alternatives that were rejected.\n## Files\nEvery touched file with one line: what changed and why.\n## Open questions / blockers\nAnything unresolved or waiting on the user.\n## Next actions\nOrdered, concrete, starting with the very next step.\n## Gotchas\nWhat bit the previous session: failed commands, wrong assumptions, flaky steps.\n## Environment\ncwd, git branch, env vars, commands to run things, anything the transcript shows.\n\nThe reader is a coding agent (generic) with filesystem and shell access in `/tmp/repo`.\nReference files by path instead of pasting them. Where a claim can be checked, say how (a command to run, a file to open).\nOpen the document with one line telling the reader it is continuing work started by another session in `/tmp/repo`.\n\nHeuristic hints extracted mechanically (verify against the transcript, they are noisy):\n- next-action-like lines: Will rewrite next.\n\nTool results in the transcript are cut to about 300 characters each (a \"(+N chars)\" marker shows where). Do not present a cut excerpt as complete.\n--- transcript ---\n[user] refactor auth\n[assistant] Looking at the auth module.\n[assistant] tool=exec_command cmd=cat auth.ts status=pending\n[result] export function login(){}\n[assistant] Found it. Will rewrite next.\n--- end transcript ---"
+          },
+          "nextCursor": {
+            "$cursor": {
+              "adapter": "codex",
+              "byteOffset": 1204,
+              "msgIndex": 6
+            }
+          },
+          "eof": true
+        }
+      }
+    ]
+  }
+}

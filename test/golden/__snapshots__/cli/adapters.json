@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "adapters"
+  ],
+  "exit": 0,
+  "stdout": [
+    "claude-code",
+    "codex",
+    "copilot-cli",
+    "gemini",
+    "goose",
+    "opencode",
+    "screen",
+    "tmux"
+  ],
+  "stderr": null
+}

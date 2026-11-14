@@ -8,6 +8,7 @@ import claudeCode from "../../src/adapters/claude-code/index.js";
 import type { SessionEntry } from "../../src/core/types.js";
 import { encodeCursor } from "../../src/core/cursor.js";
 import { runAdapterConformance } from "../helpers/adapter-conformance.js";
+import { withEnv } from "../helpers/tmp-home.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string) => resolve(__dirname, "../fixtures/claude-code", name, "transcript.jsonl");
@@ -110,5 +111,32 @@ describe("claude-code adapter", () => {
     expect(sessions[0]!.id).toBe("claude-code:from-record");
     expect(sessions[0]!.cwd).toBe("/tmp/late");
     expect(sessions[0]!.name).toBe("late-claude");
+  });
+
+  // D3.7: skill-root resolution already honoured CLAUDE_CONFIG_DIR; session discovery
+  // did not, so a relocated config dir made every session invisible.
+  it("scan honours CLAUDE_CONFIG_DIR over $HOME/.claude", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ac-home-empty-"));
+    const config = await mkdtemp(join(tmpdir(), "ac-config-"));
+    const projDir = join(config, "projects", "-tmp-relocated");
+    await mkdir(projDir, { recursive: true });
+    const tx = join(projDir, "relocated.jsonl");
+    await writeFile(tx, `{"type":"user","sessionId":"relocated","cwd":"/tmp/relocated","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hi"}}\n`, "utf8");
+    await withEnv({ HOME: home, CLAUDE_CONFIG_DIR: config }, async () => {
+      const sessions = await claudeCode.scan();
+      expect(sessions.map((s) => s.id)).toEqual(["claude-code:relocated"]);
+      expect(sessions[0]!.transcriptPath).toBe(tx);
+    });
+  });
+
+  it("a blank CLAUDE_CONFIG_DIR falls back to $HOME/.claude", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ac-home-blank-"));
+    const projDir = join(home, ".claude", "projects", "-tmp-repo");
+    await mkdir(projDir, { recursive: true });
+    await writeFile(join(projDir, "blank.jsonl"), `{"type":"user","sessionId":"blank","cwd":"/tmp/repo","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hi"}}\n`, "utf8");
+    await withEnv({ HOME: home, CLAUDE_CONFIG_DIR: "  " }, async () => {
+      const sessions = await claudeCode.scan();
+      expect(sessions.map((s) => s.id)).toEqual(["claude-code:blank"]);
+    });
   });
 });

@@ -1,8 +1,18 @@
 // src/core/types.ts
+import type { InvocationKind } from "../agents/types.js";
 
 export type SessionStatus = "active" | "idle" | "ended";
 export type Activity = "idle" | "thinking" | "tool-running";
 export type SessionSourceType = "file" | "directory" | "database" | "terminal" | "manual";
+export type SessionOutcome = "succeeded" | "failed" | "interrupted";
+
+/** A provider's latest execution state, when its storage exposes one. */
+export interface SessionExecution {
+  state: "running" | "idle";
+  outcome?: SessionOutcome;
+  at?: string;
+  sequence?: number;
+}
 
 export interface SessionEntry {
   id: string;             // adapter-prefixed, e.g. "claude-code:abc-123"
@@ -15,6 +25,7 @@ export interface SessionEntry {
   sourceType?: SessionSourceType;
   lastSeen: string;       // ISO timestamp
   status: SessionStatus;
+  execution?: SessionExecution;
   /**
    * Set when this session is a subagent spawned by another: the id of the session that
    * spawned it. Absent for top-level sessions.
@@ -92,6 +103,9 @@ export interface StructuredSnapshot {
   lastUserMessage?: string;
   lastAssistantMessage?: string;
   currentTask?: string;
+  /** The session's first substantive human ask: what the whole session is for. `currentTask`
+   * is what the user wants now; for a single-ask session the two are equal. Local only. */
+  goal?: string;
   touchedFiles: string[];
   writingFiles: string[];
   pendingToolCalls: ToolCall[];
@@ -115,6 +129,9 @@ export interface BriefSnapshot {
   activity: Activity;
   brief: string;
   currentTask?: string;
+  /** The session's first substantive human ask: what the whole session is for. `currentTask`
+   * is what the user wants now; for a single-ask session the two are equal. Local only. */
+  goal?: string;
   lastAssistantMessage?: string;
   pendingTools: string[];
   recentTools: string[];
@@ -130,6 +147,9 @@ export interface HandoffSnapshot {
   messageCount: number;
   activity: Activity;
   currentTask?: string;
+  /** The session's first substantive human ask: what the whole session is for. `currentTask`
+   * is what the user wants now; for a single-ask session the two are equal. Local only. */
+  goal?: string;
   lastAssistantMessage?: string;
   decisions: string[];
   openQuestions: string[];
@@ -237,4 +257,63 @@ export interface CoordinationDigest {
   sessions: CoordinationSession[];
   overlapHints: CoordinationOverlap[];
   nextCursor: CoordinationCursor;
+}
+
+// --- Adapter contract -------------------------------------------------------------
+//
+// The plugin ABI third-party adapters implement (published as `agent-peek/adapter`).
+// It lives in core, beside the SessionEntry and RawMessage shapes it is written in
+// terms of, so core depends on no adapter module: the engine needs the contract and a
+// way to look adapters up, never a concrete loader or a built-in adapter.
+
+export interface AdapterReadResult {
+  messages: RawMessage[];
+  nextCursor: Cursor;
+  eof: boolean;
+}
+
+export interface Adapter {
+  /** Stable adapter name. Used as id prefix and registry key. */
+  name: string;
+
+  /**
+   * Which kinds of skill invocation this parser can extract. Declared here because
+   * seeing a slash command is a property of the parser, not of the agent: an adapter
+   * that reads structured tool calls but has no slash syntax to extract leaves
+   * human-initiated usage invisible, which is a different state from "never used".
+   * Omitted means none, which is honest for an adapter that surfaces no tool calls.
+   */
+  observes?: InvocationKind[];
+
+  /** Discover sessions on disk. Returns SessionEntry[]; loader merges into registry. */
+  scan(): Promise<SessionEntry[]>;
+
+  /**
+   * Read messages from `entry`, optionally starting from `cursor`.
+   * File-backed JSONL adapters must stop at the last newline-terminated record.
+   * Adapters should avoid throwing on writer-mid-flight partial data.
+   */
+  read(entry: SessionEntry, cursor?: Cursor): Promise<AdapterReadResult>;
+
+  /** Optional: live tail. Reserved for v2; not used in v1. */
+  watch?(entry: SessionEntry, onChange: () => void): () => void;
+}
+
+export interface AdapterModule {
+  default: Adapter;
+}
+
+/**
+ * The read side of an adapter set, which is all the engine needs. The app layer owns
+ * the concrete `AdapterLoader` (registration, aliases, external discovery).
+ */
+export interface AdapterCatalog {
+  /** Registered adapter names, aliases excluded. */
+  names(): string[];
+  all(): Adapter[];
+  /** Throws AdapterNotFoundError for a name that is neither registered nor an alias. */
+  get(name: string): Adapter;
+  has(name: string): boolean;
+  /** The registered adapter `name` stands for: itself, or an alias's target. */
+  canonical(name: string): string;
 }

@@ -1,5 +1,6 @@
 // src/usage/scan.ts
 import { stat } from "node:fs/promises";
+import { walkFiles } from "../adapters/common.js";
 import type { Adapter } from "../adapters/types.js";
 import type { SessionEntry } from "../core/types.js";
 import { decodeCursor } from "../core/cursor.js";
@@ -71,7 +72,9 @@ export async function scanAdapter(
 
   // Anything watermarked for this adapter but no longer on disk becomes a tombstone:
   // proof the session was counted, as distinct from never having been observed.
-  const live = new Set(entries.map((e) => e.transcriptPath));
+  // Bare transcript paths stay live too: a 0.6 watermark keyed by a shared database's
+  // path still names a file that exists, so it must not be tombstoned.
+  const live = new Set(entries.flatMap((e) => [e.transcriptPath, sourceKey(e)]));
   for (const w of watermarksFor(store, adapter.name)) {
     if (live.has(w.sourcePath) || w.deleted) continue;
     store.markDeleted(w.sourcePath, now);
@@ -88,6 +91,38 @@ function watermarksFor(store: UsageStore, adapter: string): Watermark[] {
   return rows.map((r) => store.getWatermark(r.source_path)!).filter(Boolean);
 }
 
+/**
+ * The watermark key for a session's source. A file or directory holds one session, so
+ * its path is enough, and keeping it unchanged keeps every 0.6 watermark valid. A
+ * database holds many (all Goose sessions share `sessions.db`), so its key adds the
+ * adapter-qualified session id; keyed by path alone, the first session's watermark
+ * made every other session look unchanged, and their rows collided on the primary key.
+ */
+export function sourceKey(entry: SessionEntry): string {
+  return entry.sourceType === "database" ? `${entry.transcriptPath}#${entry.id}` : entry.transcriptPath;
+}
+
+interface SourceStat {
+  size: number;
+  mtimeMs: number;
+}
+
+/**
+ * Size and mtime that change whenever the session does. A directory's own mtime moves
+ * only when entries are added or removed, not when a file inside it is appended to, so
+ * a directory source uses the newest mtime and total size of the files it contains.
+ */
+async function sourceStat(entry: SessionEntry): Promise<SourceStat> {
+  const st = await stat(entry.transcriptPath);
+  if (!st.isDirectory()) return { size: st.size, mtimeMs: st.mtimeMs };
+  const files = await Promise.all((await walkFiles(entry.transcriptPath)).map((f) => stat(f)));
+  if (files.length === 0) return { size: 0, mtimeMs: st.mtimeMs };
+  return {
+    size: files.reduce((sum, f) => sum + f.size, 0),
+    mtimeMs: Math.max(...files.map((f) => f.mtimeMs)),
+  };
+}
+
 /** Returns the number of invocations recorded, or null if the source was unchanged. */
 async function scanSource(
   adapter: Adapter,
@@ -96,8 +131,8 @@ async function scanSource(
   opts: ScanOptions,
   now: Date,
 ): Promise<number | null> {
-  const path = entry.transcriptPath;
-  const st = await stat(path);
+  const path = sourceKey(entry);
+  const st = await sourceStat(entry);
   const prior = store.getWatermark(path);
 
   // A shrink means truncation or rotation: the stored byte offset is now past EOF, so

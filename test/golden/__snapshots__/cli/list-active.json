@@ -1,0 +1,9 @@
+{
+  "argv": [
+    "list",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": [],
+  "stderr": null
+}

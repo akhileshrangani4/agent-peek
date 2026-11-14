@@ -1,0 +1,46 @@
+{
+  "argv": [
+    "at",
+    "claude-code:s1",
+    "--mode",
+    "structured",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "snapshot": {
+      "mode": "structured",
+      "sessionId": "claude-code:s1",
+      "messageCount": 5,
+      "lastUserMessage": "refactor auth",
+      "lastAssistantMessage": "Found it. Will rewrite next.",
+      "currentTask": "refactor auth",
+      "goal": "refactor auth",
+      "touchedFiles": [
+        "/tmp/repo/auth.ts"
+      ],
+      "writingFiles": [],
+      "pendingToolCalls": [],
+      "lastToolCalls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/tmp/repo/auth.ts"
+          },
+          "status": "completed",
+          "id": "t1"
+        }
+      ],
+      "activity": "thinking"
+    },
+    "nextCursor": {
+      "$cursor": {
+        "adapter": "claude-code",
+        "byteOffset": 2308,
+        "msgIndex": 5
+      }
+    },
+    "eof": true
+  },
+  "stderr": null
+}

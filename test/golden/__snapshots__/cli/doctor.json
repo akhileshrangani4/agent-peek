@@ -1,0 +1,137 @@
+{
+  "argv": [
+    "doctor",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "adapters": [
+      {
+        "adapter": "claude-code",
+        "source": "file",
+        "path": "<HOME>/.claude/projects",
+        "status": "ready"
+      },
+      {
+        "adapter": "codex",
+        "source": "file",
+        "path": "<HOME>/.codex/sessions",
+        "status": "ready"
+      },
+      {
+        "adapter": "copilot-cli",
+        "source": "directory",
+        "path": "<HOME>/.copilot/session-state",
+        "status": "not found"
+      },
+      {
+        "adapter": "gemini",
+        "source": "file",
+        "path": "<HOME>/.gemini/tmp",
+        "status": "not found"
+      },
+      {
+        "adapter": "goose",
+        "source": "database",
+        "path": "<HOME>/.local/share/goose/sessions/sessions.db",
+        "status": "not found",
+        "command": "sqlite3"
+      },
+      {
+        "adapter": "opencode",
+        "source": "directory",
+        "path": "<HOME>/.local/share/opencode/storage",
+        "status": "not found"
+      },
+      {
+        "adapter": "opencode",
+        "source": "database",
+        "path": "<HOME>/.local/share/opencode/opencode.db",
+        "status": "not found"
+      },
+      {
+        "adapter": "tmux",
+        "source": "terminal",
+        "command": "tmux",
+        "status": "needs command",
+        "note": "Use `peek list --terminals` or `--adapter tmux`; captures terminal scrollback."
+      },
+      {
+        "adapter": "screen",
+        "source": "terminal",
+        "command": "screen",
+        "status": "needs command",
+        "note": "Use `peek list --terminals` or `--adapter screen`; captures terminal scrollback."
+      }
+    ],
+    "agents": [
+      {
+        "slug": "claude-code",
+        "displayName": "Claude Code",
+        "adapter": "claude-code",
+        "roots": [
+          {
+            "path": "<HOME>/.claude/skills",
+            "kind": "user",
+            "mutable": true,
+            "present": true
+          },
+          {
+            "path": "<HOME>/.claude/plugins/cache",
+            "kind": "plugin",
+            "mutable": false,
+            "present": false
+          }
+        ],
+        "projectDir": ".claude/skills",
+        "honoursDisableModelInvocation": true,
+        "tier": "verified",
+        "observes": [
+          "tool_call",
+          "slash_command"
+        ],
+        "observable": true,
+        "attributes": [
+          "tool_call",
+          "slash_command"
+        ],
+        "attributable": true,
+        "manageable": true,
+        "installed": true,
+        "presence": "present"
+      },
+      {
+        "slug": "codex",
+        "displayName": "Codex",
+        "adapter": "codex",
+        "roots": [
+          {
+            "path": "<HOME>/.codex/skills",
+            "kind": "user",
+            "mutable": true,
+            "present": false
+          }
+        ],
+        "projectDir": ".agents/skills",
+        "tier": "verified",
+        "observes": [
+          "tool_call",
+          "slash_command"
+        ],
+        "observable": true,
+        "attributes": [
+          "slash_command"
+        ],
+        "attributable": true,
+        "manageable": false,
+        "installed": true,
+        "presence": "present"
+      }
+    ],
+    "state": {
+      "path": "<HOME>/.agent-peek",
+      "writable": true
+    }
+  },
+  "stderr": null
+}

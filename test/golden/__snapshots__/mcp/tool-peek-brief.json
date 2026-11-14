@@ -1,0 +1,40 @@
+{
+  "tool": "peek_session",
+  "arguments": {
+    "selector": "claude-code:s2",
+    "mode": "brief"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "snapshot": {
+            "mode": "brief",
+            "sessionId": "claude-code:s2",
+            "messageCount": 2,
+            "activity": "tool-running",
+            "brief": "Task: run tests Pending tools: Bash",
+            "currentTask": "run tests",
+            "goal": "run tests",
+            "pendingTools": [
+              "Bash"
+            ],
+            "recentTools": [
+              "Bash"
+            ]
+          },
+          "nextCursor": {
+            "$cursor": {
+              "adapter": "claude-code",
+              "byteOffset": 801,
+              "msgIndex": 2
+            }
+          },
+          "eof": true
+        }
+      }
+    ]
+  }
+}

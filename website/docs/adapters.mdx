@@ -15,7 +15,7 @@ agent tools. Each one knows where a given tool stores its transcripts.
 | `copilot-cli` | `~/.copilot/session-state/*` |
 | `gemini` | `~/.gemini/tmp/<project>/chats/session-*.json` |
 | `goose` | `~/.local/share/goose/sessions/sessions.db` |
-| `opencode` | `~/.local/share/opencode/storage/{session,message,part}` |
+| `opencode` | `~/.local/share/opencode/opencode.db` (OpenCode V2 SQLite; `$OPENCODE_DB` overrides it, and `opencode-<channel>.db` files beside it are read too) and the pre-V2 `~/.local/share/opencode/storage/{session,message,part}`. Both list as `opencode:<id>`, V2 first; `opencode-legacy-v1` is an alias. |
 | `screen` | GNU screen scrollback via `hardcopy -h` |
 | `tmux` | tmux pane output |
 

@@ -15,30 +15,29 @@
 // 3. Nothing here mutates. `archive_plan` computes the plan and hands back the literal
 //    command, because dry-run-by-default works by a person reading the plan — and an
 //    argument named `confirm` is set by the model, not the user.
-import { existsSync } from "node:fs";
 import { listAgents } from "../agents/index.js";
+import { indexState, parseGroupByList, UsageService, type IndexState } from "../app/usage.js";
 import { buildInventory } from "../skills/inventory.js";
 import { discoverProjects } from "../skills/discover.js";
 import { joinUsage } from "../skills/assemble.js";
 import { buildSkillsReport, expandSkill } from "../skills/report.js";
 import type { SegmentId, SkillsReport } from "../skills/report.js";
 import { planArchive, selectSkill, ArchiveRefusedError } from "../skills/archive.js";
-import { buildUsageReport } from "../usage/report.js";
-import { UsageStore, usageDbPath } from "../usage/store.js";
-import { buildNameIndex, builtinRowFilter } from "../skills/resolve.js";
+import { UsageStore } from "../usage/store.js";
 import { GROUP_BY_DIMENSIONS } from "../usage/query.js";
-import type { UsageFilter, GroupBy, UsageRow } from "../usage/query.js";
+import type { UsageFilter, GroupBy } from "../usage/query.js";
+
+export { indexState, type IndexState };
 
 /** Only the dimensions the query API declares; an unknown name is a caller error. */
 export function parseGroupBy(raw: unknown): GroupBy[] {
-  const dims = String(raw ?? "skill").split(",").map((d) => d.trim()).filter(Boolean);
-  const invalid = dims.filter((d) => !GROUP_BY_DIMENSIONS.includes(d as GroupBy));
-  if (invalid.length) {
+  const parsed = parseGroupByList(String(raw ?? "skill"));
+  if (!parsed.ok) {
     throw new Error(
-      `Unknown groupBy dimension: ${invalid.join(", ")}. Valid: ${GROUP_BY_DIMENSIONS.join(", ")}`,
+      `Unknown groupBy dimension: ${parsed.invalid.join(", ")}. Valid: ${GROUP_BY_DIMENSIONS.join(", ")}`,
     );
   }
-  return dims as GroupBy[];
+  return parsed.dims;
 }
 
 /** Rows returned when a caller does not ask. Kept small: the subject is context cost. */
@@ -50,29 +49,8 @@ export function clampLimit(value: unknown): number {
   return Math.min(Math.max(n, 1), MAX_LIMIT);
 }
 
-/**
- * The index is built by the CLI, never by this surface. Opening a `UsageStore` creates
- * `~/.agent-peek/` and a first run writes tens of megabytes after scanning every
- * transcript — not something a tool call should trigger inside someone else's session
- * without saying so.
- */
-export interface IndexState {
-  state: "ready" | "missing";
-  path: string;
-  hint?: string;
-}
-
-export function indexState(home?: string): IndexState {
-  const path = usageDbPath(home);
-  if (existsSync(path)) return { state: "ready", path };
-  return {
-    state: "missing",
-    path,
-    hint: "No usage index yet. Run `peek usage` once in a terminal to build it; the first "
-      + "run scans every transcript and writes this file. peek will not build it from an "
-      + "MCP call.",
-  };
-}
+// The index is built by the CLI, never by this surface: `indexState` is checked before
+// any store is opened, because opening one creates `~/.agent-peek/usage.db`.
 
 /**
  * Inventory options including the default project survey. Discovery reads the index, so
@@ -141,21 +119,14 @@ export async function usageTool(args: UsageToolArgs) {
       since: args.since,
       until: args.until,
     };
-    const groupBy = parseGroupBy(args.groupBy);
     // Built-ins are recorded because the index stores names verbatim; they are not skills,
-    // and a caller asking about skills should not be told it runs /clear a lot. Predicate
-    // shared with the CLI, and handed to the report so it applies before the limit.
-    const keepRow = args.includeBuiltins || !filter.skillsOnly
-      ? undefined
-      : builtinRowFilter<UsageRow>(
-        buildNameIndex(await buildInventory(args.home ? { home: args.home } : {})),
-        groupBy.length === 1 ? groupBy[0] : undefined,
-      );
-    const report = await buildUsageReport(
-      store,
-      { ...filter, groupBy, limit: clampLimit(args.limit) },
-      { home: args.home, ...(keepRow ? { keepRow } : {}) },
-    );
+    // and a caller asking about skills should not be told it runs /clear a lot.
+    const report = await new UsageService({ store, home: args.home }).report({
+      filter,
+      groupBy: parseGroupBy(args.groupBy),
+      limit: clampLimit(args.limit),
+      includeBuiltins: args.includeBuiltins,
+    });
     return { index, report };
   } finally {
     store.close?.();

@@ -1,27 +1,31 @@
 // src/adapters/sqlite.ts
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { createRequire } from "node:module";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
-const execFileAsync = promisify(execFile);
+const nodeRequire = createRequire(import.meta.url);
+// Lazy-load node:sqlite as src/feed/store.ts and src/usage/store.ts do. A static import
+// would emit Node's ExperimentalWarning for every command (adapters always load), and
+// the bundler rewrites a static `node:sqlite` import to a bare `sqlite` package.
+let cachedCtor: typeof DatabaseSync | undefined;
+function databaseSyncCtor(): typeof DatabaseSync {
+  cachedCtor ??= (nodeRequire("node:sqlite") as { DatabaseSync: typeof DatabaseSync }).DatabaseSync;
+  return cachedCtor;
+}
 
-export async function sqliteJson<T = Record<string, unknown>>(dbPath: string, sql: string): Promise<T[] | undefined> {
+/**
+ * Run one query against a database another tool owns, through the built-in
+ * `node:sqlite` driver: no `sqlite3` binary on PATH and no SQL built from strings.
+ *
+ * Read-only so peek never takes a write lock on a live database; the timeout waits
+ * briefly when the owner holds the lock instead of failing at once. Errors propagate:
+ * the caller decides whether an unreadable database is fatal (read) or skippable (scan).
+ */
+export function queryReadOnly<T>(dbPath: string, sql: string, params: SQLInputValue[] = []): T[] {
+  const Database = databaseSyncCtor();
+  const db = new Database(dbPath, { readOnly: true, timeout: 3000 });
   try {
-    // -readonly: never take a write lock or create WAL sidecars next to a live
-    // database owned by another tool. .timeout: wait briefly instead of failing
-    // immediately when the writer holds the lock.
-    const { stdout } = await execFileAsync("sqlite3",
-      ["-json", "-readonly", "-cmd", ".timeout 3000", dbPath, sql], {
-        encoding: "utf8",
-        maxBuffer: 50 * 1024 * 1024,
-      });
-    const trimmed = stdout.trim();
-    if (!trimmed) return [];
-    const parsed = JSON.parse(trimmed);
-    return Array.isArray(parsed) ? parsed as T[] : [];
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
-      console.warn("[agent-peek] sqlite3 binary not found; install sqlite3 to read this database");
-    }
-    return undefined;
+    return db.prepare(sql).all(...params) as T[];
+  } finally {
+    db.close();
   }
 }

@@ -1,0 +1,64 @@
+{
+  "argv": [
+    "feed",
+    "<HOME>/repo",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "project": "2aae04be455fd589",
+    "projectLabel": "gh:agent-peek/golden-fixture",
+    "items": [
+      {
+        "post": {
+          "v": 1,
+          "id": "<ID:2>",
+          "type": "finding",
+          "origin": "authored",
+          "author": {
+            "session": "golden-agent",
+            "name": "golden-agent"
+          },
+          "scope": {
+            "project": "gh:agent-peek/golden-fixture",
+            "paths": [
+              "auth.ts"
+            ],
+            "topics": [
+              "auth"
+            ]
+          },
+          "body": {
+            "title": "Auth lives in auth.ts",
+            "text": "login() is defined in auth.ts",
+            "evidence": []
+          },
+          "links": {
+            "mentions": []
+          },
+          "lifecycle": {
+            "createdAt": "<NOW>",
+            "expiresAt": "<NOW>",
+            "validity": "fresh",
+            "driftedPaths": []
+          }
+        },
+        "presentation": "full",
+        "tokens": 19
+      }
+    ],
+    "tokensUsed": 19,
+    "omitted": 0,
+    "nextCursor": {
+      "$cursor": {
+        "v": 1,
+        "w": "<NOW>",
+        "d": [],
+        "s": []
+      }
+    },
+    "derivedErrors": [],
+    "recovered": false
+  },
+  "stderr": null
+}

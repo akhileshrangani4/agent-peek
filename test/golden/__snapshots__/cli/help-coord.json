@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "help",
+    "coord"
+  ],
+  "exit": 0,
+  "stdout": [
+    "peek coord",
+    "",
+    "peek coord . --writing",
+    "peek coord . --json --fields currentTask,intent,activeWritingFiles",
+    "peek coord . --since-file .peek-cursor --json",
+    "",
+    "Full options: peek coord --help"
+  ],
+  "stderr": null
+}

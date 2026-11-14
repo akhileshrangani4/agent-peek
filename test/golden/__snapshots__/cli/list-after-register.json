@@ -1,0 +1,67 @@
+{
+  "argv": [
+    "list",
+    "--all",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": [
+    {
+      "id": "custom:worker-1",
+      "adapter": "custom",
+      "transcriptPath": "<HOME>/worker.jsonl",
+      "cwd": "/tmp/repo",
+      "tag": "worker",
+      "sourceType": "manual",
+      "lastSeen": "<NOW>",
+      "status": "active",
+      "name": "worker",
+      "displayName": "worker"
+    },
+    {
+      "id": "claude-code:s1",
+      "name": "repo-claude",
+      "adapter": "claude-code",
+      "transcriptPath": "<HOME>/.claude/projects/-repo/s1.jsonl",
+      "cwd": "/tmp/repo",
+      "sourceType": "file",
+      "lastSeen": "2026-04-28T14:00:00.000Z",
+      "status": "ended",
+      "displayName": "repo-claude"
+    },
+    {
+      "id": "claude-code:s2",
+      "name": "repo2-claude",
+      "adapter": "claude-code",
+      "transcriptPath": "<HOME>/.claude/projects/-repo/s2.jsonl",
+      "cwd": "/tmp/repo2",
+      "sourceType": "file",
+      "lastSeen": "2026-04-28T14:00:00.000Z",
+      "status": "ended",
+      "displayName": "repo2-claude"
+    },
+    {
+      "id": "claude-code:s3",
+      "name": "repo-claude",
+      "adapter": "claude-code",
+      "transcriptPath": "<HOME>/.claude/projects/-repo/s3.jsonl",
+      "cwd": "/tmp/repo",
+      "sourceType": "file",
+      "lastSeen": "2026-04-28T14:00:00.000Z",
+      "status": "ended",
+      "displayName": "repo-claude-2"
+    },
+    {
+      "id": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+      "adapter": "codex",
+      "transcriptPath": "<HOME>/.codex/sessions/2026/04/28/rollout-2026-04-28T12-00-00-019cbabb-1261-7393-8ae4-007653e6c643.jsonl",
+      "cwd": "/tmp/repo",
+      "sourceType": "file",
+      "lastSeen": "2026-04-28T14:00:00.000Z",
+      "status": "ended",
+      "name": "repo-codex",
+      "displayName": "repo-codex"
+    }
+  ],
+  "stderr": null
+}

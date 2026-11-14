@@ -1,0 +1,17 @@
+{
+  "tool": "peek_session",
+  "arguments": {
+    "selector": "claude-code:missing"
+  },
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": [
+          "No session matched selector: claude-code:missing"
+        ]
+      }
+    ]
+  }
+}

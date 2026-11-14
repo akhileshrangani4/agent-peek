@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "tag",
+    "claude-code:s1",
+    "as",
+    "golden-main"
+  ],
+  "exit": 0,
+  "stdout": [
+    "tagged claude-code:s1 as golden-main"
+  ],
+  "stderr": null
+}
