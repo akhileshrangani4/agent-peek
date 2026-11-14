@@ -14,7 +14,7 @@ import { parseRecord as parseCodexRecord, parseJsonlSlice as parseCodexSlice } f
 import { parseRecord as parseClaudeRecord } from "../../src/adapters/claude-code/parse.js";
 import { Engine } from "../../src/core/engine.js";
 import { Registry } from "../../src/core/registry.js";
-import { AdapterLoader, discoverExternal } from "../../src/adapters/loader.js";
+import { AdapterLoader, discoverExternal } from "../../src/app/adapters.js";
 import { toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
 import { decodeCursor } from "../../src/core/cursor.js";
 import { TranscriptUnreadableError, SessionNotFoundError } from "../../src/core/errors.js";

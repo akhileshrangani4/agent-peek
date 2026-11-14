@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Engine } from "../../src/core/engine.js";
 import { Registry } from "../../src/core/registry.js";
-import { AdapterLoader } from "../../src/adapters/loader.js";
+import { AdapterLoader } from "../../src/app/adapters.js";
 import { makeTmpHome } from "../helpers/tmp-home.js";
 import { SessionNotFoundError, AmbiguousSelectorError } from "../../src/core/errors.js";
 import type { Adapter } from "../../src/adapters/types.js";

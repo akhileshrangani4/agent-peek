@@ -1,9 +1,7 @@
 import type { Registry } from "./registry.js";
 import type { ClaimsStore } from "./claims.js";
-import type { AdapterLoader } from "../adapters/loader.js";
-import type { Adapter } from "../adapters/types.js";
 import type {
-  CoordinationDigest, CoordinationCursor,
+  Adapter, AdapterCatalog, CoordinationDigest, CoordinationCursor,
   RawOrder, RawWindowFrom, SessionEntry, PeekResult, SnapshotMode, Cursor, HandoffTarget,
 } from "./types.js";
 import {
@@ -66,7 +64,7 @@ export interface CoordinationOpts {
 }
 
 export class Engine {
-  constructor(private readonly deps: { registry: Registry; loader: AdapterLoader; claims?: ClaimsStore }) {}
+  constructor(private readonly deps: { registry: Registry; loader: AdapterCatalog; claims?: ClaimsStore }) {}
 
   adapterNames(): string[] {
     return this.deps.loader.names().sort();

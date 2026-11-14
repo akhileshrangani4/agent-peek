@@ -1,6 +1,6 @@
 // test/unit/loader.test.ts
 import { describe, it, expect, beforeEach } from "vitest";
-import { AdapterLoader } from "../../src/adapters/loader.js";
+import { AdapterLoader } from "../../src/app/adapters.js";
 import { AdapterNotFoundError } from "../../src/core/errors.js";
 import type { Adapter } from "../../src/adapters/types.js";
 
