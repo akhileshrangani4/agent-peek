@@ -243,7 +243,7 @@ export class Engine {
       hiddenLowSignalSessionCount,
       hiddenUnchangedSessionCount,
       cwd: opts.cwd,
-      nextCursor: encodeCoordinationCursor({ version: 1, sessions: nextCursors }),
+      nextCursor: encodeCoordinationCursor({ version: 1, sessions: inListingOrder(entries, nextCursors) }),
     });
   }
 
@@ -357,4 +357,18 @@ function isTerminalAdapter(adapter: string): boolean {
 
 function isTerminalSession(entry: SessionEntry): boolean {
   return entry.sourceType === "terminal" || isTerminalAdapter(entry.adapter);
+}
+
+/**
+ * Cursor states keyed in listing order. The reads run concurrently and fill the map as
+ * each one finishes, so its key order (and the encoded cursor's bytes) followed which
+ * transcript happened to load first.
+ */
+function inListingOrder<T>(entries: SessionEntry[], states: Record<string, T>): Record<string, T> {
+  const ordered: Record<string, T> = {};
+  for (const entry of entries) {
+    const state = states[entry.id];
+    if (state !== undefined) ordered[entry.id] = state;
+  }
+  return ordered;
 }
