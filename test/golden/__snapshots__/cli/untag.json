@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "untag",
+    "golden-main"
+  ],
+  "exit": 0,
+  "stdout": [
+    "untagged golden-main"
+  ],
+  "stderr": null
+}

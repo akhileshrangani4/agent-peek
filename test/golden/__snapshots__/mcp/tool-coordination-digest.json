@@ -1,0 +1,116 @@
+{
+  "tool": "coordination_digest",
+  "arguments": {
+    "cwd": "/tmp/repo",
+    "includeEnded": true
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "mode": "coordination",
+          "generatedAt": "<NOW>",
+          "cwd": "/tmp/repo",
+          "firstSnapshot": true,
+          "sessionCount": 3,
+          "shownSessionCount": 3,
+          "totalSessionCount": 3,
+          "newSessionCount": 3,
+          "changedSessionCount": 0,
+          "sessions": [
+            {
+              "id": "claude-code:s1",
+              "displayName": "repo-claude",
+              "adapter": "claude-code",
+              "status": "ended",
+              "activity": "thinking",
+              "cwd": "/tmp/repo",
+              "sourceType": "file",
+              "lastSeen": "2026-04-28T14:00:00.000Z",
+              "messageCount": 5,
+              "changedMessageCount": 5,
+              "currentTask": "refactor auth",
+              "lastAssistantMessage": "Found it. Will rewrite next.",
+              "pendingTools": [],
+              "recentTools": [
+                "Read"
+              ],
+              "intent": "reading",
+              "recentFiles": [
+                "/tmp/repo/auth.ts"
+              ],
+              "knownFiles": [
+                "/tmp/repo/auth.ts"
+              ],
+              "hotFiles": [],
+              "activeWritingFiles": [],
+              "recentWritingFiles": [],
+              "writingFileEvents": [],
+              "writingFiles": [],
+              "touchedFiles": [
+                "/tmp/repo/auth.ts"
+              ]
+            },
+            {
+              "id": "claude-code:s3",
+              "displayName": "repo-claude-2",
+              "adapter": "claude-code",
+              "status": "ended",
+              "activity": "idle",
+              "cwd": "/tmp/repo",
+              "sourceType": "file",
+              "lastSeen": "2026-04-28T14:00:00.000Z",
+              "messageCount": 3,
+              "changedMessageCount": 3,
+              "currentTask": "use the golden skill",
+              "pendingTools": [],
+              "recentTools": [
+                "Skill"
+              ],
+              "intent": "unknown",
+              "recentFiles": [],
+              "knownFiles": [],
+              "hotFiles": [],
+              "activeWritingFiles": [],
+              "recentWritingFiles": [],
+              "writingFileEvents": [],
+              "writingFiles": [],
+              "touchedFiles": []
+            },
+            {
+              "id": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+              "displayName": "repo-codex",
+              "adapter": "codex",
+              "status": "ended",
+              "activity": "thinking",
+              "cwd": "/tmp/repo",
+              "sourceType": "file",
+              "lastSeen": "2026-04-28T14:00:00.000Z",
+              "messageCount": 6,
+              "changedMessageCount": 6,
+              "currentTask": "refactor auth",
+              "lastAssistantMessage": "Found it. Will rewrite next.",
+              "pendingTools": [],
+              "recentTools": [
+                "exec_command"
+              ],
+              "intent": "unknown",
+              "recentFiles": [],
+              "knownFiles": [],
+              "hotFiles": [],
+              "activeWritingFiles": [],
+              "recentWritingFiles": [],
+              "writingFileEvents": [],
+              "writingFiles": [],
+              "touchedFiles": []
+            }
+          ],
+          "overlapHints": [],
+          "nextCursor": "gz.H4sIAAAAAAAAA83S22oiQRAG4FcZ6npG52Am69yJrDKigYirZpZctN2Vmda2O3TXeAq--xI3p40he7EQ9q74KeqHj3qADVonjYYs8sGhe5wdZA_AFasFBtwIzFx0SmrrjIUMcD-oin5vK_rTfb408ibeVWI2VsPZ1abo_5DD7kDifKwmcbHm8TTMl2Y_OnRaw-6AeCwGi_VYYTdPr-YhvJQ-NVjUNGFuBRlYvGOcjPVYTRX4oJijjnPSEdM0QudYiZBBz9RaeJIa3kwq5VncWknoadxRA3yQmlDT6RwTUpfgw0qbre5JhQ6yn9Ck9X3T4r1pPvY0yMGtD4yT3ODMSpK6fF699cEiR03n-fY1-b5BTefxU0Km5hWKz9qPR_9P_eRf9ZPR5Mbl6-hQhKou-tNWvjSHu-vP8GuHHlXolUYJ1J5bSaXeatb6pPhe8wvpfjsZgbssjNp8wRaLIIrTKLhM2knwjWErCMPL9CLBlKetvxm2V8W8_MhuN1p2wrPP1V_5uf-F9fH4C7nUFQ4sBAAA"
+        }
+      }
+    ]
+  }
+}

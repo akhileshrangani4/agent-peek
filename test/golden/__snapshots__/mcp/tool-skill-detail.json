@@ -1,0 +1,42 @@
+{
+  "tool": "skill_detail",
+  "arguments": {
+    "skill": "golden-skill"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "index": {
+            "state": "ready",
+            "path": "<HOME>/.agent-peek/usage.db"
+          },
+          "skill": {
+            "key": "<HOME>/.claude/skills/golden-skill",
+            "name": "golden-skill",
+            "description": "A skill the fixture session invokes.",
+            "modelInvocable": true,
+            "estimatedTokens": 12,
+            "chargedTokens": 12,
+            "flags": [],
+            "costBasis": "estimated from SKILL.md frontmatter (name + description) at ~4 chars/token, charged once per agent that lists the skill. An upper bound: some hosts list a name without its description, and an agent honouring disable-model-invocation lists neither."
+          },
+          "installations": [
+            {
+              "agent": "claude-code",
+              "path": "<HOME>/.claude/skills/golden-skill",
+              "action": "move",
+              "symlink": false,
+              "mutable": true,
+              "coverage": "attributed",
+              "usesLabel": "1",
+              "tokens": 12
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

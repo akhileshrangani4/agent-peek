@@ -1,13 +1,12 @@
 // src/adapters/claude-code/index.ts
 import { open, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
-import { readFileWindow, statusFromMtime } from "../common.js";
+import { claudeConfigDir, readFileWindow, statusFromMtime } from "../common.js";
 import { parseJsonlSlice, parseRecord } from "./parse.js";
 import { settleToolStatuses } from "../../core/snapshot.js";
 
@@ -19,7 +18,7 @@ const adapter: Adapter = {
   observes: ["tool_call", "slash_command"],
 
   async scan(): Promise<SessionEntry[]> {
-    const root = join(process.env.HOME ?? homedir(), ".claude", "projects");
+    const root = join(claudeConfigDir(), "projects");
     const out: SessionEntry[] = [];
     let projects: string[];
     try {

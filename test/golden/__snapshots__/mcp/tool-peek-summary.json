@@ -1,0 +1,31 @@
+{
+  "tool": "peek_session",
+  "arguments": {
+    "selector": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+    "mode": "summary"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "snapshot": {
+            "mode": "summary",
+            "sessionId": "codex:019cbabb-1261-7393-8ae4-007653e6c643",
+            "summary": "Current task: refactor auth. The latest message is from the assistant, so the session may still be in progress. Last assistant update: Found it. Will rewrite next.. Recent tools: exec_command.",
+            "deltaMessageCount": 6
+          },
+          "nextCursor": {
+            "$cursor": {
+              "adapter": "codex",
+              "byteOffset": 1204,
+              "msgIndex": 6
+            }
+          },
+          "eof": true
+        }
+      }
+    ]
+  }
+}

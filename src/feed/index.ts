@@ -32,10 +32,12 @@ export async function postToFeed(opts: {
   as?: string;
   home?: string;
   engine?: Engine;
+  /** The post's creation time; defaults to now. Lets a service run on an injected clock. */
+  now?: Date;
 }): Promise<FeedPost> {
   const identity = await projectIdentity(opts.dir);
   const author = await resolveAuthor({ as: opts.as, cwd: opts.dir, engine: opts.engine });
-  const post = validatePost({ ...opts.input, project: identity.label, author });
+  const post = validatePost({ ...opts.input, project: identity.label, author }, opts.now);
   const store = new FeedStore({ projectId: identity.id, home: opts.home });
   try {
     for (const ref of [opts.input.supersedes, opts.input.replyTo]) {
@@ -58,10 +60,12 @@ export async function readFeed(opts: {
   home?: string;
   engine?: Engine;
   includeDerived?: boolean;
+  /** The read's reference time for expiry; defaults to now. */
+  now?: Date;
 }): Promise<FeedReadResult> {
   const identity = await projectIdentity(opts.dir);
   const cursor = decodeFeedCursor(opts.since);
-  const now = new Date();
+  const now = opts.now ?? new Date();
   const store = new FeedStore({ projectId: identity.id, home: opts.home });
   try {
     // Drift-check every candidate (not just ones newer than the cursor) so

@@ -1,0 +1,25 @@
+{
+  "argv": [
+    "claim",
+    "src/verify.ts",
+    "--as",
+    "golden-agent",
+    "--ttl",
+    "1h",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "id": "<ID:1>",
+    "files": [
+      "<HOME>/repo/src/verify.ts"
+    ],
+    "owner": "golden-agent",
+    "creator": "<USER>@<HOST>:<HOME>/repo",
+    "cwd": "<HOME>/repo",
+    "createdAt": "<NOW>",
+    "expiresAt": "<NOW>",
+    "identityNote": "no tracked session found for this directory; using <USER>@<HOST>:<HOME>/repo."
+  },
+  "stderr": null
+}

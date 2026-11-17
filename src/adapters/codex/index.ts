@@ -1,12 +1,11 @@
 // src/adapters/codex/index.ts
 import { open, readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { Adapter, AdapterReadResult } from "../types.js";
 import type { SessionEntry, RawMessage, Cursor } from "../../core/types.js";
 import { encodeCursor, decodeCursor } from "../../core/cursor.js";
 import { TranscriptUnreadableError } from "../../core/errors.js";
-import { readFileWindow, statusFromMtime } from "../common.js";
+import { codexHome, readFileWindow, statusFromMtime } from "../common.js";
 import { parseJsonlSlice, parseRecord } from "./parse.js";
 
 const ADAPTER_NAME = "codex";
@@ -20,7 +19,7 @@ const adapter: Adapter = {
 
   async scan(): Promise<SessionEntry[]> {
     // Codex CLI rollouts: ~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl
-    const root = join(process.env.HOME ?? homedir(), ".codex", "sessions");
+    const root = join(codexHome(), "sessions");
     const out: SessionEntry[] = [];
     const files = await collectRolloutFiles(root);
     for (const fpath of files) {

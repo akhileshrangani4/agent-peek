@@ -692,7 +692,7 @@ console.log(result.nextCursor);
 - `copilot-cli`: reads GitHub Copilot CLI session-state directories in `~/.copilot/session-state/*`
 - `gemini`: reads Gemini CLI transcripts in `~/.gemini/tmp/<project>/chats/session-*.json`
 - `goose`: reads Goose session records in `~/.local/share/goose/sessions/sessions.db`
-- `opencode`: reads OpenCode filesystem storage in `~/.local/share/opencode/storage/{session,message,part}`
+- `opencode`: reads OpenCode V2 SQLite storage in `~/.local/share/opencode/opencode.db` (or `$OPENCODE_DB`, plus any `opencode-<channel>.db`) and the pre-V2 filesystem storage in `~/.local/share/opencode/storage/{session,message,part}`. Both list as `opencode:<id>`; a session in both is listed once, from V2. `opencode-legacy-v1` is accepted as an alias for `opencode`. V2 sessions carry `execution` (`state`, `outcome`, `at`, `sequence`).
 - `screen`: captures GNU screen scrollback via `hardcopy -h`
 - `tmux`: captures tmux pane output
 
@@ -705,6 +705,22 @@ terminal scrollback, not structured agent transcript files. Use
 Set `AGENT_PEEK_ADAPTER_PATH` to a colon-separated list of adapter modules.
 Each module's default export must implement the `Adapter` interface from
 `agent-peek/adapter`.
+
+## Privacy
+
+Transcripts never leave your machine. Anything `agent-peek` sends off the machine
+is limited to structure (ids, kinds, timestamps, pointers into a transcript),
+repo-relative paths, commit SHAs, skill keys, branch, adapter and model names,
+feed posts with their token-capped bodies, and short structured status. Message
+text, tool input and output, prompt text, absolute paths and hostnames are never
+sent. A full-text index over your own transcripts is opt-in and stays local.
+
+One guard, `assertExportable`, enforces this with a whitelist per payload kind
+and refuses anything outside it. The full boundary, and why it is a whitelist
+rather than a redaction pass, is recorded in
+[ADR 0002: graph and network retention](docs/adr/0002-graph-and-network-retention.md).
+The usage index's own boundary is
+[ADR 0001](docs/adr/0001-usage-index-stores-whitelisted-arguments.md).
 
 ## Security Model
 

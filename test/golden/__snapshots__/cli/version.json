@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "version",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "name": "agent-peek",
+    "version": "<VERSION>"
+  },
+  "stderr": null
+}

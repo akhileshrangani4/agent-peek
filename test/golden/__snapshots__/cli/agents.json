@@ -1,0 +1,80 @@
+{
+  "argv": [
+    "agents",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "source": {
+      "package": "skills",
+      "version": "1.5.23",
+      "sha256": "343668347d50a885b47187091314ecc8fc7ee7584bfdf724ccee34d587da7dd3",
+      "extracted": "2026-08-31"
+    },
+    "agents": [
+      {
+        "slug": "claude-code",
+        "displayName": "Claude Code",
+        "adapter": "claude-code",
+        "roots": [
+          {
+            "path": "<HOME>/.claude/skills",
+            "kind": "user",
+            "mutable": true,
+            "present": true
+          },
+          {
+            "path": "<HOME>/.claude/plugins/cache",
+            "kind": "plugin",
+            "mutable": false,
+            "present": false
+          }
+        ],
+        "projectDir": ".claude/skills",
+        "honoursDisableModelInvocation": true,
+        "tier": "verified",
+        "observes": [
+          "tool_call",
+          "slash_command"
+        ],
+        "observable": true,
+        "attributes": [
+          "tool_call",
+          "slash_command"
+        ],
+        "attributable": true,
+        "manageable": true,
+        "installed": true,
+        "presence": "present"
+      },
+      {
+        "slug": "codex",
+        "displayName": "Codex",
+        "adapter": "codex",
+        "roots": [
+          {
+            "path": "<HOME>/.codex/skills",
+            "kind": "user",
+            "mutable": true,
+            "present": false
+          }
+        ],
+        "projectDir": ".agents/skills",
+        "tier": "verified",
+        "observes": [
+          "tool_call",
+          "slash_command"
+        ],
+        "observable": true,
+        "attributes": [
+          "slash_command"
+        ],
+        "attributable": true,
+        "manageable": false,
+        "installed": true,
+        "presence": "present"
+      }
+    ]
+  },
+  "stderr": null
+}

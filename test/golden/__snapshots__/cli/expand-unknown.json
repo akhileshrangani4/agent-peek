@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "expand",
+    "<ID:3>",
+    "--json"
+  ],
+  "exit": 2,
+  "stdout": {
+    "error": "post_not_found",
+    "message": "No post found with id: <ID:3>",
+    "hint": "Use `peek feed --json` to list current post ids.",
+    "next": [
+      "peek feed --json"
+    ],
+    "exit": 2
+  },
+  "stderr": [
+    "error: post_not_found · exit 2"
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "argv": [
+    "at",
+    "opencode:ses_legacy",
+    "--since",
+    {
+      "$cursor": {
+        "adapter": "opencode",
+        "byteOffset": 2,
+        "msgIndex": 2
+      }
+    },
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "snapshot": {
+      "mode": "raw",
+      "sessionId": "opencode:ses_legacy",
+      "messages": [],
+      "totalMessageCount": 2,
+      "window": {
+        "start": 2,
+        "end": 2,
+        "order": "oldest-first"
+      }
+    },
+    "nextCursor": {
+      "$cursor": {
+        "adapter": "opencode",
+        "byteOffset": 2,
+        "msgIndex": 2
+      }
+    },
+    "eof": true
+  },
+  "stderr": null
+}

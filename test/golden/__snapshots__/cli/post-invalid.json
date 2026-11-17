@@ -1,0 +1,23 @@
+{
+  "argv": [
+    "post",
+    "finding",
+    "No paths",
+    "--text",
+    "findings need paths",
+    "--json"
+  ],
+  "exit": 5,
+  "stdout": {
+    "error": "post_rejected",
+    "message": "Post rejected: type \"finding\" requires --paths (used for ranking and drift detection). Pathless observations should use type \"status\".",
+    "hint": "Posts are token-budgeted context units. Shorten the body and link evidence instead of inlining it.",
+    "next": [
+      "peek post --help"
+    ],
+    "exit": 5
+  },
+  "stderr": [
+    "error: post_rejected · exit 5"
+  ]
+}

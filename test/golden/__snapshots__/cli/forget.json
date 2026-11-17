@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "forget",
+    "custom:worker-1"
+  ],
+  "exit": 0,
+  "stdout": [
+    "forgot custom:worker-1"
+  ],
+  "stderr": null
+}

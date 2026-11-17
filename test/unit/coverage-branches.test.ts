@@ -14,7 +14,7 @@ import { parseRecord as parseCodexRecord, parseJsonlSlice as parseCodexSlice } f
 import { parseRecord as parseClaudeRecord } from "../../src/adapters/claude-code/parse.js";
 import { Engine } from "../../src/core/engine.js";
 import { Registry } from "../../src/core/registry.js";
-import { AdapterLoader, discoverExternal } from "../../src/adapters/loader.js";
+import { AdapterLoader, discoverExternal } from "../../src/app/adapters.js";
 import { toRaw, toStructured, toSummary } from "../../src/core/snapshot.js";
 import { decodeCursor } from "../../src/core/cursor.js";
 import { TranscriptUnreadableError, SessionNotFoundError } from "../../src/core/errors.js";
@@ -555,7 +555,7 @@ describe("createEngine factory branches", () => {
     const { home, cleanup } = await makeTmpHome();
     try {
       // Use empty HOME so adapter scans return [].
-      await withEnv({ HOME: home }, async () => {
+      await withEnv({ HOME: home, XDG_DATA_HOME: join(home, ".local", "share") }, async () => {
         const e = await createEngine({ home });
         const l = await e.list();
         expect(l).toEqual([]); // no sessions in the tmp home

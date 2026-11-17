@@ -1,0 +1,34 @@
+{
+  "tool": "archive_plan",
+  "arguments": {
+    "skill": "idle-skill"
+  },
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "plan": {
+            "skillKey": "<HOME>/.claude/skills/idle-skill",
+            "skillName": "idle-skill",
+            "actions": [
+              {
+                "skillKey": "<HOME>/.claude/skills/idle-skill",
+                "skillName": "idle-skill",
+                "agent": "claude-code",
+                "path": "<HOME>/.claude/skills/idle-skill",
+                "rootPath": "<HOME>/.claude/skills",
+                "kind": "move"
+              }
+            ],
+            "skipped": [],
+            "warnings": []
+          },
+          "command": "peek skills archive idle-skill --yes",
+          "note": "peek did not change anything. Run the command above in a terminal to execute; without --yes it prints this plan again."
+        }
+      }
+    ]
+  }
+}

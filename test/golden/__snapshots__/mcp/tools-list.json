@@ -1,0 +1,418 @@
+[
+  {
+    "name": "peek_session",
+    "description": "Read a snapshot of another agent's chat session. For \"what is that agent doing\" use mode=brief or structured. mode=handoff does not spawn anything: the result's `material` string is a complete prompt (writing instructions and the eight section headings, heuristic hints, then the compressed transcript between `--- transcript ---` and `--- end transcript ---`); you are the harness, so answer that prompt yourself and the markdown you produce is the handoff. `document` in that result is only a regex stub.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "selector": {
+          "type": "string",
+          "description": "Session displayName, id, tag, or cwd."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "raw",
+            "structured",
+            "brief",
+            "summary",
+            "handoff"
+          ],
+          "default": "raw",
+          "description": "raw: transcript messages (windowed). structured: stable fields (currentTask, activity, writingFiles, pending tools). brief: one-paragraph status; use this for \"what is that agent doing\". summary: prose. handoff: `material` for you to write a handoff document from."
+        },
+        "target": {
+          "type": "string",
+          "description": "handoff mode: who the handoff is for (generic, claude-code, codex, gemini, copilot, opencode, chatgpt, claude-chat). Chat targets get code inlined; CLI targets get paths."
+        },
+        "since": {
+          "type": "string",
+          "description": "Cursor returned by a prior peek."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Max raw messages (default 200)."
+        },
+        "first": {
+          "type": "number",
+          "description": "Show the first N raw messages."
+        },
+        "last": {
+          "type": "number",
+          "description": "Show the last N raw messages."
+        },
+        "around": {
+          "type": "number",
+          "description": "Show raw messages around this 1-based message number."
+        },
+        "offset": {
+          "type": "number",
+          "description": "Skip N messages from the selected raw edge."
+        },
+        "reverse": {
+          "type": "boolean",
+          "description": "Return raw messages newest-first."
+        }
+      },
+      "required": [
+        "selector"
+      ]
+    }
+  },
+  {
+    "name": "list_sessions",
+    "description": "List discovered agent sessions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "idle",
+            "ended"
+          ]
+        },
+        "includeEnded": {
+          "type": "boolean",
+          "description": "Include ended sessions when status is not provided."
+        },
+        "includeTerminal": {
+          "type": "boolean",
+          "description": "Include terminal capture adapters such as tmux and screen."
+        }
+      }
+    }
+  },
+  {
+    "name": "coordination_digest",
+    "description": "Summarize nearby agent activity, changes since a prior digest, and possible overlap.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "description": "Working directory to summarize. Omit to include all active sessions."
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "idle",
+            "ended"
+          ]
+        },
+        "writingOnly": {
+          "type": "boolean",
+          "description": "Only include sessions with recent write intent."
+        },
+        "since": {
+          "type": "string",
+          "description": "Coordination cursor returned by a prior digest."
+        },
+        "includeEnded": {
+          "type": "boolean",
+          "description": "Include ended sessions."
+        },
+        "includeTerminal": {
+          "type": "boolean",
+          "description": "Include terminal capture adapters such as tmux and screen."
+        }
+      }
+    }
+  },
+  {
+    "name": "tag_session",
+    "description": "Give a session a friendly tag for easier addressing.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tag"
+      ]
+    }
+  },
+  {
+    "name": "post_to_feed",
+    "description": "Publish a token-budgeted context post (finding, intent, warning, question, answer, handoff, status) to this project's feed so other agents can ingest it instead of re-exploring.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "finding",
+            "intent",
+            "warning",
+            "question",
+            "answer",
+            "handoff",
+            "status"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "description": "Max 80 chars"
+        },
+        "text": {
+          "type": "string",
+          "description": "Max ~150 tokens; link evidence instead of inlining"
+        },
+        "dir": {
+          "type": "string",
+          "description": "Project directory; defaults to server cwd"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Repo-relative paths (required for finding/warning)"
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reply_to": {
+          "type": "string"
+        },
+        "supersedes": {
+          "type": "string"
+        },
+        "mentions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ttl_ms": {
+          "type": "number"
+        },
+        "as": {
+          "type": "string",
+          "description": "Author identity override"
+        }
+      },
+      "required": [
+        "type",
+        "title",
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "read_feed",
+    "description": "Read this project's context feed: posts from other agents ranked by relevance to your working set and packed to a token budget. Call before exploring the repo.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "budget": {
+          "type": "number",
+          "description": "Token budget, default 600"
+        },
+        "context_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths you are working on (improves ranking)"
+        },
+        "since": {
+          "type": "string",
+          "description": "Cursor from a prior read_feed"
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reader": {
+          "type": "string",
+          "description": "Your session identity (boosts mentions)"
+        },
+        "include_derived": {
+          "type": "boolean",
+          "description": "Include derived status/overlap posts, default true"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "expand_post",
+    "description": "Fetch one feed post in full, including evidence references, before trusting or acting on it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "post_id": {
+          "type": "string"
+        },
+        "dir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "post_id"
+      ]
+    }
+  },
+  {
+    "name": "usage_report",
+    "description": "Which skills and tools have actually been invoked, across every agent, from peek's durable index. Returns an envelope carrying the observed window, per-adapter windows, and the agents peek cannot see — counts are meaningless without them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupBy": {
+          "type": "string",
+          "description": "Dimension(s), comma-separated: skill|tool|agent|adapter|day|cwd|sourceKind|sidechain|attributionAgent. Default skill."
+        },
+        "skill": {
+          "type": "string",
+          "description": "Only this skill or command name."
+        },
+        "agent": {
+          "type": "string",
+          "description": "Only this agent slug."
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string",
+          "description": "Only invocations of this tool. Default: skills only."
+        },
+        "allTools": {
+          "type": "boolean",
+          "description": "Every tool, not just skills."
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "tool_call",
+            "slash_command"
+          ]
+        },
+        "sidechain": {
+          "type": "boolean",
+          "description": "true for subagent calls only, false for main loop only."
+        },
+        "attributionAgent": {
+          "type": "string",
+          "description": "Subagent type that made the call."
+        },
+        "since": {
+          "type": "string",
+          "description": "ISO instant, inclusive."
+        },
+        "until": {
+          "type": "string",
+          "description": "ISO instant, exclusive."
+        },
+        "includeBuiltins": {
+          "type": "boolean",
+          "description": "Keep CLI built-ins like /clear, which are recorded but are not skills."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Rows to return (default 20, max 100)."
+        }
+      }
+    }
+  },
+  {
+    "name": "skills_report",
+    "description": "Skill inventory segmented by what can honestly be acted on: archivable, unknown usage, read-only, in use. Summary first with per-segment totals, then a capped slice. Needs the usage index; without it, segments are withheld rather than reporting every skill as unused.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "segment": {
+          "type": "string",
+          "enum": [
+            "archivable",
+            "unknown-usage",
+            "read-only",
+            "in-use"
+          ],
+          "description": "Return rows for one segment only. Totals for every segment are always included."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Rows per segment (default 20, max 100)."
+        }
+      }
+    }
+  },
+  {
+    "name": "skill_detail",
+    "description": "One skill: its installations per agent, what archiving each would do, per-agent usage coverage, and cost. Returns paths and flags, never SKILL.md content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "skill": {
+          "type": "string",
+          "description": "Skill name or key, as returned by skills_report."
+        }
+      },
+      "required": [
+        "skill"
+      ]
+    }
+  },
+  {
+    "name": "archive_plan",
+    "description": "What archiving a skill WOULD do, plus the command a human runs to do it. Changes nothing: peek exposes no tool that can archive, because dry-run-by-default works by a person reading the plan.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "skill": {
+          "type": "string",
+          "description": "Skill name or key."
+        },
+        "agent": {
+          "type": "string",
+          "description": "Limit to one agent's installation."
+        },
+        "allAgents": {
+          "type": "boolean",
+          "description": "Retire from every mutable root."
+        }
+      },
+      "required": [
+        "skill"
+      ]
+    }
+  },
+  {
+    "name": "list_agents",
+    "description": "Coding agents peek knows: which are on this machine, whether each entry is verified or sourced from a third-party table, and what peek can observe and attribute for each.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "type": "boolean",
+          "description": "Include agents peek knows of that are not installed here."
+        }
+      }
+    }
+  }
+]

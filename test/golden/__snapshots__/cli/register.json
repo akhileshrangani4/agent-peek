@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "register",
+    "custom:worker-1",
+    "at",
+    "<HOME>/worker.jsonl",
+    "--as",
+    "worker",
+    "--cwd",
+    "/tmp/repo"
+  ],
+  "exit": 0,
+  "stdout": [
+    "registered custom:worker-1"
+  ],
+  "stderr": null
+}

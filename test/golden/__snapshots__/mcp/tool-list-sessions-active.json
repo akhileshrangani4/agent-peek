@@ -1,0 +1,13 @@
+{
+  "tool": "list_sessions",
+  "arguments": {},
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": []
+      }
+    ]
+  }
+}

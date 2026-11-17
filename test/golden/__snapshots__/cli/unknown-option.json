@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "ui",
+    "--json"
+  ],
+  "exit": 5,
+  "stdout": {
+    "error": "invalid_usage",
+    "message": "Unknown option `--json`",
+    "hint": "Run `peek ui --help` for the expected arguments and options.",
+    "next": [
+      "peek ui --help",
+      "peek help"
+    ],
+    "exit": 5
+  },
+  "stderr": [
+    "error: invalid_usage · exit 5"
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "argv": [
+    "skills",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "costBasis": "estimated from SKILL.md frontmatter (name + description) at ~4 chars/token, charged once per agent that lists the skill. An upper bound: some hosts list a name without its description, and an agent honouring disable-model-invocation lists neither.",
+    "projects": {
+      "surveyed": [
+        "/tmp/repo",
+        "/tmp/repo2"
+      ],
+      "found": 2,
+      "capped": false,
+      "skills": 0,
+      "tokens": 0
+    },
+    "segments": [
+      {
+        "id": "archivable",
+        "title": "Safe to archive",
+        "note": "no recorded use, and every installation sits on an agent peek can attribute",
+        "count": 1,
+        "tokens": 9
+      },
+      {
+        "id": "unknown-usage",
+        "title": "Usage unknown",
+        "note": "peek cannot see usage here, so nothing recorded is not evidence of disuse",
+        "count": 0,
+        "tokens": 0
+      },
+      {
+        "id": "read-only",
+        "title": "Read-only",
+        "note": "reported for cost and never mutated; disable a plugin with /plugin to stop paying for its set",
+        "count": 0,
+        "tokens": 0
+      },
+      {
+        "id": "in-use",
+        "title": "In use",
+        "note": "recorded invocations; not offered",
+        "count": 1,
+        "tokens": 12
+      }
+    ],
+    "unmatched": [],
+    "totalSkills": 2,
+    "skills": [
+      {
+        "key": "<HOME>/.claude/skills/golden-skill",
+        "name": "golden-skill",
+        "segment": "in-use",
+        "reason": "1 recorded invocation",
+        "tokens": 12,
+        "agents": [
+          "claude-code"
+        ],
+        "installations": 1,
+        "modelInvocable": true,
+        "flags": []
+      },
+      {
+        "key": "<HOME>/.claude/skills/idle-skill",
+        "name": "idle-skill",
+        "segment": "archivable",
+        "reason": "no recorded use, every installation attributable",
+        "tokens": 9,
+        "agents": [
+          "claude-code"
+        ],
+        "installations": 1,
+        "modelInvocable": true,
+        "flags": []
+      }
+    ],
+    "rootsScanned": 1,
+    "details": "run with --details for installations, flags with evidence, and roots scanned"
+  },
+  "stderr": null
+}

@@ -1,0 +1,20 @@
+{
+  "tool": "post_to_feed",
+  "arguments": {
+    "type": "finding",
+    "title": "No paths",
+    "text": "findings need paths",
+    "dir": "<HOME>/repo"
+  },
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": [
+          "Post rejected: type \"finding\" requires --paths (used for ranking and drift detection). Pathless observations should use type \"status\"."
+        ]
+      }
+    ]
+  }
+}

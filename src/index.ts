@@ -4,7 +4,7 @@ import packageJson from "../package.json" with { type: "json" };
 export const VERSION = packageJson.version;
 
 export type {
-  SessionEntry, SessionStatus, Activity, FileClaim,
+  SessionEntry, SessionStatus, SessionExecution, SessionOutcome, Activity, FileClaim,
   RawMessage, ToolCall,
   Cursor, CursorData,
   Snapshot, RawSnapshot, StructuredSnapshot, BriefSnapshot, SummarySnapshot, HandoffSnapshot,
@@ -17,8 +17,19 @@ export {
   SessionNotFoundError, AmbiguousSelectorError, AdapterError,
   AdapterNotFoundError, CursorMismatchError, InvalidCursorError, RegistryLockTimeoutError,
   TranscriptUnreadableError, TranscriptCorruptError, SummaryUnavailableError,
-  PostRejectedError, PostNotFoundError, NotAProjectError,
+  PostRejectedError, PostNotFoundError, NotAProjectError, NonExportableFieldError,
 } from "./core/errors.js";
+
+// ADR 0002: the one guard every outbound payload passes through.
+export {
+  assertExportable, containsHomePath, isRepoRelativePath, EXPORT_KINDS, EXPORTABLE_NODE_KINDS,
+  EXPORTABLE_EDGE_KINDS, EXPORTABLE_EDGE_ORIGINS, STATUS_SUMMARY_MAX_CHARS, CLAIM_NOTE_MAX_CHARS,
+  GRAPH_BATCH_MAX_ROWS,
+} from "./export/assert-exportable.js";
+export type {
+  ExportKind, ExportPayload, ExportablePost, ExportableClaim, ExportableStatus,
+  ExportableGraphBatch, ExportableGraphNode, ExportableGraphEdge,
+} from "./export/assert-exportable.js";
 
 export {
   addAgent, adapterObserves, builtinAgents, isPresent, listAgents, mergeAgents,
@@ -87,44 +98,10 @@ export type {
   PackedItem, PackedFeed, RankContext, FeedReadResult,
 } from "./feed/index.js";
 
-export { AdapterLoader, discoverExternal } from "./adapters/loader.js";
-export type { Adapter, AdapterReadResult, AdapterModule } from "./adapters/types.js";
+export { AdapterLoader, discoverExternal } from "./app/adapters.js";
+export type { Adapter, AdapterReadResult, AdapterModule, AdapterCatalog } from "./core/types.js";
 
-import claudeCode from "./adapters/claude-code/index.js";
-import codex from "./adapters/codex/index.js";
-import copilotCli from "./adapters/copilot-cli/index.js";
-import gemini from "./adapters/gemini/index.js";
-import goose from "./adapters/goose/index.js";
-import opencode from "./adapters/opencode/index.js";
-import screen from "./adapters/screen/index.js";
-import tmux from "./adapters/tmux/index.js";
-import { Engine } from "./core/engine.js";
-import { Registry } from "./core/registry.js";
-import { ClaimsStore } from "./core/claims.js";
-import { AdapterLoader, discoverExternal } from "./adapters/loader.js";
-
-export interface CreateEngineOpts {
-  home?: string;
-  withBuiltins?: boolean;
-  withExternal?: boolean;
-}
-
-export async function createEngine(opts: CreateEngineOpts = {}): Promise<Engine> {
-  const registry = new Registry({ home: opts.home });
-  const claims = new ClaimsStore({ home: opts.home });
-  const loader = new AdapterLoader();
-  if (opts.withBuiltins !== false) {
-    loader.register(claudeCode);
-    loader.register(codex);
-    loader.register(copilotCli);
-    loader.register(gemini);
-    loader.register(goose);
-    loader.register(opencode);
-    loader.register(screen);
-    loader.register(tmux);
-  }
-  if (opts.withExternal) await discoverExternal(loader);
-  return new Engine({ registry, loader, claims });
-}
+export { createEngine } from "./app/engine.js";
+export type { CreateEngineOpts } from "./app/engine.js";
 export { Row, Rows, Rule, state, num, overflow, padEnd, padStart, terminalWidth, colorEnabled, renderStatic, sparkline, sparklineBlank } from "./cli/render.js";
 export type { Role, Cell } from "./cli/render.js";

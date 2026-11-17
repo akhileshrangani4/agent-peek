@@ -1,0 +1,106 @@
+{
+  "tool": "skills_report",
+  "arguments": {},
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "index": {
+            "state": "ready",
+            "path": "<HOME>/.agent-peek/usage.db"
+          },
+          "totals": {
+            "skills": 2,
+            "tokens": 21,
+            "bySegment": {
+              "archivable": 1,
+              "unknown-usage": 0,
+              "read-only": 0,
+              "in-use": 1
+            }
+          },
+          "segments": [
+            {
+              "id": "archivable",
+              "title": "Safe to archive",
+              "note": "no recorded use, and every installation sits on an agent peek can attribute",
+              "skills": 1,
+              "tokens": 9,
+              "truncated": false,
+              "rows": [
+                {
+                  "key": "<HOME>/.claude/skills/idle-skill",
+                  "name": "idle-skill",
+                  "rootHint": "~/.claude/skills",
+                  "tokens": 9,
+                  "agents": [
+                    "claude-code"
+                  ],
+                  "uses": 0,
+                  "usesLabel": "0",
+                  "reason": "no recorded use, every installation attributable"
+                }
+              ]
+            },
+            {
+              "id": "unknown-usage",
+              "title": "Usage unknown",
+              "note": "peek cannot see usage here, so nothing recorded is not evidence of disuse",
+              "skills": 0,
+              "tokens": 0,
+              "truncated": false,
+              "rows": []
+            },
+            {
+              "id": "read-only",
+              "title": "Read-only",
+              "note": "reported for cost and never mutated; disable a plugin with /plugin to stop paying for its set",
+              "skills": 0,
+              "tokens": 0,
+              "truncated": false,
+              "rows": []
+            },
+            {
+              "id": "in-use",
+              "title": "In use",
+              "note": "recorded invocations; not offered",
+              "skills": 1,
+              "tokens": 12,
+              "truncated": false,
+              "rows": [
+                {
+                  "key": "<HOME>/.claude/skills/golden-skill",
+                  "name": "golden-skill",
+                  "rootHint": "~/.claude/skills",
+                  "tokens": 12,
+                  "agents": [
+                    "claude-code"
+                  ],
+                  "uses": 1,
+                  "usesLabel": "1",
+                  "lastSeen": "2026-04-28T13:30:01.000Z",
+                  "reason": "1 recorded invocation"
+                }
+              ]
+            }
+          ],
+          "unmatched": [],
+          "unmatchedTotal": 0,
+          "costBasis": "estimated from SKILL.md frontmatter (name + description) at ~4 chars/token, charged once per agent that lists the skill. An upper bound: some hosts list a name without its description, and an agent honouring disable-model-invocation lists neither.",
+          "projects": {
+            "surveyed": [
+              "/tmp/repo",
+              "/tmp/repo2"
+            ],
+            "found": 2,
+            "capped": false,
+            "skills": 0,
+            "tokens": 0
+          }
+        }
+      }
+    ]
+  }
+}

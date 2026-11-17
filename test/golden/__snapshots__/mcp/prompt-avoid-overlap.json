@@ -1,0 +1,18 @@
+{
+  "prompt": "avoid-overlap",
+  "arguments": {
+    "cwd": "/tmp/repo"
+  },
+  "result": {
+    "description": "Avoid overlapping agent work",
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Call coordination_digest with cwd=\"/tmp/repo\".\nInspect high/medium overlapHints, activeWritingFiles, recentWritingFiles, and hotFiles before choosing files to edit.\nIf another active session appears to be working in the same area, read its handoff before proceeding."
+        }
+      }
+    ]
+  }
+}

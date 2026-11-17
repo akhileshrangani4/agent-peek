@@ -1,0 +1,62 @@
+{
+  "tool": "list_agents",
+  "arguments": {},
+  "result": {
+    "isError": false,
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "totals": {
+            "known": 76,
+            "present": 2,
+            "verified": 8
+          },
+          "agents": [
+            {
+              "slug": "claude-code",
+              "displayName": "Claude Code",
+              "presence": "present",
+              "tier": "verified",
+              "adapter": "claude-code",
+              "observes": [
+                "tool_call",
+                "slash_command"
+              ],
+              "attributes": [
+                "tool_call",
+                "slash_command"
+              ],
+              "observable": true,
+              "manageable": true,
+              "roots": [
+                {
+                  "path": "<HOME>/.claude/skills",
+                  "kind": "user",
+                  "mutable": true
+                }
+              ]
+            },
+            {
+              "slug": "codex",
+              "displayName": "Codex",
+              "presence": "present",
+              "tier": "verified",
+              "adapter": "codex",
+              "observes": [
+                "tool_call",
+                "slash_command"
+              ],
+              "attributes": [
+                "slash_command"
+              ],
+              "observable": true,
+              "manageable": false,
+              "roots": []
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

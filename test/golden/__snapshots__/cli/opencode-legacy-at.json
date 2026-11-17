@@ -1,0 +1,101 @@
+{
+  "argv": [
+    "at",
+    "opencode:ses_legacy",
+    "--tools",
+    "--json"
+  ],
+  "exit": 0,
+  "stdout": {
+    "snapshot": {
+      "mode": "raw",
+      "sessionId": "opencode:ses_legacy",
+      "messages": [
+        {
+          "role": "user",
+          "text": "fix auth",
+          "raw": {
+            "info": {
+              "id": "msg_l1",
+              "sessionID": "ses_legacy",
+              "role": "user",
+              "time": {
+                "created": 1770000000000
+              }
+            },
+            "parts": [
+              {
+                "id": "prt_l1",
+                "messageID": "msg_l1",
+                "type": "text",
+                "text": "fix auth"
+              }
+            ]
+          },
+          "timestamp": "2026-02-02T02:40:00.000Z"
+        },
+        {
+          "role": "assistant",
+          "text": "reading auth.ts\nexport function login(){}",
+          "toolCalls": [
+            {
+              "name": "read",
+              "input": {
+                "filePath": "/tmp/repo/auth.ts"
+              },
+              "output": "export function login(){}",
+              "status": "completed"
+            }
+          ],
+          "raw": {
+            "info": {
+              "id": "msg_l2",
+              "sessionID": "ses_legacy",
+              "role": "assistant",
+              "time": {
+                "created": 1770000001000
+              }
+            },
+            "parts": [
+              {
+                "id": "prt_l2",
+                "messageID": "msg_l2",
+                "type": "text",
+                "text": "reading auth.ts"
+              },
+              {
+                "id": "prt_l3",
+                "messageID": "msg_l2",
+                "type": "tool",
+                "tool": "read",
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "filePath": "/tmp/repo/auth.ts"
+                  },
+                  "output": "export function login(){}"
+                }
+              }
+            ]
+          },
+          "timestamp": "2026-02-02T02:40:01.000Z"
+        }
+      ],
+      "totalMessageCount": 2,
+      "window": {
+        "start": 0,
+        "end": 2,
+        "order": "oldest-first"
+      }
+    },
+    "nextCursor": {
+      "$cursor": {
+        "adapter": "opencode",
+        "byteOffset": 2,
+        "msgIndex": 2
+      }
+    },
+    "eof": true
+  },
+  "stderr": null
+}

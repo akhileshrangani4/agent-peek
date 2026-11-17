@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "ui"
+  ],
+  "exit": 5,
+  "stdout": null,
+  "stderr": [
+    "error: ui_requires_tty",
+    "message: `peek ui` needs an interactive terminal.",
+    "hint: Use `peek list` and `peek at <selector>` for pipes, scripts, and agent harnesses.",
+    "next:",
+    "  - peek list",
+    "  - peek at <selector> --mode structured",
+    "exitCode: 5"
+  ]
+}

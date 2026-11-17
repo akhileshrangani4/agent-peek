@@ -1,0 +1,18 @@
+{
+  "prompt": "session-handoff",
+  "arguments": {
+    "selector": "claude-code:s1"
+  },
+  "result": {
+    "description": "Handoff for claude-code:s1",
+    "messages": [
+      {
+        "role": "user",
+        "content": {
+          "type": "text",
+          "text": "Call peek_session with mode=\"handoff\" (or read agent-peek://session/claude-code%3As1/handoff).\nThe result's `material` field is a prompt plus the compressed transcript. You are the model that writes the handoff:\nfollow the instructions in `material` and produce the markdown document it describes.\nDo not infer progress beyond what the transcript shows."
+        }
+      }
+    ]
+  }
+}
