@@ -1,0 +1,19 @@
+head: cb16d35fd04d2570370fcdedcdfe8ea16b15695e
+$ npx vitest run --reporter=verbose test/unit/loader.test.ts test/adapters/opencode-engine.test.ts
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ✓ test/unit/loader.test.ts > AdapterLoader > registers built-in adapters 2ms
+ ✓ test/unit/loader.test.ts > AdapterLoader > throws AdapterNotFoundError for unknown adapter 0ms
+ ✓ test/unit/loader.test.ts > AdapterLoader > lists registered names 1ms
+ ✓ test/unit/loader.test.ts > AdapterLoader > rejects duplicate registration 1ms
+ ✓ test/unit/loader.test.ts > AdapterLoader > resolves an alias to its target without listing it 0ms
+ ✓ test/unit/loader.test.ts > AdapterLoader > rejects an alias that collides or points nowhere 1ms
+ ✓ test/adapters/opencode-engine.test.ts > opencode through the engine > lists both stores under opencode:<id> for --adapter opencode and its alias 44ms
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)
+   Start at  23:00:39
+   Duration  936ms (transform 439ms, setup 0ms, import 814ms, tests 52ms, environment 0ms)
+
+exit: 0

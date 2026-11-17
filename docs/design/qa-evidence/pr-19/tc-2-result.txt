@@ -1,0 +1,17 @@
+D3.2 architecture boundary at 63f50b37c4a5d64a70af947561593cd2e46aec36
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ✓ test/architecture.test.ts > import walker > finds static, type-only, re-export, side-effect and dynamic imports, and skips comments 2ms
+ ✓ test/architecture.test.ts > import walker > resolves the real graph, including the app layer's use of concrete adapters 15ms
+ ✓ test/architecture.test.ts > import walker > would report a forbidden import 0ms
+ ✓ test/architecture.test.ts > layer boundaries (D3.2) > core imports no adapters, services or front ends 1ms
+ ✓ test/architecture.test.ts > layer boundaries (D3.2) > no service imports from the CLI or MCP front ends 1ms
+ ✓ test/architecture.test.ts > layer boundaries (D3.2) > adapters sit below the service layer and the front ends 0ms
+ ✓ test/architecture.test.ts > layer boundaries (D3.2) > no library layer reaches up into a front end 1ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  23:59:13
+   Duration  240ms (transform 27ms, setup 0ms, import 56ms, tests 22ms, environment 0ms)
+

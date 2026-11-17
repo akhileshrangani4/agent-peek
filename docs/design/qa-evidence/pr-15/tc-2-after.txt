@@ -1,0 +1,29 @@
+ ✓ test/adapters/codex.test.ts > codex adapter > scan finds nothing under empty $HOME 3ms
+ ✓ test/adapters/codex.test.ts > codex adapter > reads multi-turn fixture 2ms
+ ✓ test/adapters/codex.test.ts > codex adapter > keeps call_id as ToolCall.id on both the call and its output 1ms
+ ✓ test/adapters/codex.test.ts > codex adapter > omits ToolCall.id when a record has no call_id 2ms
+ ✓ test/adapters/codex.test.ts > codex adapter > returns empty for empty fixture 1ms
+ ✓ test/adapters/codex.test.ts > codex adapter > ignores corrupt trailing line (writer in flight) 1ms
+ ✓ test/adapters/codex.test.ts > codex adapter > cursor diff returns only new messages 2ms
+ ✓ test/adapters/codex.test.ts > codex adapter > rejects cursor from another adapter 2ms
+ ✓ test/adapters/codex.test.ts > codex adapter > passes adapter conformance suite (multi-turn) 1ms
+ ✓ test/adapters/codex.test.ts > codex adapter > scan picks up sessions under fake $HOME 2ms
+ ✓ test/adapters/codex.test.ts > codex adapter > scan honours CODEX_HOME over $HOME/.codex 2ms
+ ✓ test/adapters/goose.test.ts > goose adapter > reads legacy JSONL sessions 6ms
+ ✓ test/adapters/goose.test.ts > goose adapter > reads SQLite sessions with no sqlite3 binary on PATH 3ms
+ ✓ test/adapters/goose.test.ts > goose adapter > binds the session id as a parameter, so quotes cannot change the query 2ms
+ ✓ test/adapters/goose.test.ts > goose adapter > resumes from a cursor within one database session 2ms
+ ✓ test/adapters/goose.test.ts > goose adapter > warns and keeps legacy sessions when the database is not a Goose store 4ms
+ ✓ test/adapters/goose.test.ts > goose adapter > read throws TranscriptUnreadableError when the database cannot be queried 2ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > scan finds nothing under empty $HOME 3ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > reads multi-turn fixture 2ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > returns empty for empty fixture 1ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > ignores corrupt trailing line (writer in flight) 1ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > cursor diff returns only new messages 2ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > rejects cursor from another adapter 2ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > passes adapter conformance suite (multi-turn) 1ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > scan picks up sessions under fake $HOME 2ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > scan finds session metadata after initial non-message records 2ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > scan honours CLAUDE_CONFIG_DIR over $HOME/.claude 2ms
+ ✓ test/adapters/claude-code.test.ts > claude-code adapter > a blank CLAUDE_CONFIG_DIR falls back to $HOME/.claude 2ms
+      Tests  28 passed (28)

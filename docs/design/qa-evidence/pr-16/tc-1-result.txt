@@ -1,0 +1,46 @@
+head: 0da5270fc402ee34949939c5483d9cb8b62968b7, CI=true (no snapshot writes), Node v24.22.3
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > covers every 0.6.0 command 3ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek help 388ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek help-coord 308ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek version 383ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek update-check 379ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek adapters 312ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek doctor 378ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek agents 402ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-all 324ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-active 312ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-raw 321ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-raw-tools 321ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-structured 327ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-summary 327ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-handoff-local 352ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-unknown 361ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek coord 389ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek tag 394ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-by-tag-brief 352ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek untag 360ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek register 372ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-after-register 328ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek forget 355ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek claim 332ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-own-claim-ignored 340ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-include-self 338ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek release 357ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-after-release 330ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek post 342ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek post-invalid 328ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek feed 348ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek expand 315ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek expand-unknown 319ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek usage 366ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek usage-all-tools 348ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills 333ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills-detail 336ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills-archive-plan 335ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek ui-without-tty 313ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek unknown-option 320ms
+ Test Files  3 passed (3)
+      Tests  81 passed (81)
+   Start at  22:42:57
+   Duration  13.74s (transform 134ms, setup 0ms, import 348ms, tests 14.77s, environment 0ms)
+

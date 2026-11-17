@@ -1,0 +1,108 @@
+D3.1 golden suite at 98a7d7aaac47acc1e8dc29ee1ab3e0409803935f (node v24.22.3), base release/0.7.0 f987adf (#20)
+git diff --stat origin/release/0.7.0 -- test/golden (empty = no golden file changed):
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ✓ test/golden/harness.test.ts > Normalizer > rewrites the fixture home, the checkout and the node binary, and leaves fixture data paths alone 4ms
+ ✓ test/golden/harness.test.ts > Normalizer > rewrites the user@host fallback identity 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > replaces run-time instants and keeps fixture instants 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > numbers generated ids by first appearance and keeps stable fixture ids 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > decodes opaque cursors and normalises their contents 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > leaves strings that are not cursors alone, even if base64-looking 0ms
+ ✓ test/golden/harness.test.ts > Normalizer > rewrites the package and node versions, but not a longer number containing them 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > replaces elapsed-time fields only 0ms
+ ✓ test/golden/harness.test.ts > structure > parses JSON output and splits text output into lines 1ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > ignores additions, so a new tool leaves the golden unchanged 1ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > reports a removed baseline entry 0ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > changes the recorded projection when a baseline entry is reshaped 0ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > records in baseline order, so reordering registration is not a change 0ms
+ ✓ test/golden/harness.test.ts > projectOntoRecorded > accepts added keys at any depth, including inside array elements 0ms
+ ✓ test/golden/harness.test.ts > projectOntoRecorded > rejects a changed value 0ms
+ ✓ test/golden/harness.test.ts > projectOntoRecorded > rejects a removed key 0ms
+ ✓ test/golden/harness.test.ts > projectOntoRecorded > rejects a list that grew, shrank or reordered 0ms
+ ✓ test/golden/harness.test.ts > projectOntoRecorded > rejects a value whose type changed 0ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > covers every 0.6.0 command 2ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek help 316ms
+ ✓ test/golden/opencode-legacy.golden.test.ts > OpenCode legacy storage golden output (0.6.0 baseline) > peek opencode-legacy-list 362ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek help-coord 364ms
+ ✓ test/golden/opencode-legacy.golden.test.ts > OpenCode legacy storage golden output (0.6.0 baseline) > peek opencode-legacy-at 334ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tools/list keeps every 0.6.0 tool, unchanged 10ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompts/list keeps every 0.6.0 prompt, unchanged 3ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > covers every 0.6.0 tool and prompt 0ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool list-sessions-all 16ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool list-sessions-active 10ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-raw-default 12ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-raw-window 8ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-structured 10ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-brief 8ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-summary 7ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-handoff 13ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-unknown 6ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool coordination-digest 11ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool tag-session 4ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-by-tag 6ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool post-to-feed 12ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool post-to-feed-invalid 10ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool read-feed 28ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool expand-post 9ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool usage-report 41ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool usage-report-all-tools 18ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool skills-report 30ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool skill-detail 29ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool archive-plan 16ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek version 307ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool list-agents 17ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompt coordinate-agents 3ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompt session-handoff 2ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompt avoid-overlap 1ms
+ ✓ test/golden/opencode-legacy.golden.test.ts > OpenCode legacy storage golden output (0.6.0 baseline) > peek opencode-legacy-at-since 372ms
+ ✓ test/golden/opencode-legacy.golden.test.ts > OpenCode legacy storage golden output (0.6.0 baseline) > peek opencode-legacy-at-shared 322ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek update-check 376ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek adapters 322ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek doctor 357ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek agents 374ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-all 377ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-active 330ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-raw 329ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-raw-tools 366ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-structured 336ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-summary 332ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-handoff-local 340ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-unknown 323ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek coord 339ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek tag 322ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-by-tag-brief 365ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek untag 344ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek register 321ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-after-register 366ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek forget 326ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek claim 329ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-own-claim-ignored 338ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-include-self 357ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek release 322ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-after-release 335ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek post 319ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek post-invalid 333ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek feed 343ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek expand 326ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek expand-unknown 327ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek usage 376ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek usage-all-tools 360ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills 364ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills-detail 361ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills-archive-plan 357ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek ui-without-tty 321ms
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek unknown-option 377ms
+
+ Test Files  4 passed (4)
+      Tests  90 passed (90)
+   Start at  00:16:05
+   Duration  13.66s (transform 174ms, setup 0ms, import 503ms, tests 16.10s, environment 0ms)
+
+
+== supplementary: #20 cursor-order fix kept, #20 path rules routed through services
+ ✓ test/unit/engine.test.ts > Engine > coordinate encodes the same cursor whichever session read finishes first 99ms
+ ✓ test/app/paths-routing.test.ts > #20 path resolution through the app services > CoordinationService.check resolves a cd-prefixed edit to the real file, not a same-named decoy 33ms
+ ✓ test/app/paths-routing.test.ts > #20 path resolution through the app services > the Codex code-mode reader feeds check and the handoff's file roles through the app-layer loader 33ms
+ Test Files  2 passed (2)
+      Tests  24 passed (24)

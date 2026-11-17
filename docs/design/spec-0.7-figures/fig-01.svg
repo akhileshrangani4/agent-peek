@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" role="img" aria-labelledby="shape-title shape-desc">
+  <style>
+  text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .svg-fill-100 { fill: #eef3fb; } .svg-fill-200 { fill: #dbe6f6; } .svg-fill-300 { fill: #b9cdeb; }
+  .svg-fill-500 { fill: #5b84c4; } .svg-fill-700 { fill: #2f5597; } .svg-fill-900 { fill: #13294b; }
+  .svg-stroke-300 { stroke: #b9cdeb; } .svg-stroke-500 { stroke: #5b84c4; }
+  .svg-stroke-700 { stroke: #2f5597; } .svg-stroke-900 { stroke: #13294b; }
+  </style>
+  <title id="shape-title">agent-peek 0.7 system boundary</title>
+  <desc id="shape-desc">A developer machine holds the transcripts, the local stores and the local graph, and pushes only structure and authored text to a self-hosted peek serve. Cloud agents in Claude Code, Cursor, Copilot and Codex reach peek serve over HTTPS with a bearer token, through MCP tools or the REST ingest. Transcript text is fenced inside the developer machine.</desc>
+  <defs>
+    <marker id="shape-arrow" viewBox="0 0 8 6" refX="8" refY="3" markerWidth="8" markerHeight="6" orient="auto"><path class="svg-fill-700" fill="#2f5597" d="M0 0 8 3 0 6Z"></path></marker>
+    <pattern id="shape-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="svg-fill-100" fill="#eef3fb" width="8" height="8"></rect><line class="svg-stroke-300" stroke="#b9cdeb" x1="0" y1="0" x2="0" y2="8" stroke-width="3"></line></pattern>
+  </defs>
+  <rect class="svg-fill-100 svg-stroke-700" fill="#eef3fb" stroke="#2f5597" x="10" y="10" width="270" height="310" rx="2"></rect>
+  <text class="svg-fill-900" fill="#13294b" x="20" y="30">DEVELOPER MACHINE (local, default)</text>
+  <rect fill="url(#shape-hatch)" class="svg-stroke-500" stroke="#5b84c4" x="24" y="44" width="242" height="54" rx="2"></rect>
+  <text class="svg-fill-900" fill="#13294b" x="34" y="66">agent transcripts (8 adapters)</text>
+  <text class="svg-fill-700" fill="#2f5597" x="34" y="84">text never leaves this box</text>
+  <rect class="svg-fill-200 svg-stroke-700" fill="#dbe6f6" stroke="#2f5597" x="24" y="112" width="242" height="70" rx="2"></rect>
+  <text class="svg-fill-900" fill="#13294b" x="34" y="132">app services (src/app)</text>
+  <text class="svg-fill-700" fill="#2f5597" x="34" y="150">CLI · stdio MCP</text>
+  <text class="svg-fill-700" fill="#2f5597" x="34" y="168">same tool registry as HTTP</text>
+  <rect class="svg-fill-100 svg-stroke-700" fill="#eef3fb" stroke="#2f5597" x="24" y="196" width="242" height="70" rx="2"></rect>
+  <text class="svg-fill-900" fill="#13294b" x="34" y="216">local stores</text>
+  <text class="svg-fill-700" fill="#2f5597" x="34" y="234">feed/&lt;id&gt;.db: posts + claims</text>
+  <text class="svg-fill-700" fill="#2f5597" x="34" y="252">usage.db · graph.db</text>
+  <rect class="svg-fill-100 svg-stroke-700" fill="#eef3fb" stroke="#2f5597" x="24" y="278" width="242" height="32" rx="2"></rect>
+  <text class="svg-fill-900" fill="#13294b" x="34" y="299">peek push · outbox (opt-in)</text>
+  <path class="svg-stroke-700" stroke="#2f5597" fill="none" d="M145 98V112M145 182V196M145 266V278"></path>
+
+  <rect class="svg-fill-200 svg-stroke-900" fill="#dbe6f6" stroke="#13294b" x="320" y="60" width="200" height="210" rx="2"></rect>
+  <text class="svg-fill-900" fill="#13294b" x="332" y="82">PEEK SERVE (self-hosted)</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="108">POST /mcp  Streamable HTTP</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="128">/v1/*  REST ingest + read</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="148">hashed scoped tokens</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="168">per-project SQLite:</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="186">  feed · claims · status</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="204">  graph structure</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="230">TTL hard-delete job</text>
+  <text class="svg-fill-700" fill="#2f5597" x="332" y="250">TLS at reverse proxy</text>
+
+  <rect class="svg-fill-100 svg-stroke-700" fill="#eef3fb" stroke="#2f5597" x="560" y="40" width="190" height="250" rx="2"></rect>
+  <text class="svg-fill-900" fill="#13294b" x="572" y="62">CLOUD AGENTS</text>
+  <text class="svg-fill-700" fill="#2f5597" x="572" y="90">Claude Code cloud</text>
+  <text class="svg-fill-700" fill="#2f5597" x="572" y="112">Cursor background</text>
+  <text class="svg-fill-700" fill="#2f5597" x="572" y="134">Copilot coding agent</text>
+  <text class="svg-fill-700" fill="#2f5597" x="572" y="156">Codex cloud</text>
+  <text class="svg-fill-700" fill="#2f5597" x="572" y="178">(Devin: not targeted)</text>
+  <text class="svg-fill-700" fill="#2f5597" x="572" y="214">MCP tools only</text>
+  <text class="svg-fill-700" fill="#2f5597" x="572" y="234">hooks / CLI POST status</text>
+
+  <path class="svg-stroke-700" stroke="#2f5597" fill="none" d="M266 294H300V200H320" marker-end="url(#shape-arrow)"></path>
+  <text class="svg-fill-700" fill="#2f5597" x="286" y="316">structure + authored text</text>
+  <path class="svg-stroke-700" stroke="#2f5597" fill="none" d="M560 120H520" marker-end="url(#shape-arrow)"></path>
+  <path class="svg-stroke-700" stroke="#2f5597" fill="none" d="M560 224H520" marker-end="url(#shape-arrow)"></path>
+  <text class="svg-fill-700" fill="#2f5597" x="526" y="110">HTTPS</text>
+  <text class="svg-fill-700" fill="#2f5597" x="526" y="300">Bearer token</text>
+</svg>

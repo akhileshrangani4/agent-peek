@@ -1,0 +1,48 @@
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ✓ test/docs.test.ts > ADR 0002 (D1.1) > lives beside ADR 0001 with status Accepted 2ms
+ ✓ test/docs.test.ts > ADR 0002 (D1.1) > names the leave and never-leave lists from spec D1 1ms
+ ✓ test/docs.test.ts > ADR 0002 (D1.1) > names the guard that enforces it, at a path that exists 0ms
+ ✓ test/docs.test.ts > README privacy section (D1.1) > links to ADR 0002 from a Privacy section, and the link resolves 1ms
+ ✓ test/docs.test.ts > README privacy section (D1.1) > has no broken relative links in the README or the ADRs 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > accepts a whitelisted post 3ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > accepts the FeedPost that validatePost builds, including its undefined optional keys 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > rejects a field outside the whitelist, naming it by pointer 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > rejects transcript-shaped fields: text outside the body, tool input, raw records 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > rejects an evidence cursor, which can carry terminal scrollback 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > rejects absolute /Users/… paths in path fields and in authored text 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > rejects a machine-local project label and an absolute worktree 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > rejects the anonymous user@hostname fallback author 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > caps the body at the origin's token limit 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: post > never echoes the rejected value in the error message 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: claim > accepts a whitelisted claim 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: claim > rejects a field outside the whitelist, including a client-asserted principal 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: claim > rejects text and input fields 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: claim > rejects absolute paths: the 0.6 claims.json shape does not export as-is 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: claim > requires at least one path and a valid expiry 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: status > accepts a whitelisted status, with or without a session key 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: status > rejects a field outside the whitelist 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: status > rejects the transcript fields a sidecar might be tempted to send 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: status > caps the summary at 2,000 chars and rejects home paths inside it 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: status > rejects an unknown state and absolute paths 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: graph batch > accepts a whitelisted batch 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: graph batch > rejects a field outside the node, edge or props whitelist 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: graph batch > rejects message text and tool input wherever they appear 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: graph batch > rejects absolute /Users/… paths in labels, ids and props 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: graph batch > rejects machine-scoped file nodes and edges that point at them 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: graph batch > rejects inferred edges and kinds outside the 0.7 set 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: graph batch > caps a batch at the server's row limit 27ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: envelope > rejects non-objects, unknown kinds and stray envelope keys 1ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: envelope > rejects class instances and arrays where objects are expected 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: envelope > escapes hostile keys so the pointer cannot be forged 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: envelope > rejects a __proto__ key parsed from JSON 0ms
+ ✓ test/export/assert-exportable.test.ts > assertExportable: envelope > narrows the payload type and is exported from the package root 0ms
+ ✓ test/export/assert-exportable.test.ts > path helpers > isRepoRelativePath accepts POSIX repo paths only 0ms
+ ✓ test/export/assert-exportable.test.ts > path helpers > containsHomePath finds home directories anywhere but not inside repo paths 1ms
+
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Start at  22:35:57
+   Duration  809ms (transform 395ms, setup 0ms, import 681ms, tests 55ms, environment 0ms)
+

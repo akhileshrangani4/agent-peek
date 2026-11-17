@@ -1,0 +1,21 @@
+D3.8 coverage at 63f50b37c4a5d64a70af947561593cd2e46aec36 (vitest run --coverage, v8, node v24.22.3)
+ Test Files  62 passed (62)
+      Tests  893 passed (893)
+file                           lines   stmts  branch   funcs
+src/app/adapters.ts              100     100   97.29     100
+src/app/claims.ts                100     100     100     100
+src/app/coordination.ts          100     100     100     100
+src/app/doctor.ts              96.55   96.77    87.5     100
+src/app/engine.ts                100     100     100     100
+src/app/feed.ts                  100     100     100     100
+src/app/identity.ts              100     100   83.33     100
+src/app/index.ts                 100     100   85.71     100
+src/app/paths.ts                 100     100     100     100
+src/app/project.ts               100     100     100     100
+src/app/sessions.ts              100   97.91   97.05     100
+src/app/time.ts                  100     100     100     100
+src/app/usage.ts               93.75      95   77.77      90
+src/mcp/tools.ts               98.48    98.7    75.9     100
+TOTAL                          93.69   90.85   81.55    94.5
+
+thresholds (vitest.config.ts): lines 85, statements 84, functions 80, branches 70; D3.8: each new src/app file >= 85% lines

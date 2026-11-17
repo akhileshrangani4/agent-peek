@@ -1,0 +1,36 @@
+# BEFORE: release/0.7.0 @ 5fc859df88a7f5412f450cafec3ce3416036b310 with this PR's test added — Node v24.22.3
+$ npx vitest run --reporter=verbose test/integration/cli.test.ts -t "cd-prefixed edit"
+
+ RUN  v4.1.11 /tmp/e1-base
+
+ × test/integration/cli.test.ts > CLI integration > check sees a cd-prefixed edit on the real file and not on a same-named decoy 381ms
+   → expected +0 to be 1 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/integration/cli.test.ts > CLI integration > check sees a cd-prefixed edit on the real file and not on a same-named decoy
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ test/integration/cli.test.ts:643:23
+    641|
+    642|     const real = await runCli(["check", "apps/server/src/apps/service.…
+    643|     expect(real.code).toBe(1);
+       |                       ^
+    644|     const realJson = JSON.parse(real.stdout);
+    645|     expect(realJson.files).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 34 skipped (35)
+   Start at  00:06:48
+   Duration  744ms (transform 109ms, setup 0ms, import 141ms, tests 388ms, environment 0ms)
+
+

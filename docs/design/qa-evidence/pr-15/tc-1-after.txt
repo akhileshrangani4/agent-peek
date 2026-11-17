@@ -1,0 +1,8 @@
+ ✓ test/usage-scan-sources.test.ts > usage scan: several sessions in one database (Goose) > indexes both Goose sessions in one sessions.db 9ms
+ ✓ test/usage-scan-sources.test.ts > usage scan: several sessions in one database (Goose) > keeps invocations from every session sharing a database file 2ms
+ ✓ test/usage-scan-sources.test.ts > usage scan: several sessions in one database (Goose) > skips every session of an unchanged database on the next scan 2ms
+ ✓ test/usage-scan-sources.test.ts > usage scan: several sessions in one database (Goose) > does not tombstone a 0.6 watermark keyed by the bare database path 2ms
+ ✓ test/usage-scan-sources.test.ts > usage scan: several sessions in one database (Goose) > keys database sources by session and file sources by path alone 0ms
+ ✓ test/usage-scan-sources.test.ts > usage scan: directory-backed sessions (Copilot CLI) > rescans a session that gains a message inside its directory 8ms
+ ✓ test/usage-scan-sources.test.ts > usage scan: directory-backed sessions (Copilot CLI) > still skips a directory session whose files are unchanged 4ms
+      Tests  7 passed (7)

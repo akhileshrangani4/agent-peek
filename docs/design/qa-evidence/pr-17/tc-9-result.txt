@@ -1,0 +1,69 @@
+head: cb16d35fd04d2570370fcdedcdfe8ea16b15695e
+$ npx vitest run --reporter=verbose test/golden/cli.golden.test.ts -t peek doctor$
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > covers every 0.6.0 command
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek help
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek help-coord
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek version
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek update-check
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek adapters
+ ✓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek doctor 345ms
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek agents
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-all
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-active
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-raw
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-raw-tools
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-structured
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-summary
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-handoff-local
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-unknown
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek coord
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek tag
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek at-by-tag-brief
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek untag
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek register
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek list-after-register
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek forget
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek claim
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-own-claim-ignored
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-include-self
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek release
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek check-after-release
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek post
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek post-invalid
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek feed
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek expand
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek expand-unknown
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek usage
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek usage-all-tools
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills-detail
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek skills-archive-plan
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek ui-without-tty
+ ↓ test/golden/cli.golden.test.ts > CLI golden output (0.6.0 baseline) > peek unknown-option
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 39 skipped (40)
+   Start at  23:00:41
+   Duration  600ms (transform 62ms, setup 0ms, import 85ms, tests 378ms, environment 0ms)
+
+exit: 0
+
+$ grep -rn "sqlite3\|execFile\|child_process" src/adapters/opencode src/adapters/opencode-legacy-v1
+(no matches)
+
+$ opencode rows in doctor golden
+40-      {
+41:        "adapter": "opencode",
+42-        "source": "directory",
+43-        "path": "<HOME>/.local/share/opencode/storage",
+44-        "status": "not found"
+45-      },
+46-      {
+47:        "adapter": "opencode",
+48-        "source": "database",
+49-        "path": "<HOME>/.local/share/opencode/opencode.db",
+50-        "status": "not found"
+51-      },

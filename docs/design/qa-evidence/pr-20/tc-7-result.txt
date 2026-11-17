@@ -1,0 +1,12 @@
+# agent-peek PR #20 @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 — Node v24.22.3
+$ npx vitest run test/unit/handoff.test.ts -t written then rm'd
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/unit/handoff.test.ts > handoff file roles and end state (#1, D9.2) > marks a file written then rm'd as deleted, not live 20ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 42 skipped (43)
+   Start at  00:06:09
+   Duration  462ms (transform 213ms, setup 0ms, import 260ms, tests 22ms, environment 0ms)
+

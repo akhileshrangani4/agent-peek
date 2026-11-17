@@ -1,0 +1,16 @@
+head: cb16d35fd04d2570370fcdedcdfe8ea16b15695e
+$ git diff --numstat origin/release/0.7.0 -- test/golden/__snapshots__
+6	0	test/golden/__snapshots__/cli/doctor.json
+54	0	test/golden/__snapshots__/cli/opencode-legacy-at-shared.json
+38	0	test/golden/__snapshots__/cli/opencode-legacy-at-since.json
+101	0	test/golden/__snapshots__/cli/opencode-legacy-at.json
+35	0	test/golden/__snapshots__/cli/opencode-legacy-list.json
+
+$ git show --stat cbdd693
+cbdd693 test(golden): add the OpenCode V2 database row to peek doctor
+
+ test/golden/__snapshots__/cli/doctor.json | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+$ deleted lines in snapshots:
+0

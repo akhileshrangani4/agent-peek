@@ -1,0 +1,879 @@
+<!DOCTYPE html><html lang="en"><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>New Blueprint</title>
+  </head>
+  <body>
+    <main data-bp-node-id="doc-body"><style>
+  .ac td:first-child { white-space: nowrap; font-family: var(--bp-mono); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--bp-space-4, 1rem); }
+  .two-col > article { border-top: 1px solid var(--bp-edge); padding-top: .5rem; }
+  @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+<header>
+  <bp-eyebrow>Spec · agent-peek 0.7 · akhileshrangani4/agent-peek @ main b6197fe</bp-eyebrow>
+  <h1>agent-peek 0.7: off localhost, across cloud agents, with a conversation knowledge graph</h1>
+  <bp-subheader>Make agent-peek's identities portable, clean up the core, add a local knowledge graph, and ship an opt-in self-hostable <code>peek serve</code> that Claude Code cloud, Cursor, Copilot and Codex cloud agents can reach — while local stdio use stays exactly as it is today.</bp-subheader>
+</header>
+<bp-toc></bp-toc>
+<section id="decision" data-bp-node-id="decision"><h2 data-sidebar="Decision">Decision to approve</h2>
+<bp-subheader>agent-peek only works on one machine: it reads transcripts from local disk, keeps every store under <code>~/.agent-peek</code>, and serves MCP over stdio only. This spec ships 0.7.0 on a release branch. It fixes identity so data from several machines can merge, cleans up the core, adds a local knowledge graph, and adds an opt-in, self-hosted <code>peek serve</code> that four cloud agent products can reach.</bp-subheader>
+
+<p><strong>Approve or challenge these five choices.</strong> You confirmed all five on 2026-11-13. Each one decides the shape of a deliverable:</p>
+<ol>
+  <li><strong>Scope:</strong> everything through the server and ingestion, on one release branch. That covers D1–D7 below. LLM fact extraction, embeddings, OAuth, vendor pull connectors and multi-tenant hosting are out of scope.</li>
+  <li><strong>Hosting:</strong> a self-hostable <code>peek serve</code> (a single Node process or Docker image, backed by SQLite). Nobody operates a shared service.</li>
+  <li><strong>Retention:</strong> machines and the server exchange only structure, whitelisted fields, and short text that people or agents authored or derived. Transcript text never leaves the machine. A local text index is opt-in.</li>
+  <li><strong>Remote-less repos:</strong> a user can assign a project key in a committed file or an env var. Without one, the repo stays machine-local.</li>
+  <li><strong>Compatibility:</strong> the exported library storage API may break in 0.7.0, with a migration note. CLI commands, MCP tool names and on-disk data stay compatible.</li>
+</ol>
+<p><strong>Launch agents:</strong> Claude Code (cloud/web), Cursor background agents, the GitHub Copilot coding agent and Codex cloud. Devin is not a launch target, but nothing in the design excludes it.</p>
+
+<bp-callout type="ref" label="Load-bearing assumption">
+  <p>This build assumes two things. First, the four cloud products can be pointed at a <code>peek serve</code> endpoint. Second, once connected, agents actually read and post to the shared feed, so duplicate exploration and conflicting edits drop.</p>
+  <ul>
+    <li><strong>What confirms or breaks it.</strong> D6 ships a per-vendor setup doc and an automated conformance test for each product's documented MCP config shape. That proves the server speaks each product's protocol, not that the vendor's cloud runs it. A live two-product pilot follows the release: Claude Code cloud plus Cursor, counting unprompted <code>read_feed</code>/<code>post_to_feed</code> calls. If agents rarely call the tools, the bottleneck is instructions and hooks, not transport.</li>
+    <li><strong>Codex cloud.</strong> Whether Codex cloud tasks can use remote MCP was <em>not verified</em> (research B §7). Its setup doc must cover a CLI-over-HTTPS fallback.</li>
+    <li><strong>Explanations the brief skipped.</strong> Git branches and PR comments may already coordinate cloud agents working on isolated clones. Vendors already expose some visibility (Cursor Cloud MCP, Devin's message API). The real gap may be one human seeing every agent, not agents talking to each other. For the graph, which facts are stored and how long they are kept matters more than which database holds them.</li>
+  </ul>
+</bp-callout>
+
+<bp-callout type="ref" label="Out of scope (non-goals)">
+  <p>The following are out of scope:</p>
+  <ul>
+    <li>LLM-inferred graph edges (<code>DECIDED</code> by model, <code>MENTIONS_ENTITY</code>) and embedding similarity</li>
+    <li>OAuth 2.1 and Protected Resource Metadata</li>
+    <li>Devin and Cursor pull connectors</li>
+    <li>A multi-tenant hosted service, Postgres or pgvector</li>
+    <li>A dedicated graph database</li>
+    <li>Sending transcript text to the server</li>
+    <li>A server-side handoff runner</li>
+    <li>A web dashboard</li>
+  </ul>
+</bp-callout>
+</section>
+<section id="evidence" data-bp-node-id="evidence"><h2 data-sidebar="Current state">What I read and what it changed</h2>
+<bp-subheader>The evidence comes from three read-only research passes against <code>main@b6197fe</code>, consolidated in <code>art_00mWlGqk</code>. File and line references below are restated from Research A (<code>art_aHRDJ2Da</code>), B (<code>art_0TCWI3i6</code>) and C (<code>art_4KQWMyMN</code>).</bp-subheader>
+
+<bp-table density="compact" wide="">
+<table>
+  <thead><tr><th scope="col">I read</th><th scope="col">What I learned</th><th scope="col">What it changed in this spec</th></tr></thead>
+  <tbody>
+    <tr><th scope="row"><code>src/core/types.ts:7-30</code>, <code>registry.ts:39-147</code></th><td>Sessions are keyed by adapter id plus a local <code>transcriptPath</code>. The registry is JSON, and <code>Engine.list()</code> rewrites it under a lock on every read.</td><td>D2 adds a machine-namespaced global session id. D3 makes reads stop writing.</td></tr>
+    <tr><th scope="row"><code>core/claims.ts:22-136</code>, <code>cli/index.ts:1269-1283</code></th><td>Claims live in one global <code>claims.json</code> with absolute paths. Path normalisation lives in the CLI. <code>claims.ts</code> has 4.41% line coverage.</td><td>D2 moves claims into per-project SQLite with repo-relative paths, plus a one-time import. D3 moves the path rules into a service.</td></tr>
+    <tr><th scope="row"><code>feed/store.ts:19-155</code>, <code>feed/identity.ts:13-53</code></th><td>The feed DB has no schema version and only the <code>posts_created</code> and <code>post_paths_path</code> indexes. The feed cursor tracks the writer's <code>createdAt</code>. Project identity hashes the normalised origin and otherwise falls back to machine-local paths. Authors fall back to <code>user@hostname</code>.</td><td>D2 adds versioned migrations, a server-assigned <code>seq</code> cursor, the project-key precedence, and a split between principal and label.</td></tr>
+    <tr><th scope="row"><code>usage/schema.ts:85-147</code>, <code>usage/store.ts:115-150</code>, ADR 0001</th><td>The usage index already has watermarks, deterministic primary keys, per-source transactions and additive-only migrations. ADR 0001 forbids storing raw tool input.</td><td>D4 reuses this pattern and the watermarks for graph ingestion. D1 writes ADR 0002 to extend ADR 0001's retention rule to the graph and the network.</td></tr>
+    <tr><th scope="row">Adapters: <code>claude-code/index.ts:22-96</code>, <code>codex/parse.ts:52-68</code>, <code>goose/index.ts:76-77</code>, <code>adapters/sqlite.ts:12-16</code></th><td>JSONL slicing is duplicated. Codex drops <code>call_id</code>. Adapters ignore <code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code>. Goose shells out to the <code>sqlite3</code> CLI with SQL built by string interpolation.</td><td>D3 delivers a shared JSONL reader, keeps Codex <code>call_id</code>, applies env roots everywhere, and reads Goose through <code>node:sqlite</code>.</td></tr>
+    <tr><th scope="row"><code>core/coordination.ts</code>, <code>feed/derive.ts:27-92</code></th><td>Coordination re-reads a changed session from byte 0 after a delta read. Derived status posts call <code>list()</code> and then <code>peek()</code> once per session (an N+1 pattern, inferred).</td><td>D3 sets performance acceptance criteria with read counts that a test asserts.</td></tr>
+    <tr><th scope="row"><code>src/index.ts:4-130</code>, <code>package.json:8-33</code></th><td>Storage classes and path helpers are public exports. <code>./adapter</code> is a plugin interface for third-party adapters.</td><td>The compatibility section lists what stays stable and what breaks, with the migration note.</td></tr>
+    <tr><th scope="row"><code>mcp/index.ts:27-222</code>, <code>:548-549</code></th><td>The MCP server runs on stdio only and exposes 12 tools, 3 prompts and resources. Tool defaults use the server's <code>process.cwd()</code>. <code>peek_session</code> defaults to <code>mode: raw</code>.</td><td>D5 shares tool definitions between stdio and HTTP. The remote tool set requires a project and drops the raw, tail and handoff modes.</td></tr>
+    <tr><th scope="row">Vendor docs, retrieved 2026-11-13 (B §2.1)</th><td>Streamable HTTP is the transport all of them share, and every product accepts a bearer header. Copilot cannot use OAuth servers and ignores resources and prompts. Cursor proxies MCP through its backend, so the server needs public TLS. Codex cloud remote MCP is unverified.</td><td>D5 is HTTP-only, uses bearer tokens, and exposes everything as tools. D6 writes vendor docs that name the egress allowlist step.</td></tr>
+    <tr><th scope="row">Graph store survey (C §3); <code>node:sqlite</code> probe on Node 24.22.3</th><td>FTS5, recursive CTEs and JSON functions work. Every target query needs at most 2 hops, except the subagent tree. Kùzu was archived in Oct 2025. FalkorDB is SSPL. Neo4j Aura costs about $66/month.</td><td>D4 builds typed <code>node</code>/<code>edge</code> tables in SQLite. No new database dependency.</td></tr>
+    <tr><th scope="row">Test suite run (A §7)</th><td>Typecheck and lint are clean. 573 tests pass in 43 files, with line coverage at 90.56%. CI thresholds are 85/84/80/70. The CLI and MCP entry points are excluded from coverage.</td><td>Every deliverable adds Vitest tests and must keep the CI thresholds. The service layer moves logic into covered code.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+<bp-note>Three findings were inferred from code, not reproduced: the Goose watermark collision and the Copilot directory-mtime skip, a peek cursor replaying against a different session, and the N+1 feed derivation. D3's tests must reproduce each before fixing it. If one does not reproduce, the PR records that and closes the item.</bp-note>
+</section>
+<section id="shape" data-bp-node-id="shape"><h2 data-sidebar="System shape">What we should build</h2>
+<bp-subheader>One application core and three front ends: the CLI, stdio MCP and HTTP. The core runs over the same per-project SQLite stores on a laptop and inside <code>peek serve</code>. Transcript text never crosses the machine boundary. Only structure and short authored or derived text does.</bp-subheader>
+
+<figure>
+<svg viewBox="0 0 760 330" role="img" aria-labelledby="shape-title shape-desc" style="font: 12px var(--bp-mono)">
+  <title id="shape-title">agent-peek 0.7 system boundary</title>
+  <desc id="shape-desc">A developer machine holds the transcripts, the local stores and the local graph, and pushes only structure and authored text to a self-hosted peek serve. Cloud agents in Claude Code, Cursor, Copilot and Codex reach peek serve over HTTPS with a bearer token, through MCP tools or the REST ingest. Transcript text is fenced inside the developer machine.</desc>
+  <defs>
+    <marker id="shape-arrow" viewBox="0 0 8 6" refX="8" refY="3" markerWidth="8" markerHeight="6" orient="auto"><path class="svg-fill-700" d="M0 0 8 3 0 6Z"></path></marker>
+    <pattern id="shape-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="svg-fill-100" width="8" height="8"></rect><line class="svg-stroke-300" x1="0" y1="0" x2="0" y2="8" stroke-width="3"></line></pattern>
+  </defs>
+  <rect class="svg-fill-100 svg-stroke-700" x="10" y="10" width="270" height="310" rx="2"></rect>
+  <text class="svg-fill-900" x="20" y="30">DEVELOPER MACHINE (local, default)</text>
+  <rect fill="url(#shape-hatch)" class="svg-stroke-500" x="24" y="44" width="242" height="54" rx="2"></rect>
+  <text class="svg-fill-900" x="34" y="66">agent transcripts (8 adapters)</text>
+  <text class="svg-fill-700" x="34" y="84">text never leaves this box</text>
+  <rect class="svg-fill-200 svg-stroke-700" x="24" y="112" width="242" height="70" rx="2"></rect>
+  <text class="svg-fill-900" x="34" y="132">app services (src/app)</text>
+  <text class="svg-fill-700" x="34" y="150">CLI · stdio MCP</text>
+  <text class="svg-fill-700" x="34" y="168">same tool registry as HTTP</text>
+  <rect class="svg-fill-100 svg-stroke-700" x="24" y="196" width="242" height="70" rx="2"></rect>
+  <text class="svg-fill-900" x="34" y="216">local stores</text>
+  <text class="svg-fill-700" x="34" y="234">feed/&lt;id&gt;.db: posts + claims</text>
+  <text class="svg-fill-700" x="34" y="252">usage.db · graph.db</text>
+  <rect class="svg-fill-100 svg-stroke-700" x="24" y="278" width="242" height="32" rx="2"></rect>
+  <text class="svg-fill-900" x="34" y="299">peek push · outbox (opt-in)</text>
+  <path class="svg-stroke-700" fill="none" d="M145 98V112M145 182V196M145 266V278"></path>
+
+  <rect class="svg-fill-200 svg-stroke-900" x="320" y="60" width="200" height="210" rx="2"></rect>
+  <text class="svg-fill-900" x="332" y="82">PEEK SERVE (self-hosted)</text>
+  <text class="svg-fill-700" x="332" y="108">POST /mcp  Streamable HTTP</text>
+  <text class="svg-fill-700" x="332" y="128">/v1/*  REST ingest + read</text>
+  <text class="svg-fill-700" x="332" y="148">hashed scoped tokens</text>
+  <text class="svg-fill-700" x="332" y="168">per-project SQLite:</text>
+  <text class="svg-fill-700" x="332" y="186">  feed · claims · status</text>
+  <text class="svg-fill-700" x="332" y="204">  graph structure</text>
+  <text class="svg-fill-700" x="332" y="230">TTL hard-delete job</text>
+  <text class="svg-fill-700" x="332" y="250">TLS at reverse proxy</text>
+
+  <rect class="svg-fill-100 svg-stroke-700" x="560" y="40" width="190" height="250" rx="2"></rect>
+  <text class="svg-fill-900" x="572" y="62">CLOUD AGENTS</text>
+  <text class="svg-fill-700" x="572" y="90">Claude Code cloud</text>
+  <text class="svg-fill-700" x="572" y="112">Cursor background</text>
+  <text class="svg-fill-700" x="572" y="134">Copilot coding agent</text>
+  <text class="svg-fill-700" x="572" y="156">Codex cloud</text>
+  <text class="svg-fill-700" x="572" y="178">(Devin: not targeted)</text>
+  <text class="svg-fill-700" x="572" y="214">MCP tools only</text>
+  <text class="svg-fill-700" x="572" y="234">hooks / CLI POST status</text>
+
+  <path class="svg-stroke-700" fill="none" d="M266 294H300V200H320" marker-end="url(#shape-arrow)"></path>
+  <text class="svg-fill-700" x="286" y="316">structure + authored text</text>
+  <path class="svg-stroke-700" fill="none" d="M560 120H520" marker-end="url(#shape-arrow)"></path>
+  <path class="svg-stroke-700" fill="none" d="M560 224H520" marker-end="url(#shape-arrow)"></path>
+  <text class="svg-fill-700" x="526" y="110">HTTPS</text>
+  <text class="svg-fill-700" x="526" y="300">Bearer token</text>
+</svg>
+<figcaption>The hatched region is the retention fence from ADR 0002. Everything to the right of the developer machine is opt-in, and local stdio use works with no server at all.</figcaption>
+</figure>
+
+<h3>Responsibilities</h3>
+<dl>
+  <dt><code>src/app/</code>: application services (new)</dt>
+  <dd>These are the only callers of the stores. They hold rules that live in the CLI today: path normalisation, identity resolution, author resolution, claim conflict checks and feed relevance. Each service takes an explicit <code>ProjectRef</code> instead of reading <code>process.cwd()</code>. The CLI, stdio MCP and the HTTP server stay thin adapters over the services.</dd>
+  <dt><code>src/mcp/tools.ts</code>: one tool registry (new)</dt>
+  <dd>This file defines each tool once, with its zod schema and handler. Stdio registers the full set. HTTP registers the remote set: the same names, with <code>project</code> required and raw, tail and handoff modes removed.</dd>
+  <dt>Stores</dt>
+  <dd>The existing <code>feed/&lt;projectId&gt;.db</code> becomes the per-project store. It gains versioned migrations, a <code>seq</code> column, a claims table and a status table. <code>usage.db</code> keeps its schema. <code>graph.db</code> is new (D4). The server uses the same store code under its own data dir.</dd>
+  <dt><code>src/serve/</code>: the HTTP host (new)</dt>
+  <dd>The host serves the MCP Streamable HTTP endpoint, the REST routes, token auth, rate limits and the retention job. It runs only behind the <code>peek serve</code> command, so no code path opens a socket unless that command is invoked.</dd>
+  <dt><code>src/remote/</code>: the remote client (new)</dt>
+  <dd>This module has a typed HTTP client and a durable outbox. It also has the <code>peek push</code> loop, the <code>peek hook</code> entry point and the remote configuration. When a project has a remote configured, services route feed, claims and status calls through it.</dd>
+</dl>
+</section>
+<section id="d1-retention" data-bp-node-id="d1-retention"><h2 data-sidebar="D1 Retention ADR">D1 · Retention and trust boundary (ADR 0002)</h2>
+<bp-subheader>D1 records the retention decision you made as an ADR. It is the first file on the release branch, and the code in D4 to D6 enforces it.</bp-subheader>
+<p><code>docs/adr/0002-graph-and-network-retention.md</code> records the following:</p>
+<ul>
+  <li><strong>What may leave a machine.</strong>
+    <ul>
+      <li>Node and edge structure: ids, kinds, timestamps and provenance pointers <code>(session, msgIndex)</code>.</li>
+      <li>Repo-relative paths, commit SHAs, skill keys, branch names, adapter names and model ids.</li>
+      <li>Feed posts and their authored bodies, which are already token-capped.</li>
+      <li>Derived status posts, and pushed status text up to 2,000 chars.</li>
+    </ul>
+  </li>
+  <li><strong>What never leaves a machine.</strong> Message text, tool input, tool output, prompt text, absolute paths and hostnames.</li>
+  <li><strong>Local text index.</strong> Opt-in only, through <code>peek graph index --text</code> or the config key <code>graph.text: true</code>. It stays in <code>graph.db</code>, is never pushed, and is dropped by <code>peek graph index --text=off</code>.</li>
+  <li><strong>TTLs.</strong> Today's per-type feed TTLs apply on the server, enforced by hard delete. Graph edges whose source is gone are invalidated (<code>valid_to</code> set), not deleted. Server graph data for a project is purged by <code>peek serve project delete</code>.</li>
+  <li><strong>Trust.</strong> Content written by another agent reaches tools as quoted data, with the authenticated principal kept separate from the asserted label. The <code>expand_post</code> "before trusting or acting on it" framing stays.</li>
+</ul>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D1.1</td><td>ADR 0002 exists with status <code>Accepted</code>. It names the leave and never-leave lists above, and the README links to it from a privacy section (added if none exists).</td><td>Review the diff. A doc-link check in CI (a <code>test/docs.test.ts</code> assertion that the link resolves).</td></tr>
+    <tr><td>D1.2</td><td>A shared <code>assertExportable(payload)</code> guard rejects any payload with a field outside the whitelist schema. Every push, ingest and graph-export path calls it.</td><td>A unit test for each payload kind. A fixture with a <code>text</code>, <code>input</code> or absolute <code>/Users/…</code> field must throw <code>NonExportableFieldError</code>.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+</section>
+<section id="d2-identity" data-bp-node-id="d2-identity"><h2 data-sidebar="D2 Portable identity">D2 · Portable identity and per-project coordination store</h2>
+<bp-subheader>D2 fixes the identity keys before anything crosses a machine, so data observed on two machines merges into one record. Local behaviour stays the same: the same commands, the same output, and existing cursors keep working.</bp-subheader>
+
+<h3>Project identity precedence</h3>
+<p>The new <code>resolveProject(dir, opts)</code> function in <code>src/feed/identity.ts</code> returns a <code>ProjectRef { id, label, source }</code>. It checks these sources in order and uses the first that applies:</p>
+<ol>
+  <li>The explicit <code>--project &lt;key&gt;</code> flag, or the MCP <code>project</code> argument.</li>
+  <li>The <code>AGENT_PEEK_PROJECT</code> env var.</li>
+  <li>A committed <code>.agent-peek.json</code> at the git toplevel, shaped as <code>{ "project": "&lt;key&gt;" }</code>.</li>
+  <li>The normalised origin remote. This is today's path and today's ids, unchanged.</li>
+  <li>The machine-local fallbacks: the git common dir, then the real path. They are unchanged, but marked <code>source: "local"</code>.</li>
+</ol>
+<p>Keys must match <code>^[a-z0-9][a-z0-9._-]{1,63}$</code>. A keyed project id is <code>hashKey("key:" + key)</code>, so a key can never collide with a remote label. Remote mode (D6) refuses a project whose <code>source</code> is <code>local</code>. It exits with code 6 and a message that names <code>.agent-peek.json</code>.</p>
+
+<h3>Machine and session identity</h3>
+<ul>
+  <li><code>~/.agent-peek/machine.json</code> holds <code>{ "id": "&lt;uuidv4&gt;" }</code>. It is created on first use and is the <code>m:&lt;id&gt;</code> namespace.</li>
+  <li>A <code>globalSessionId(entry)</code> helper returns <code>s:&lt;machine&gt;:&lt;adapter&gt;:&lt;nativeId&gt;</code>. Local selectors and <code>SessionEntry.id</code> keep today's <code>&lt;adapter&gt;:&lt;nativeId&gt;</code> form. The global id is used only in the graph, on the server and in pushed payloads.</li>
+</ul>
+
+<h3>Per-project store: migrations, <code>seq</code>, claims, authors, drift</h3>
+<p>The store keeps its path at <code>~/.agent-peek/feed/&lt;projectId&gt;.db</code> and is opened through one <code>openProjectStore()</code>. Every change below is an additive migration recorded in <code>PRAGMA user_version</code>:</p>
+<pre><code>-- v1: existing tables, now recorded
+-- v2
+ALTER TABLE posts ADD COLUMN seq INTEGER;          -- backfilled from created_at order; assigned by the store on insert
+CREATE UNIQUE INDEX posts_seq ON posts(seq);
+CREATE INDEX posts_live ON posts(validity, expires_at, type, created_at);
+ALTER TABLE posts ADD COLUMN author_principal TEXT; -- authenticated identity; null for local stdio
+-- v3
+CREATE TABLE claims (
+  id TEXT PRIMARY KEY, owner_session TEXT NOT NULL, owner_label TEXT, owner_principal TEXT,
+  created_at TEXT NOT NULL, expires_at TEXT NOT NULL, note TEXT);
+CREATE TABLE claim_paths (claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  path TEXT NOT NULL);                              -- repo-relative, POSIX separators
+CREATE INDEX claim_paths_path ON claim_paths(path);
+-- v4
+ALTER TABLE post_paths ADD COLUMN blob TEXT;        -- git blob sha of the path at post time, null if untracked</code></pre>
+<ul>
+  <li><strong>Feed cursor.</strong> New cursors encode <code>{v:2, seq}</code>. Legacy <code>createdAt</code> cursors still decode, and they map to the first <code>seq</code> whose <code>created_at</code> is greater than the cursor time. A malformed cursor throws <code>InvalidCursorError</code>, as it does today.</li>
+  <li><strong>Peek cursor.</strong> The peek cursor gains <code>sessionId</code>. Decoding against a different session throws <code>CursorMismatchError</code>. A cursor without <code>sessionId</code> is accepted for the adapter it names, which keeps today's behaviour.</li>
+  <li><strong>Claims migration.</strong> On first open after the upgrade, each non-expired entry in <code>~/.agent-peek/claims.json</code> is imported into the store of its project. Files under a git toplevel become repo-relative. Files outside any repo go to a machine-scoped store, <code>feed/local-&lt;machine&gt;.db</code>. The import renames the JSON file to <code>claims.json.migrated</code>. It is idempotent: an existing claim id is skipped, and a crash mid-import is safe to re-run.</li>
+  <li><strong>Authors.</strong> <code>resolveAuthor</code> returns <code>{ label, session?, principal? }</code>. The label is today's resolution, unchanged for display. The principal is set only by authenticated remote paths (D5). The <code>user@hostname</code> fallback stays local-only and is never sent.</li>
+  <li><strong>Drift.</strong> A reader compares the stored <code>blob</code> with <code>git hash-object</code> on its own checkout. If <code>blob</code> is null or the path is not tracked, the reader falls back to today's mtime rule.</li>
+</ul>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D2.1</td><td>Precedence order holds. The same repo cloned at two paths with the same origin resolves to the same id. A remote-less repo with <code>.agent-peek.json</code> resolves to the same id from two temp dirs. Without a key it resolves <code>source:"local"</code>.</td><td><code>test/feed/identity.test.ts</code> uses temp git repos. It includes a test that ids for remote-backed repos are byte-identical to 0.6.0 ids.</td></tr>
+    <tr><td>D2.2</td><td>Opening a 0.6.0 feed DB migrates it to v4 without data loss. The <code>seq</code> order matches the <code>created_at</code> order. Running the migration twice is a no-op.</td><td>A migration test against a fixture DB generated by the 0.6.0 store code, checked into <code>test/fixtures/feed-v0.6.db</code>.</td></tr>
+    <tr><td>D2.3</td><td>A 0.6.0 feed cursor still returns the correct incremental posts. A <code>v:2</code> cursor returns exactly the posts with higher <code>seq</code>, even when <code>created_at</code> values are out of order.</td><td>Unit tests in <code>test/feed/cursor.test.ts</code>, including a skewed-clock fixture.</td></tr>
+    <tr><td>D2.4</td><td>A peek cursor from session A used on session B of the same adapter throws <code>CursorMismatchError</code>, after the test first reproduces today's silent replay.</td><td><code>test/core/cursor.test.ts</code></td></tr>
+    <tr><td>D2.5</td><td>The <code>claims.json</code> import is idempotent and repo-relative. It survives an interrupted import. <code>peek claim</code>, <code>check</code> and <code>coord</code> see imported claims. <code>check</code> still exits 1 on a conflict.</td><td>A new <code>test/coordination/claims-store.test.ts</code>, plus the existing CLI integration tests unchanged. Line coverage of the claims code is at least 85% (it is 4.41% today).</td></tr>
+    <tr><td>D2.6</td><td>A post that cites <code>src/a.ts</code> is not drifted for a reader whose checkout has the same blob, even when the reader's mtime is newer. It is drifted when the blob differs.</td><td><code>test/feed/drift.test.ts</code> using two temp clones.</td></tr>
+    <tr><td>D2.7</td><td>The machine id is stable across runs. <code>globalSessionId</code> is deterministic. Local selectors such as <code>peek at claude-code:&lt;uuid&gt;</code> are unchanged.</td><td>Unit tests, plus the existing CLI integration tests passing unchanged.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+</section>
+<section id="d3-core" data-bp-node-id="d3-core"><h2 data-sidebar="D3 Core overhaul">D3 · Core overhaul: service layer, adapters, performance</h2>
+<bp-subheader>D3 gives the CLI, stdio MCP and HTTP one set of rules to call, and fixes the adapter and performance defects the audit found. User-visible output does not change.</bp-subheader>
+
+<div class="two-col">
+<article>
+<bp-eyebrow>Service layer</bp-eyebrow>
+<ul>
+  <li><code>src/app/</code> holds <code>SessionsService</code>, <code>FeedService</code>, <code>ClaimsService</code>, <code>CoordinationService</code> and <code>UsageService</code>. Each one takes a <code>ProjectRef</code> and a <code>Clock</code>.</li>
+  <li>Path normalisation, author resolution and identity rules move out of <code>cli/index.ts</code> (<code>1269-1283</code>, <code>1629-1640</code>) into these services.</li>
+  <li><code>src/mcp/tools.ts</code> defines the 12 existing tools once. <code>mcp/index.ts</code> only registers them. Names, argument schemas and result shapes stay byte-compatible.</li>
+  <li>The type-level cycle between <code>core</code> and <code>adapters</code> is broken. Shared types move to <code>src/core/types.ts</code>, which imports nothing from adapters.</li>
+</ul>
+</article>
+<article>
+<bp-eyebrow>Adapters</bp-eyebrow>
+<ul>
+  <li>One shared <code>readJsonlWindow(path, cursor)</code> replaces the duplicated JSONL slicing.</li>
+  <li>Codex keeps <code>call_id</code> as <code>ToolCall.id</code>.</li>
+  <li>Claude Code honours <code>CLAUDE_CONFIG_DIR</code>, and Codex honours <code>CODEX_HOME</code>. All adapters resolve home through one <code>homeDir()</code>.</li>
+  <li>Goose reads through <code>node:sqlite</code> opened read-only, with bound parameters. The <code>sqlite3</code> CLI dependency is gone.</li>
+  <li>Cursor fields get one documented meaning. OpenCode's <code>byteOffset</code>, which counts messages today, moves to <code>msgIndex</code>. Old cursors still decode.</li>
+  <li>The <code>Adapter</code> plugin interface (<code>./adapter</code>) is unchanged.</li>
+</ul>
+</article>
+</div>
+
+<h3>Performance and correctness fixes</h3>
+<ul>
+  <li><strong>Reads don't write.</strong> <code>Engine.list()</code> stops rewriting <code>registry.json</code> on every call. It writes only when an entry's tag or metadata actually changed, compared by content hash.</li>
+  <li><strong>No double read.</strong> Coordination merges the delta into the cached structured state instead of re-reading from byte 0.</li>
+  <li><strong>No N+1 derivation.</strong> <code>deriveStatusPosts</code> reads each session's tail at most once per call, sharing the list result.</li>
+  <li><strong>Watermark identity.</strong> Usage and graph watermarks key on <code>(adapter, nativeSessionId, sourcePath)</code>, not <code>transcriptPath</code> alone. This fixes the Goose collision. Copilot's skip compares the newest file mtime inside the session dir, not the dir's own mtime.</li>
+</ul>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D3.1</td><td>The CLI and stdio MCP produce identical <code>--json</code> output and tool results before and after the refactor, across the existing fixtures.</td><td>A golden-output test that records 0.6.0 outputs for each command and tool on the fixture home and diffs them. The existing 573 tests still pass.</td></tr>
+    <tr><td>D3.2</td><td>No service imports from <code>src/cli</code> or <code>src/mcp</code>. <code>core</code> does not import <code>adapters</code>.</td><td>An oxlint import-boundary rule, or a <code>test/architecture.test.ts</code> that walks imports.</td></tr>
+    <tr><td>D3.3</td><td>Two consecutive <code>peek list</code> calls with no session changes leave the mtime and inode of <code>registry.json</code> unchanged.</td><td>A unit test on <code>Engine.list()</code> with a temp home.</td></tr>
+    <tr><td>D3.4</td><td>An incremental <code>coord</code> call over a session that grew by N bytes reads at most N + window bytes from that transcript.</td><td>A test with an instrumented file-read spy, which first reproduces today's full re-read.</td></tr>
+    <tr><td>D3.5</td><td><code>deriveStatusPosts</code> over K sessions makes at most K adapter reads.</td><td>A spy-count test that first reproduces the N+1 behaviour, or records that it did not reproduce.</td></tr>
+    <tr><td>D3.6</td><td>Two Goose sessions in one <code>sessions.db</code> are both indexed by usage scan. A Copilot session that gains a message inside its dir is rescanned.</td><td>Adapter fixture tests. The PR records whether the inferred defect reproduced.</td></tr>
+    <tr><td>D3.7</td><td>Codex normalised tool calls carry <code>id</code>. Setting <code>CLAUDE_CONFIG_DIR</code> or <code>CODEX_HOME</code> to a fixture dir discovers sessions there. Goose works on a machine with no <code>sqlite3</code> binary on <code>PATH</code>.</td><td>Adapter unit tests. The Goose test runs with <code>PATH</code> stripped.</td></tr>
+    <tr><td>D3.8</td><td>Overall coverage stays at or above the thresholds configured in <code>vitest.config.ts</code>. Every new <code>src/app</code> file has at least 85% line coverage.</td><td><code>vitest run --coverage</code> in CI.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+</section>
+<section id="d4-graph" data-bp-node-id="d4-graph"><h2 data-sidebar="D4 Knowledge graph">D4 · Local conversation knowledge graph</h2>
+<bp-subheader>D4 adds <code>graph.db</code>: a typed property graph over sessions, agents, files, commits, skills, posts and claims. It is built from parsed and heuristic signals the code already computes. It answers six named queries, holds no transcript text, and syncs by deterministic id.</bp-subheader>
+
+<h3>Store and schema</h3>
+<p><code>~/.agent-peek/graph.db</code> is opened through <code>node:sqlite</code> with additive migrations. It uses Research C §2's <code>node</code> and <code>edge</code> tables and indexes unchanged: a bi-temporal edge with <code>observed_at</code>, <code>valid_from</code>, <code>valid_to</code>, <code>invalidated_by</code>, and a provenance pointer <code>(src_session, src_msg_from, src_msg_to)</code>. Two adjustments apply:</p>
+<ul>
+  <li><code>node_fts</code> indexes only <code>label</code>, plus authored post titles. The opt-in text index is a separate <code>msg_fts</code> table that exists only after <code>peek graph index --text</code>. It is excluded from every export path by <code>assertExportable</code>.</li>
+  <li>The <code>origin</code> check constraint allows <code>parsed|heuristic|authored|derived</code>. <code>inferred</code> is reserved and rejected until a later ADR enables it.</li>
+</ul>
+<p>Node ids follow Research C: <code>m:</code>, <code>p:</code>, <code>s:&lt;machine&gt;:&lt;adapter&gt;:&lt;native&gt;</code>, <code>f:&lt;project&gt;:&lt;repo-relative&gt;</code>, <code>c:&lt;project&gt;:&lt;sha&gt;</code>, <code>t:&lt;session&gt;:&lt;msg&gt;:&lt;call&gt;</code>, and the post uuid. A path outside any repo becomes <code>f:m:&lt;machine&gt;:&lt;abs&gt;</code>. It never merges and is never exported.</p>
+
+<h3>Edges built in 0.7</h3>
+<p>Parsed: <code>SPAWNED</code>, <code>RAN_AS</code>, <code>IN_PROJECT</code>, <code>ON_BRANCH</code>, <code>RAN_ON</code>, <code>CALLED</code>, <code>INVOKED</code> / <code>INVOKED_AMBIGUOUS</code>, <code>CLAIMS</code>, <code>OWNED_BY</code>, <code>CHANGED</code> (from <code>git log --name-only</code>) and <code>SAME_AS</code> (Gemini id reconciliation).</p>
+<p>Authored: <code>AUTHORED</code>, <code>ABOUT</code>, <code>REPLIES_TO</code>, <code>ANSWERS</code>, <code>SUPERSEDES</code>, <code>MENTIONS</code> and <code>CITES</code>.</p>
+<p>Heuristic: <code>READ</code> and <code>WROTE</code> (the existing <code>inferTouchedFiles</code> family) and <code>COMMITTED</code> (a <code>git commit</code> in Bash plus a sha in the output).</p>
+<p>Derived: <code>OVERLAPS</code> and <code>CO_CHANGES_WITH</code> (counts over <code>WROTE</code> and <code>CHANGED</code>).</p>
+<bp-callout type="ref" label="Deliberately not built">
+  <p>Four edge kinds are left out:</p>
+  <ul>
+    <li><code>DECIDED</code> and <code>ASKED</code> from the handoff regex. Their Fact labels would be transcript text, which violates D1.</li>
+    <li><code>MENTIONS_ENTITY</code> and embedding <code>RELATED_TO</code>, which are LLM-inferred and out of scope.</li>
+  </ul>
+  <p>"Related sessions" uses shared-file Jaccard instead.</p>
+</bp-callout>
+
+<h3>Ingestion</h3>
+<ul>
+  <li>Ingestion extends the usage scan into a graph scan that shares the usage watermarks (keyed per D3). Each transcript is read once per change.</li>
+  <li>Rows are upserted by deterministic id, with <code>last_seen = max()</code>. A rescan rewrites the same rows. An expired transcript stops new observations but deletes nothing.</li>
+  <li>Feed posts and claims are read through from the project stores on each scan.</li>
+  <li><code>CHANGED</code> runs <code>git log</code> incrementally from a per-project last-sha watermark.</li>
+  <li>The graph scan runs during <code>peek usage scan</code>, on demand through <code>peek graph index</code>, and lazily before a graph query when the last scan is older than 60 s.</li>
+</ul>
+
+<h3>Queries, CLI and MCP</h3>
+<p>The surface has six named, typed queries. There is no free-form query tool. Each query is a function in <code>src/graph/queries.ts</code>, and the services, the CLI and the MCP tools call it.</p>
+<bp-table density="compact">
+<table>
+  <thead><tr><th scope="col">Question</th><th scope="col">CLI</th><th scope="col">MCP tool</th></tr></thead>
+  <tbody>
+    <tr><td>What do we know about file X?</td><td><code>peek graph file &lt;path&gt;</code></td><td><code>graph_file</code></td></tr>
+    <tr><td>Who touched a path prefix recently?</td><td><code>peek graph who &lt;prefix&gt; [--since 7d]</code></td><td><code>graph_who_touched</code></td></tr>
+    <tr><td>Related past sessions</td><td><code>peek graph related &lt;session&gt;</code></td><td><code>graph_related_sessions</code></td></tr>
+    <tr><td>What did a session's subagents do?</td><td><code>peek graph subagents &lt;session&gt;</code></td><td><code>graph_subagents</code></td></tr>
+    <tr><td>Which commits came out of a session?</td><td><code>peek graph commits &lt;session&gt;</code></td><td><code>graph_session_commits</code></td></tr>
+    <tr><td>Open questions in this repo</td><td><code>peek graph questions</code></td><td><code>graph_open_questions</code></td></tr>
+  </tbody>
+</table>
+</bp-table>
+<p>Results return node and edge records with <code>origin</code> and provenance pointers. Posts are returned in <code>scorePost</code> order. Feed relevance in <code>rank.ts</code> gains one graph-proximity tier between the 0.2 floor and the 0.6 directory match. That tier covers a <code>CO_CHANGES_WITH</code> neighbour, or a file the reader's session wrote. Each query writes a shape-only log row (query name, hop count, latency, row count) to <code>graph.db</code>. This is the evidence for the "reassess the store" decision.</p>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D4.1</td><td>Scanning the fixture home twice gives identical row counts and ids. Appending one message adds only that message's edges.</td><td><code>test/graph/ingest.test.ts</code></td></tr>
+    <tr><td>D4.2</td><td>No column in <code>node</code> or <code>edge</code> contains fixture message text, tool input or tool output. Without <code>--text</code>, the <code>msg_fts</code> table does not exist.</td><td>A privacy test seeds the fixtures with unique canary strings, scans, then searches every text column in <code>graph.db</code> for them.</td></tr>
+    <tr><td>D4.3</td><td>Each of the six queries returns the expected nodes on a hand-built fixture graph. That includes a 3-level <code>SPAWNED</code> tree and a commit that <code>COMMITTED</code> pairs to its session.</td><td>One test per query in <code>test/graph/queries.test.ts</code>.</td></tr>
+    <tr><td>D4.4</td><td>On a generated corpus of 30 days, 2,000 sessions and about 200k edges, each query runs with p95 under 200 ms on CI hardware.</td><td>A <code>vitest bench</code> or timed test, marked so it fails CI above 2× the target and warns above the target.</td></tr>
+    <tr><td>D4.5</td><td>The same repo cloned at two paths gives one <code>p:</code> node and one <code>f:</code> node per file, with worktree and branch on the edges.</td><td>An ingest test using two temp clones.</td></tr>
+    <tr><td>D4.6</td><td>The graph-proximity tier changes the ranking only for posts whose paths are graph neighbours. All existing <code>rank</code> tests pass unchanged.</td><td>New and existing <code>test/feed/rank.test.ts</code> cases.</td></tr>
+    <tr><td>D4.7</td><td>Inserting an edge with <code>origin='inferred'</code> fails.</td><td>A schema test.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+</section>
+<section id="d5-serve" data-bp-node-id="d5-serve"><h2 data-sidebar="D5 peek serve">D5 · <code>peek serve</code>: remote MCP, ingest API, tokens</h2>
+<bp-subheader>D5 adds one opt-in command that runs a single Node process (or the Docker image), which a team hosts behind its own TLS. It serves MCP over Streamable HTTP and a small REST API. Both run on the D3 services and the D2 per-project stores. The server holds no transcript text, so it never serves raw, tail or handoff modes.</bp-subheader>
+
+<h3>Process and configuration</h3>
+<ul>
+  <li><strong>Start command.</strong> <code>peek serve [--port 7337] [--host 127.0.0.1] [--data ~/.agent-peek-server] [--public]</code>.</li>
+  <li><strong>Binding.</strong> The server binds to loopback by default. To bind to a non-loopback host you must pass <code>--public</code>, and the startup log then says TLS must be terminated by a reverse proxy or tunnel. Research B found that vendors need a public HTTPS endpoint.</li>
+  <li><strong>Data directory.</strong> It holds <code>projects/&lt;projectId&gt;.db</code>, which uses the same store code and migrations as D2, plus <code>graph/&lt;projectId&gt;.db</code> and <code>server.db</code> (tokens, rate-limit counters, audit log).</li>
+  <li><strong>Origin check.</strong> Requests that carry an <code>Origin</code> header not on <code>--allow-origin</code> are rejected with 403. This guards against DNS rebinding.</li>
+  <li><strong>Size and rate limits.</strong> The request body cap is 64 KiB, and an oversized body gets 413. The default write limit is 60 per minute per token, configurable, and an over-limit request gets 429 with <code>Retry-After</code>.</li>
+  <li><strong>Docker.</strong> The <code>Dockerfile</code> builds on <code>node:24-slim</code> and runs as a non-root user. It has a <code>/data</code> volume and a <code>HEALTHCHECK</code> on <code>/v1/healthz</code>.</li>
+</ul>
+
+<h3>Tokens and scopes</h3>
+<p>The admin creates tokens with <code>peek serve token create --project &lt;key|id&gt; --scopes &lt;list&gt; --label &lt;principal&gt; [--expires 30d]</code>. The token is printed once, in the form <code>apk_&lt;tokenId&gt;_&lt;secret&gt;</code>. Only its sha256 is stored. <code>token list</code> and <code>token revoke &lt;id&gt;</code> manage existing tokens, and expiry defaults to 30 days.</p>
+<p>The scopes are <code>feed:read</code>, <code>feed:write</code>, <code>claims:write</code>, <code>status:write</code>, <code>graph:read</code>, <code>graph:write</code> and <code>admin</code>. There is no <code>sessions:raw</code> scope, because the server has no raw data to serve. Every request checks that the token has a grant for the project and the scope the request needs. The token <code>label</code> becomes <code>author_principal</code> on every row the request writes.</p>
+
+<h3>REST surface (<code>/v1</code>)</h3>
+<bp-table density="compact" wide="">
+<table>
+  <thead><tr><th scope="col">Route</th><th scope="col">Scope</th><th scope="col">Behaviour</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /v1/healthz</code></td><td>none</td><td>Returns <code>{ok, version, schema}</code>. Never touches project data.</td></tr>
+    <tr><td><code>GET /v1/projects/{p}/feed?cursor=&amp;limit=</code></td><td>feed:read</td><td>Returns posts by <code>seq</code> and a next cursor. Uses the same packing as <code>read_feed</code> when <code>budget</code> is set.</td></tr>
+    <tr><td><code>POST /v1/projects/{p}/posts</code></td><td>feed:write</td><td>Creates a post. A client-supplied <code>id</code> makes retries idempotent. Paths must be repo-relative, otherwise 422.</td></tr>
+    <tr><td><code>GET /v1/projects/{p}/posts/{id}</code></td><td>feed:read</td><td>The same result as <code>expand_post</code>.</td></tr>
+    <tr><td><code>GET|POST /v1/projects/{p}/claims</code>, <code>DELETE …/claims/{id}</code></td><td>feed:read / claims:write</td><td>A conflicting active claim returns 409 with the conflicting claim, which mirrors <code>check</code> exit 1.</td></tr>
+    <tr><td><code>PUT /v1/projects/{p}/status/{session}</code></td><td>status:write</td><td>Upserts a structured status: <code>{label, adapter, branch, state, summary≤2000, paths[], updatedAt}</code>. <code>assertExportable</code> guards it.</td></tr>
+    <tr><td><code>POST /v1/projects/{p}/graph</code></td><td>graph:write</td><td>A batch upsert of up to 5,000 node and edge rows by deterministic id. Edges are append plus invalidate, and <code>last_seen = max()</code>.</td></tr>
+    <tr><td><code>GET /v1/projects/{p}/graph/{query}</code></td><td>graph:read</td><td>The six D4 queries over merged data.</td></tr>
+    <tr><td><code>DELETE /v1/projects/{p}</code></td><td>admin</td><td>Purges the project DB, the graph DB and its grants.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+
+<h3>Remote MCP (<code>/mcp</code>)</h3>
+<p>The remote set is built from the D3 tool registry and is tools only, because Copilot ignores resources and prompts. It contains:</p>
+<ul>
+  <li>The existing <code>read_feed</code>, <code>post_to_feed</code> and <code>expand_post</code>.</li>
+  <li><code>list_sessions</code> and <code>coordination_digest</code>, served from pushed status and claims.</li>
+  <li>New tools: <code>claim_files</code>, <code>release_files</code> and <code>check_paths</code>. These are added to stdio too, as an additive change.</li>
+  <li><code>publish_status</code>.</li>
+  <li>The six <code>graph_*</code> tools.</li>
+</ul>
+<p>Some tools are never registered remotely: <code>peek_session</code>, <code>tag_session</code> and the usage, skills and agents tools. Every remote tool requires a <code>project</code> argument, or falls back to the only project the token is granted. Post and status content comes back as quoted data with <code>{principal, label}</code> provenance. Every request is authenticated on its own. Prefer the SDK's stateless Streamable HTTP mode. If the pinned <code>@modelcontextprotocol/sdk</code> only supports session mode, MCP sessions stay in-process, which is acceptable for the single-node server, and the PR records which mode shipped.</p>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D5.1</td><td>An MCP SDK client using Streamable HTTP with a bearer header can list tools and call <code>post_to_feed</code>, then <code>read_feed</code>. The post appears with <code>author_principal</code> set to the token label.</td><td><code>test/serve/mcp-http.test.ts</code>, which starts the server in-process on an ephemeral port.</td></tr>
+    <tr><td>D5.2</td><td><code>tools/list</code> on <code>/mcp</code> never includes <code>peek_session</code> or the usage, skills, agents or tag tools. No remote tool accepts <code>mode: raw|tail|handoff</code>.</td><td>A contract test over the remote registry.</td></tr>
+    <tr><td>D5.3</td><td>A request with no token, a revoked token, an expired token or the wrong project gets 401 or 403. A token with the wrong scope gets 403. The stored token table contains no plaintext secret.</td><td><code>test/serve/auth.test.ts</code>, which also greps <code>server.db</code> for the issued secret.</td></tr>
+    <tr><td>D5.4</td><td>A 65 KiB body gets 413. The 61st write in a minute gets 429 with <code>Retry-After</code>. A foreign <code>Origin</code> gets 403.</td><td><code>test/serve/limits.test.ts</code></td></tr>
+    <tr><td>D5.5</td><td>Two concurrent <code>claim_files</code> calls on the same path end with exactly one success and one 409 or tool error.</td><td>A concurrency test using <code>Promise.all</code> against the live server.</td></tr>
+    <tr><td>D5.6</td><td>The retention job hard-deletes expired posts and claims, leaving no row in SQLite. <code>DELETE /v1/projects/{p}</code> removes both of the project's DB files.</td><td><code>test/serve/retention.test.ts</code> with a fake clock.</td></tr>
+    <tr><td>D5.7</td><td>Graph batch upserts from two simulated machines on the same project give one <code>p:</code> node and merged <code>f:</code> nodes. Re-posting a batch changes nothing.</td><td><code>test/serve/graph-sync.test.ts</code></td></tr>
+    <tr><td>D5.8</td><td>Without <code>--public</code>, the server refuses a non-loopback <code>--host</code> and exits with code 5. The Docker image builds, and its healthcheck passes.</td><td>A unit test for the bind guard. A CI job runs <code>docker build</code> and then <code>docker run</code> plus <code>curl /v1/healthz</code>.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+</section>
+<section id="d6-clients" data-bp-node-id="d6-clients"><h2 data-sidebar="D6 Clients">D6 · Remote clients, ingestion and cloud-agent setup</h2>
+<bp-subheader>D6 makes a laptop and a cloud VM two clients of the same <code>peek serve</code>. Local commands switch to the remote when one is configured, and they keep working offline through an outbox. A sidecar inside a cloud VM reuses the existing adapters to publish derived status. Per-vendor setup is generated, not hand-written.</bp-subheader>
+
+<h3>Remote mode for local commands</h3>
+<ul>
+  <li><strong>Configuration.</strong> <code>peek remote set &lt;https-url&gt;</code> writes <code>~/.agent-peek/remote.json</code> as <code>{ url }</code>. The token is read only from <code>AGENT_PEEK_TOKEN</code> and is never written to disk by agent-peek. <code>AGENT_PEEK_REMOTE</code> overrides the URL. <code>peek remote status</code> checks <code>/v1/healthz</code> and the token's grants.</li>
+  <li><strong>RemoteClient.</strong> <code>src/remote/client.ts</code> implements the <code>FeedService</code> and <code>ClaimsService</code> interfaces from D3 over the D5 REST API. When a remote is configured and the project's identity is portable, the services resolve to the remote. If identity is <code>source:"local"</code>, the command exits 6 and names <code>.agent-peek.json</code>. <code>--local</code> forces local stores.</li>
+  <li><strong>Outbox.</strong> Writes made while the remote is unreachable (posts, claims, status) are kept in an <code>outbox</code> table in the project store. Their client-generated ids are delivered in order on the next successful call, or by <code>peek push</code>. The command prints that it queued the write. <code>check</code> run offline reports local knowledge only, and says so.</li>
+  <li><strong>Push.</strong> <code>peek push [--watch --interval 30s]</code> sends four things for every portable project with a remote: the outbox, the structured status of local live sessions, active claims, and exportable graph rows from a per-project watermark. Every payload passes <code>assertExportable</code>.</li>
+</ul>
+
+<h3>In-VM sidecar</h3>
+<p><code>peek agent [--watch]</code> is for a cloud agent's setup script. It discovers sessions in the VM's own <code>~/.claude/projects</code> and <code>~/.codex/sessions</code>, honouring the D3 env overrides. It derives the same structured status and inferred-write claims as local coordination, and publishes them with <code>status:write</code> and <code>claims:write</code>. It never sends transcript text. It exits 0 when no adapter finds sessions, so a VM where the transcript layout differs degrades to MCP-only publishing. Research B did not confirm that cloud VMs write the local layout, so this behaviour is a test, not an assumption.</p>
+
+<h3>Vendor setup</h3>
+<p><code>peek remote snippet --vendor &lt;claude|cursor|copilot|codex&gt;</code> prints the setup for each target. In each case the credential path is the one Research B fetched docs for.</p>
+<bp-table density="compact" wide="">
+<table>
+  <thead><tr><th scope="col">Target</th><th scope="col">Generated setup</th><th scope="col">Credential path</th><th scope="col">Status at spec time</th></tr></thead>
+  <tbody>
+    <tr><td>Claude Code cloud and web</td><td>An HTTP MCP entry for <code>.mcp.json</code>, plus a setup-script line for <code>peek agent --watch</code>.</td><td>A network secret that adds <code>Authorization: Bearer</code> outside the VM.</td><td>Documented. Needs live QA.</td></tr>
+    <tr><td>Cursor background agents</td><td>An HTTP MCP server with a header. Not SSE, and not <code>mcp-remote</code>.</td><td>The HTTP MCP header, kept outside the VM.</td><td>Documented. Needs live QA.</td></tr>
+    <tr><td>GitHub Copilot coding agent</td><td>A <code>type: "http"</code> server with <code>headers: { Authorization: "Bearer $COPILOT_MCP_AGENT_PEEK_TOKEN" }</code>. Tools only.</td><td>The <code>COPILOT_MCP_*</code> Agents secret.</td><td>Documented. Needs live QA.</td></tr>
+    <tr><td>Codex cloud</td><td>A setup script that installs agent-peek and runs <code>peek agent --watch</code>. It pushes over HTTPS, with no MCP dependency.</td><td>An HTTP secret for the server's domain.</td><td><strong>Remote MCP unverified.</strong> Legacy GET-only egress blocks pushes, and the docs say so.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D6.1</td><td>One shared contract suite passes against both the local services and <code>RemoteClient</code> with an in-process <code>peek serve</code>. The suite covers post, read with a cursor, expand, claim, conflict, release and check.</td><td><code>test/contract/services.contract.ts</code>, run twice.</td></tr>
+    <tr><td>D6.2</td><td>A post and a claim made while the server is down are queued. After restart they are delivered exactly once. A second <code>peek push</code> sends nothing.</td><td><code>test/remote/outbox.test.ts</code></td></tr>
+    <tr><td>D6.3</td><td>Across <code>peek push</code> and <code>peek agent</code> runs on canary-seeded fixtures, no HTTP request body contains a canary string.</td><td>A test that captures bodies at the server.</td></tr>
+    <tr><td>D6.4</td><td>Pointed at a fixture VM home, <code>peek agent --watch</code> publishes status and inferred-write claims for a session that writes a file. It exits 0 on an empty home, and it stops on SIGTERM within one interval.</td><td><code>test/remote/agent.test.ts</code></td></tr>
+    <tr><td>D6.5</td><td>The snippets for all four vendors match golden files. No snippet embeds a literal token.</td><td>Golden-file tests.</td></tr>
+    <tr><td>D6.6</td><td>With a remote configured, a project whose identity is <code>source:"local"</code> makes the command exit 6. <code>AGENT_PEEK_TOKEN</code> never appears in <code>remote.json</code> or in logs.</td><td>CLI integration tests.</td></tr>
+    <tr><td>D6.7</td><td>Live: against a deployed <code>peek serve</code>, a Claude Code cloud session, a Cursor background agent and a Copilot coding-agent run each call <code>read_feed</code> and <code>publish_status</code>, and each post shows up when a local machine reads the same project feed. Codex cloud is recorded as one of three outcomes: MCP verified, sidecar push verified, or unsupported with the reason.</td><td>A QA-stage evidence record per vendor, with screenshots or transcripts plus server audit-log rows. This is not a CI test.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+</section>
+<section id="d7-release" data-bp-node-id="d7-release"><h2 data-sidebar="D7 Docs &amp; release">D7 · Docs, agent instructions, migration and 0.7.0 release</h2>
+<bp-subheader>D7 makes the release honest and adoptable. The security page tells the truth about 0.7. A user upgrading from 0.6.0 loses nothing. Cloud agents get instructions that make them actually publish status. The release branch lands as a single 0.7.0 release.</bp-subheader>
+
+<ul>
+  <li><strong>Docs.</strong>
+    <ul>
+      <li>Rewrite <code>website/docs/security.mdx</code>. Today it says the feed DB is the only store <code>peek</code> writes, but Research A found five more stores. The rewrite lists every store, says what <code>peek serve</code> holds, and links ADR 0002.</li>
+      <li>Add pages for <code>peek serve</code>, covering deploy (Docker, reverse proxy), tokens, retention and project deletion.</li>
+      <li>Add a cloud-agents page with one section per D6 vendor. Each section includes the generated snippet and the verified or unverified status recorded in QA.</li>
+      <li>Add pages for the graph (six queries, privacy tiers, the opt-in text index) and for migrating from 0.6.</li>
+      <li>Update the README's command and MCP tool lists.</li>
+    </ul>
+  </li>
+  <li><strong>Agent instructions.</strong> Research B found that agent-called publishing depends on the agent remembering to do it. <code>peek remote snippet --instructions</code> prints an <code>AGENTS.md</code> / <code>CLAUDE.md</code> block. The block tells the agent to call <code>read_feed</code> at start, <code>claim_files</code> before editing, <code>publish_status</code> at milestones, and <code>post_to_feed</code> for decisions and handoffs. The same text ships as a docs page.</li>
+  <li><strong>Library break.</strong> The user accepted a minor-version break of the exported storage API. <code>ClaimsStore</code> becomes SQLite-backed and project-scoped. <code>projectIdentity</code> remains as a deprecated wrapper over <code>resolveProject</code>. <code>feedDbPath</code> is unchanged. Every changed export is listed in the CHANGELOG under "Breaking (library)", with the replacement for each. The <code>./adapter</code> plugin ABI does not change.</li>
+  <li><strong>Release.</strong> <code>package.json</code> moves to 0.7.0, and <code>VERSION</code> is updated. The CHANGELOG has Added, Changed, Breaking (library) and Security sections. The release branch merges to <code>main</code> only after the QA report passes. Publishing follows the repo's existing release process.</li>
+</ul>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D7.1</td><td>Upgrade end to end: a 0.6.0 <code>~/.agent-peek</code> fixture with a registry, <code>claims.json</code>, a feed DB and a usage DB is upgraded. Every 0.6.0 CLI command then runs, with identical <code>--json</code> output where D3.1 applies. The claims are present. <code>graph.db</code> is created on first scan.</td><td><code>test/upgrade/v06-to-v07.test.ts</code></td></tr>
+    <tr><td>D7.2</td><td>The website builds with the repo's existing docs build. The new pages are reachable from the sidebar, and no internal link is broken.</td><td>CI docs build, plus a link check.</td></tr>
+    <tr><td>D7.3</td><td>The security page lists every store from Research A's store table, plus <code>graph.db</code>, <code>machine.json</code>, <code>remote.json</code> and the server data dir. It has no claim that the feed DB is the only store.</td><td>Review-stage check against Research A.</td></tr>
+    <tr><td>D7.4</td><td>The CHANGELOG names every changed library export and its replacement. The type tests for the public API (<code>src/index.ts</code> exports) are updated, and they pass.</td><td>Review, plus a <code>tsd</code>/<code>expectTypeOf</code> test of the exports.</td></tr>
+    <tr><td>D7.5</td><td>The instructions snippet matches its golden file, and every tool name in it exists in the remote registry.</td><td>A golden test, plus a test that cross-checks names against the registry.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+</section>
+<section id="d8-monitor" data-bp-node-id="d8-monitor"><h2 data-sidebar="D8 OpenCode V2 &amp; monitor">D8 · OpenCode V2 adapter and the <code>peek monitor</code> retry monitor</h2>
+<bp-subheader>Addendum, 2026-11-13. On 2026-11-13 the owner brought lachieh's OpenCode V2 work (PR #12) and its planned retry monitor into 0.7. D8 lands the V2 adapter with compatibility fixes, then adds a local, opt-in monitor. The monitor notices when a top-level OpenCode session stops on a failure. By default it only tells you. With <code>--retry</code> it sends one idempotent "continue", bounded and only for transient provider errors.</bp-subheader>
+
+<p><strong>Decision to approve.</strong> Ship the monitor as <em>notify by default, retry only with <code>--retry</code></em>. It resubmits through OpenCode's local HTTP API with a message id the monitor saves before sending, never through <code>opencode run</code>. It stays local-only: no remote route, no MCP tool, and nothing in <code>peek serve</code>.</p>
+
+<h3>What I read and what it changed</h3>
+<ul>
+  <li><strong>lachieh's PR #12 and fork</strong> (Research D <code>art_6mGODRiF</code> §1). The PR's Safety section is now a set of constraints: opt-in, never retry child sessions, never infer failure from transcript prose, persist a failure fingerprint before submitting. Retry policy, transport and durable state were never built. The fork's <code>feat/session-monitor</code> is a read-only health monitor whose JSON store can't do an atomic "insert or lose the race". I keep its CLI shape and its <code>SessionEntry.execution</code> field, and drop its store.</li>
+  <li><strong>How failure is recorded</strong> (Research D §2.1; <code>anomalyco/opencode@v2.3.0</code> <code>packages/schema/src/session-message.ts:293-304</code>, <code>packages/core/src/session/message-updater.ts:148-153</code>). A failed turn writes an <code>idle</code> message with <code>outcome: "failed"</code> and a typed <code>error.type</code>. Its id is derived from the durable event id, so it is a stable fingerprint. This is why detection never reads prose.</li>
+  <li><strong>OpenCode already retries</strong> (Research D §2.2; <code>packages/core/src/model-retry.ts:11-57</code>). Each model call is retried 10 times, and up to 1 h for unreachable networks. So a <code>failed</code> idle means OpenCode's own retries ran out. This is why the monitor's budget is small and slow, and why notify-only is the default.</li>
+  <li><strong>Resubmission is idempotent only over HTTP</strong> (Research D §2.3–2.4; <code>packages/core/src/session/inbox.ts:176-189</code>, <code>packages/cli/src/run/noninteractive.ts:71</code>, <code>:217-236</code>). <code>POST /api/session/{id}/synthetic</code> with a client-supplied <code>msg_</code> id returns the first admission on a repeat and 409 on a conflicting reuse. <code>opencode run --session</code> mints a new id every call, auto-replies to permission prompts and cancels forms, so it is ruled out.</li>
+  <li><strong>Database location</strong> (Research D §2.1; <code>packages/cli/src/database-path.ts:4-12</code>). <code>OPENCODE_DB</code> overrides the path, and non-default channels use <code>opencode-&lt;channel&gt;.db</code>. lachieh's adapter hard-codes <code>opencode.db</code>, so D8.1 fixes it, matching D3.7.</li>
+</ul>
+
+<bp-callout type="ref" label="Load-bearing assumption">
+  <p>Retrying is only useful if one "continue" sent after a <code>failed</code> idle actually makes the turn succeed. The evidence is code, not measurement: OpenCode's own restart recovery sends the same kind of synthetic continue (<code>packages/core/src/session/execution/restart.ts:24-25</code>, <code>:106-111</code>). If failures are mostly persistent (quota, auth, a model that keeps rejecting the request), retries only add cost. D8.9 is the check. If it fails, <code>--retry</code> is removed before release and 0.7 ships notify-only. The alternative the brief skipped is that notify-only may deliver most of the value, since a person sees the stuck session and decides.</p>
+</bp-callout>
+
+<h3>What we should build</h3>
+<ul>
+  <li><strong>OpenCode V2 adapter</strong> (lachieh's PR #12, landed with fixes on <code>release/0.7.0</code>, authorship preserved).
+    <ul>
+      <li>Legacy filesystem sessions keep the selector <code>opencode:&lt;id&gt;</code>. If an alias is added, it is additive only.</li>
+      <li>V2 is read with <code>node:sqlite</code>, read-only, with bound parameters. There is no <code>sqlite3</code> binary.</li>
+      <li>When a session exists in both stores, V2 wins.</li>
+      <li>The database path resolves in this order: a non-blank <code>OPENCODE_DB</code>, then <code>$XDG_DATA_HOME/opencode/opencode[-&lt;channel&gt;].db</code>.</li>
+      <li>The adapter exposes additive <code>SessionEntry.execution { state, outcome, at, sequence }</code> and <code>parentSessionId</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Where it lives.</strong>
+    <ul>
+      <li><code>src/app/monitor-service.ts</code> holds <code>MonitorService</code>. Its dependencies are injected: <code>Clock</code>, <code>MonitorStore</code>, <code>OpenCodeExecutionReader</code> and <code>OpenCodeRetryTransport</code>.</li>
+      <li><code>src/monitor/policy.ts</code> holds pure functions: <code>classify(error)</code> and <code>nextAttempt(chain, now)</code>.</li>
+      <li><code>src/monitor/store.ts</code> owns <code>monitor.db</code>.</li>
+      <li><code>src/monitor/opencode-transport.ts</code> handles HTTP and service discovery.</li>
+      <li>The CLI is a thin adapter, following the D3 rule. The transport is <em>not</em> on the <code>Adapter</code> interface, so the <code>./adapter</code> plugin ABI is unchanged.</li>
+    </ul>
+  </li>
+  <li><strong>CLI.</strong> The shape follows lachieh's fork, and every command is new, so the change is additive.
+    <ul>
+      <li><code>peek monitor add &lt;session&gt; | --project | --all [--include &lt;type&gt;…]</code> enrolls a scope.</li>
+      <li><code>peek monitor list</code> and <code>peek monitor remove</code> manage enrollments.</li>
+      <li><code>peek monitor run [--once] [--retry]</code> runs the loop. Without <code>--retry</code> it never submits.</li>
+      <li><code>peek monitor watch</code> shows per-session health and the retry history.</li>
+      <li>No MCP tool is added in 0.7, so an agent cannot start retries.</li>
+    </ul>
+  </li>
+  <li><strong>Detection.</strong>
+    <ul>
+      <li>The monitor looks at the latest <code>idle</code> of an enrolled session with <code>parent_id IS NULL</code> and <code>data.outcome = 'failed'</code>.</li>
+      <li>It reads only <code>outcome</code> and <code>error.type</code>, <code>status</code> and <code>retryAfterMs</code>.</li>
+      <li><code>error.message</code>, <code>error.response.body</code> and transcript text are never read into memory beyond the row decode, and never stored.</li>
+    </ul>
+  </li>
+  <li><strong>Qualifying errors</strong> (Research D §3). These fail closed.
+    <bp-table density="compact">
+    <table>
+      <thead><tr><th scope="col">Class</th><th scope="col">Types</th></tr></thead>
+      <tbody>
+        <tr><td>Retry with <code>--retry</code></td><td><code>provider.rate-limit</code>, <code>provider.internal</code>, <code>provider.transport</code>, <code>provider.timeout</code></td></tr>
+        <tr><td>Only with <code>--include</code></td><td><code>provider.unknown</code>, <code>provider.invalid-output</code>, <code>provider.no-route</code>, <code>aborted</code></td></tr>
+        <tr><td>Never</td><td>every other <code>provider.*</code> (auth, quota and the budget/limit family, content-filter, invalid-request, unsupported-operation), <code>tool.execution</code>, <code>permission.rejected</code>, <code>unknown</code>, any unrecognised type, and the outcomes <code>interrupted</code> and <code>succeeded</code></td></tr>
+      </tbody>
+    </table>
+    </bp-table>
+  </li>
+  <li><strong>Policy</strong> (Research D §3, option P1).
+    <ul>
+      <li>A failed turn gets at most 3 attempts. A chain is every failure since the last <code>succeeded</code> idle, and a <code>succeeded</code> idle resets it.</li>
+      <li>Attempt <em>n</em> is not sent before <code>max(retryAfterMs from failure time, 5 min × 2^(n−1))</code>, capped at 60 min.</li>
+      <li>Global caps: one retry in flight per machine, and 10 per hour.</li>
+    </ul>
+  </li>
+  <li><strong>Durable state.</strong>
+    <ul>
+      <li>It lives in <code>~/.agent-peek/monitor.db</code>, which is machine-scoped. It uses <code>node:sqlite</code> in WAL mode with a busy timeout, and is migrated with <code>PRAGMA user_version</code>.</li>
+      <li>There are two tables. <code>enrollment(scope, key, policy)</code> records what is enrolled. <code>retry(fingerprint PK, session_id, failed_idle_id, error_type, chain_id, attempt, state, skip_reason, retry_message_id UNIQUE, not_before, lease_owner, lease_until, …)</code> has one row per failed turn, with the full schema in Research D §4.</li>
+      <li>The fingerprint is <code>sha256(dbIdentity | sessionId | failedIdleMsgId)</code>.</li>
+      <li>Never stored: error messages or bodies, prompt or transcript text, the server password.</li>
+    </ul>
+  </li>
+  <li><strong>Retry flow.</strong>
+    <ol>
+      <li><strong>Detect.</strong> Under <code>BEGIN IMMEDIATE</code>, insert the fingerprint as <code>planned</code>, with a freshly generated OpenCode-format <code>retry_message_id</code> and the <code>not_before</code> time. A unique-key loss means another monitor owns the failure, and this one does nothing.</li>
+      <li><strong>When due.</strong> Take the lease, then re-read <code>opencode.db</code>. Skip, recording a reason, unless all of these hold:
+        <ul>
+          <li>The latest idle is still the fingerprinted one.</li>
+          <li>No later message exists.</li>
+          <li><code>time_busy ≤ time_idle</code>.</li>
+          <li>The session is absent from <code>GET /api/session/active</code>.</li>
+          <li>The inbox is empty.</li>
+          <li><code>GET /api/info</code> reports a version of 2.3.0 or later.</li>
+          <li>The session is still top-level.</li>
+        </ul>
+      </li>
+      <li><strong>Submit.</strong> <code>POST /api/session/{id}/synthetic</code> with <code>{ id: retry_message_id, text: &lt;fixed constant&gt;, delivery: "queue", metadata: { source: "agent-peek.monitor", fingerprint } }</code>. It authenticates with HTTP Basic as <code>opencode</code>, using the password read fresh from <code>$XDG_STATE_HOME/opencode/service.json</code>. On 200 the row becomes <code>admitted</code>. A 409 becomes <code>conflict</code> and is never retried under another id. If no service is registered, the row is skipped with <code>no-server</code>, and the monitor never starts one.</li>
+      <li><strong>Crash or lease expiry.</strong> The next tick resends the <em>same</em> id, and OpenCode returns the original admission.</li>
+    </ol>
+  </li>
+  <li><strong>Feed and notices.</strong>
+    <ul>
+      <li>When the budget runs out (<code>abandoned</code>), or a never-class failure hits an enrolled session, the monitor prints a notice. It also writes one derived <code>warning</code> post to the project feed, with a structural title such as <code>OpenCode session ses_… failed: provider.quota (retries 3/3)</code> and <code>evidence: [{kind:"session"}]</code>. The post carries no error text.</li>
+      <li>Submitted and admitted attempts go only to the monitor's log.</li>
+      <li>The warning post is ordinary feed content. It reaches a remote only through the D6 push path and <code>assertExportable</code>, which it passes because it is pure structure (ADR 0002 <code>docs/adr/0002-graph-and-network-retention.md:41</code>).</li>
+    </ul>
+  </li>
+  <li><strong>Out of scope.</strong> <code>monitor.db</code> is never pushed and has no remote route. Out of scope: <code>peek serve</code>, cloud agents, retrying other machines' sessions, and any other agent's sessions.</li>
+</ul>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D8.1</td><td>V2 adapter, checked against fixture databases:
+      <ul>
+        <li>V2 sessions are listed and read.</li>
+        <li>Legacy sessions keep <code>opencode:&lt;id&gt;</code>, and every 0.6 selector still resolves.</li>
+        <li>A session present in both stores appears once, from V2.</li>
+        <li><code>execution.outcome</code> and <code>parentSessionId</code> come from the latest idle and <code>parent_id</code>.</li>
+        <li><code>OPENCODE_DB</code> pointing at a fixture is honoured, and a blank value falls back to the default.</li>
+        <li>No code path spawns <code>sqlite3</code>, and every query is parameterized.</li>
+        <li>Existing goldens are byte-identical. New V2 cases are added in their own commit.</li>
+      </ul></td><td><code>test/adapters/opencode*.test.ts</code>; the golden suite</td></tr>
+    <tr><td>D8.2</td><td>Detection uses structure only:
+      <ul>
+        <li>A fixture with a failed top-level session, a failed child session, and a succeeded session whose transcript text says "rate limit" yields exactly one detection, the top-level one.</li>
+        <li>Its classification comes from <code>error.type</code>.</li>
+      </ul></td><td><code>test/monitor/detect.test.ts</code></td></tr>
+    <tr><td>D8.3</td><td>Fingerprint before submit:
+      <ul>
+        <li>A recording transport asserts that, at call time, the row exists in a <code>planned</code> state with the same <code>retry_message_id</code> it was sent.</li>
+        <li>After a simulated crash between insert and POST, the next tick resends the identical id.</li>
+      </ul></td><td><code>test/monitor/service.test.ts</code></td></tr>
+    <tr><td>D8.4</td><td>Policy is pure and table-tested:
+      <ul>
+        <li>Every type in the table above lands in its class, and an unknown <code>provider.*</code> type is never retried.</li>
+        <li>Backoff is 5, 10 and 20 min, with <code>retryAfterMs</code> taking precedence and a 60 min cap.</li>
+        <li>A fourth attempt is never planned, and a <code>succeeded</code> idle resets the chain.</li>
+        <li>The caps hold: at most 1 retry in flight and 10 per hour.</li>
+      </ul></td><td><code>test/monitor/policy.test.ts</code></td></tr>
+    <tr><td>D8.5</td><td>Races and skips:
+      <ul>
+        <li>Two <code>MonitorService</code> instances on one <code>monitor.db</code> produce exactly one POST.</li>
+        <li>A newer message after the idle gives <code>skipped:human-acted</code>.</li>
+        <li>An active session gives <code>skipped:busy</code>.</li>
+        <li>A version below 2.3.0 gives <code>skipped:version</code>.</li>
+        <li>A missing <code>service.json</code> gives <code>skipped:no-server</code>.</li>
+        <li>A 409 gives <code>conflict</code>, with no further POST.</li>
+      </ul></td><td><code>test/monitor/service.test.ts</code></td></tr>
+    <tr><td>D8.6</td><td>Opt-in:
+      <ul>
+        <li>With no enrollment, <code>peek monitor run --once</code> reads nothing and makes zero HTTP calls.</li>
+        <li>An enrolled session without <code>--retry</code> gets a notice and a warning post, but zero POSTs.</li>
+        <li>With <code>--retry</code>, exactly one POST is made per due attempt.</li>
+      </ul></td><td><code>test/monitor/cli.test.ts</code></td></tr>
+    <tr><td>D8.7</td><td>Privacy:
+      <ul>
+        <li>A canary string placed in <code>error.message</code>, <code>error.response.body</code> and the transcript never appears in <code>monitor.db</code>, the monitor log, stdout or the warning post.</li>
+        <li>The warning post passes <code>assertExportable</code>.</li>
+        <li>The <code>service.json</code> password never appears in the log or on disk outside <code>service.json</code>.</li>
+        <li><code>peek push</code> never reads <code>monitor.db</code>.</li>
+      </ul></td><td><code>test/monitor/privacy.test.ts</code></td></tr>
+    <tr><td>D8.8</td><td>Transport contract: a local stub HTTP server built to the v2.3.0 OpenAPI shapes (<code>packages/protocol/openapi.json:2402</code>) receives Basic auth for user <code>opencode</code>, a <code>msg_</code> id in OpenCode's time-ordered format, <code>delivery: "queue"</code>, and the fixed text and metadata.</td><td><code>test/monitor/opencode-transport.test.ts</code></td></tr>
+    <tr><td>D8.9</td><td>Live recovery probe, run on a machine with OpenCode 2.3.0:
+      <ul>
+        <li>Force a <code>provider.rate-limit</code> or <code>provider.internal</code> failure on a real top-level session, enroll it and run <code>peek monitor run --once --retry</code>.</li>
+        <li>QA records the next idle outcome as recovered, not-recovered or could-not-force.</li>
+        <li>If the result is not-recovered, <code>--retry</code> is removed before release and the docs say notify-only.</li>
+      </ul></td><td>QA report, live evidence</td></tr>
+    <tr><td>D8.10</td><td>The README and the website document <code>peek monitor</code>: opt-in, local-only, the qualifying types, the budget, and what is and isn't stored. The CHANGELOG lists it under Added. The new commands have golden cases, and every existing golden is unchanged.</td><td>CI docs build; the golden suite</td></tr>
+  </tbody>
+</table>
+</bp-table>
+
+<bp-note>Implementation-only unknowns are left to the implementing PR: the earliest OpenCode version that supports <code>/synthetic</code> with a client id (pinned to 2.3.0 or later), whether a replayed admission's extra wake is always a no-op (inferred), and the exact retry wording. See Research D §7.</bp-note>
+</section>
+
+<section id="d9-handoff" data-bp-node-id="d9-handoff"><h2 data-sidebar="D9 Handoff &amp; multi-agent">D9 · Handoff and multi-agent accuracy (issues #1–#7)</h2>
+<bp-subheader>Addendum, 2026-11-13. The owner brought all seven open issues into 0.7. Research E (<code>art_qqdizOVP</code>) reproduced every one of them on <code>release/0.7.0</code> at <code>5e40e0e</code>. Two turned out worse than reported: path extraction ignores the per-call working directory, and a parent's own subagents show up as conflicts in <code>check --ignore-self</code>. D9 fixes the handoff's content, gives it a versioned JSON contract, and adds a live parent→subagent tree. It's delivered as four PRs, E1–E4.</bp-subheader>
+
+<p><strong>Decision to approve.</strong> Fix #1–#7 in four PRs on <code>release/0.7.0</code>, with the owner's six answers locked as written below. Every change is additive except one: the <code>check --ignore-self</code> exit code, which the owner accepted. The handoff stays local-only under ADR 0002. E1 (paths) and E4 (parent id) land before the D4 graph ingest and the D6.4 sidecar, because both consume their output.</p>
+
+<h3>What I read and what it changed</h3>
+<ul>
+  <li><strong>#7, paths and file roles</strong> (Research E §7; <code>src/core/coordination.ts:715-720</code> <code>normalizePath</code>, <code>505-539</code> <code>writeTargetsOfCommand</code>, <code>377-407</code> <code>inferWritingFileEvents</code>). Every relative path resolves against the session cwd. A <code>cd apps/server &amp;&amp;</code> prefix or a Codex <code>workdir</code> argument is ignored. In reproduction, two real edits were missing from the handoff. Adding a same-named decoy file put the decoy into <code>writingFiles</code>, and from there into <code>check</code> and <code>coord</code>. This makes E1 a coordination fix as well as a handoff fix, and it's why E1 gates D4 and D6.4.</li>
+  <li><strong>#5, parent id</strong> (Research E §5; <code>src/adapters/claude-code/index.ts:104</code>; <code>cli/index.ts:1260-1267</code> <code>isIgnoredSession</code>). <code>parentSessionId</code> is the bare native uuid, while <code>resolveAuthor</code> returns the prefixed <code>claude-code:&lt;id&gt;</code>. So the parent-aware ignore never matches: an orchestrator's <code>check --ignore-self</code> flags its own children and exits 1. That's why E4 adds a prefixed <code>parentId</code> and why D4's <code>SPAWNED</code> builder reads it.</li>
+  <li><strong>#1 and #2, handoff signal</strong> (Research E §1–2; <code>src/core/handoff.ts:57-93</code> <code>toHandoff</code>, <code>564-584</code> <code>isOpenQuestion</code>). Open questions are scanned over the whole transcript by wording alone, so answered questions stay open. Decisions match broad verbs (<code>using</code>, <code>added</code>), which pulls in narration. Files are the union of every path touched, with no fold over <code>git mv</code> or <code>rm</code>.</li>
+  <li><strong>#6, goal</strong> (Research E §6; <code>src/core/snapshot.ts:159-169</code> <code>inferCurrentTask</code>). When the latest human turn is an acknowledgement, the fallback takes assistant narration. The issue's second example reproduced verbatim. <code>currentTask</code> was defined on purpose as the current ask (<code>d9c4ca7</code>, <code>517e025</code>), and <code>list</code>, <code>coord</code> and <code>check</code> rely on that. So the goal goes in a new field instead.</li>
+  <li><strong>#3 and #4, git and JSON</strong> (Research E §3–4; <code>src/core/types.ts:127-149</code> <code>HandoffSnapshot</code>; <code>cli/index.ts:413</code>). Nothing parses SHAs, branches or PR URLs out of tool output. <code>--json</code> prints the internal snapshot type with no version. The D4 <code>COMMITTED</code> edge needs the same parse, so it's built once in E3 and reused.</li>
+</ul>
+
+<h3>Owner decisions (2026-11-13)</h3>
+<bp-table density="compact">
+<table>
+  <thead><tr><th scope="col">Question</th><th scope="col">Decision</th></tr></thead>
+  <tbody>
+    <tr><td>What the session's task means (#6)</td><td><code>currentTask</code> keeps its meaning (the current ask). A new <code>goal</code> field holds the first substantive human ask, and the handoff's Goal line renders <code>goal</code>.</td></tr>
+    <tr><td>Parent id form (#5)</td><td><code>parentSessionId</code> stays bare. A new adapter-prefixed <code>parentId</code> is added, and every internal comparison uses it.</td></tr>
+    <tr><td><code>check</code> exit code (#5)</td><td>Accepted. <code>check --ignore-self</code> run from a parent no longer counts its own subagents' writes (exit 1 → 0).</td></tr>
+    <tr><td>Handoff JSON default (#4)</td><td>Unchanged. <code>--mode handoff --json</code> still runs the agent CLI by default. <code>--local --json</code> is documented as the fast deterministic path.</td></tr>
+    <tr><td>Golden re-records (all)</td><td>A golden may be re-recorded only when the old snapshot, projected onto the new output, is byte-identical. The suite asserts that projection.</td></tr>
+    <tr><td><code>gh</code> calls (#3)</td><td>No network. PR state is reported as recorded in the transcript. The only new subprocesses are read-only <code>git rev-parse</code> and <code>git status --porcelain</code>, skipped when <code>git</code> isn't installed.</td></tr>
+    <tr><td>Trailing offers (#2)</td><td>An unanswered closing offer ("Would you like me to also commit it?") is an open question. Stock closers ("Anything else?", "let me know if…") are dropped.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+
+<h3>What we should build</h3>
+<div class="two-col">
+  <article><bp-eyebrow>E1 · Paths and file roles (#7, #1 files)</bp-eyebrow>
+    <ul>
+      <li><code>resolveCallCwd(tool, sessionCwd)</code>: use <code>workdir</code> or <code>cwd</code> from the tool input. For shell commands, split on <code>&amp;&amp;</code>, <code>;</code> and <code>||</code>, apply <code>cd</code> segments in order, and resolve each segment's paths against the cwd in effect. Named-argument paths, <code>extractCommandPaths</code> and <code>writeTargetsOfCommand</code> all route through it.</li>
+      <li><code>classifyFileEvents(messages, cwd)</code> returns <code>{ path, relPath, role: "wrote"|"read", state, movedTo? }</code>. It folds the events in order: a write is <code>modified</code>, or <code>created</code> if unseen; <code>mv</code>/<code>git mv</code> marks the source <code>moved</code>; <code>rm</code>/<code>git rm</code> marks <code>deleted</code>; and written files are checked on disk at handoff time.</li>
+      <li><code>toRepoRelative</code> (git toplevel, POSIX separators) is shared with D2.5. Whichever PR lands first owns it.</li>
+      <li><code>writingFiles</code> uses the corrected resolution, so <code>check</code> and <code>coord</code> stop reporting the decoy. <code>touchedFiles</code> keeps its meaning.</li>
+      <li>Codex freeform <code>apply_patch</code>: add a parser case only if a real current Codex rollout records it outside <code>function_call</code>. The PR records which.</li>
+    </ul>
+  </article>
+  <article><bp-eyebrow>E2 · Handoff signal and goal (#2, #1 questions, #6)</bp-eyebrow>
+    <ul>
+      <li><code>src/core/handoff-signal.ts</code> is a pure, table-tested rules pass.
+        <ul>
+          <li><strong>Decisions</strong> need a decision shape (<code>decided</code>, <code>chose</code>, <code>going with</code>, <code>instead of</code>, <code>rather than</code>, <code>because</code>). First-person progress narration and bare outcomes are dropped.</li>
+          <li><strong>Next actions</strong> get the same narration filter.</li>
+          <li><strong>Open questions</strong> are open only if no later turn from the other party exists. Stock closers are dropped, and trailing unanswered offers are kept.</li>
+        </ul></li>
+      <li><strong>Acknowledgement fallback:</strong> walk back through human turns to the previous real ask before looking at assistant text.</li>
+      <li><code>goal</code> on <code>StructuredSnapshot</code>, <code>BriefSnapshot</code> and <code>HandoffSnapshot</code>: the first substantive human ask, via <code>objectiveFromUserText</code>, skipping acknowledgements and harness wrappers. The document's <code>## Goal</code> line renders <code>goal</code>, and <code>## Current state</code> adds "Current ask: …" when it differs.</li>
+    </ul>
+  </article>
+  <article><bp-eyebrow>E3 · Handoff JSON v1 and git (#4, #3)</bp-eyebrow>
+    <ul>
+      <li><code>schemaVersion: 1</code>, <code>goal</code>, <code>files: HandoffFile[]</code> and <code>git</code> are added to the handoff. Every existing key keeps its meaning, and <code>nextCursor</code> stays on the <code>PeekResult</code> envelope. New fields are optional in the exported type and always populated by peek.</li>
+      <li><code>src/core/git-artifacts.ts</code> is a pure parser over tool calls joined to their outputs. It returns <code>{ branches[{name,created,pushed}], commits[{sha,branch?,subject?}], prs[{number,url?,state}], head?{branch,dirty} }</code>. <code>head</code> comes from read-only <code>git</code> in the session cwd.</li>
+      <li><code>docs/schema/handoff.v1.json</code> is checked in and documented. The Markdown handoff gains a <code>## Git</code> section.</li>
+      <li>D4 consumes <code>git-artifacts.ts</code> for <code>COMMITTED</code>, <code>ON_BRANCH</code> and commit nodes rather than writing a second parser. SHAs and branch names may enter the graph. Commit subjects and PR titles may not.</li>
+    </ul>
+  </article>
+  <article><bp-eyebrow>E4 · Session tree and parent id (#5)</bp-eyebrow>
+    <ul>
+      <li><code>parentId</code> (adapter-prefixed) is added to <code>SessionEntry</code> and <code>CoordinationSession</code>, and <code>isIgnoredSession</code> matches on it.</li>
+      <li>A pure <code>buildSessionTree(sessions, overlapHints, claims)</code>, exposed as the new <code>peek tree [selector] [--all] [--json]</code> and <code>list --tree</code>. Each node shows status, <code>currentTask</code>, active writing files and the claims it holds. Overlaps are flagged on each node involved and rolled up to the lowest common ancestor. A child's cwd isn't filtered by its parent's cwd, so worktree workers stay under their parent.</li>
+      <li>An additive stdio MCP <code>session_tree</code> tool. It's stdio only and never in D5.2's remote set.</li>
+      <li>D4's <code>SPAWNED</code> builder reads <code>parentId</code>. Claims are read through whichever store is current: <code>ClaimsService</code> if D3 has landed, and the D2.5 SQLite store once it exists.</li>
+    </ul>
+  </article>
+</div>
+
+<bp-callout type="invariant" label="Local-only">The handoff, <code>goal</code>, <code>decisions</code>, <code>openQuestions</code>, commit subjects and the handoff <code>document</code> are transcript-derived text. They never enter <code>graph.db</code>, pushed payloads or any <code>peek serve</code> route (ADR 0002, D5.2). Nothing in E1–E4 touches <code>src/serve</code> or <code>src/remote</code>.</bp-callout>
+
+<h3>Ordering against the rest of the spec</h3>
+<ul>
+  <li><strong>E1 before the D4 graph ingest and D6.4.</strong> D4's <code>READ</code>/<code>WROTE</code> edges and the sidecar's inferred-write claims would otherwise persist wrong paths, or claim a decoy file.</li>
+  <li><strong>E3 before the D4 graph ingest.</strong> <code>COMMITTED</code> reuses <code>git-artifacts.ts</code>.</li>
+  <li><strong>E4 before the D4 graph ingest.</strong> <code>SPAWNED</code> reads <code>parentId</code>. D5/D6 status payloads gain a parent global-session-id field, which is an additive id field already allowed by ADR 0002.</li>
+  <li><strong>E3 after E1 and E2</strong>, so the v1 schema freezes once.</li>
+  <li><strong>No E PR depends on D3.</strong> If the service layer has landed, new fields are computed in <code>SessionsService</code> instead of <code>Engine.peek</code>. The output shape is the same either way.</li>
+</ul>
+
+<bp-table density="compact">
+<table class="ac">
+  <thead><tr><th scope="col">ID</th><th scope="col">Acceptance criterion</th><th scope="col">Verified by</th></tr></thead>
+  <tbody>
+    <tr><td>D9.1</td><td>E1, paths (#7), on a temp workspace fixture with <code>Read</code>, <code>rg</code>, <code>cd apps/server &amp;&amp; sed -i …</code> and a Codex <code>exec_command</code> with <code>workdir</code>:
+      <ul>
+        <li><code>files</code> lists <code>apps/server/src/apps/service.ts</code> and <code>apps/server/src/mcp/tools.ts</code> as <code>wrote</code>, and <code>docs/_template.md</code> and <code>src/real.ts</code> as <code>read</code>.</li>
+        <li>With a same-named decoy at <code>src/apps/service.ts</code>, the decoy appears in neither <code>writingFiles</code> nor <code>files</code> as <code>wrote</code>.</li>
+        <li><code>check apps/server/src/apps/service.ts</code> sees the session as writing it, and <code>check src/apps/service.ts</code> doesn't.</li>
+        <li><code>relPath</code> is identical for the same file in two clones at different absolute paths.</li>
+      </ul></td><td><code>test/unit/coordination-paths.test.ts</code>; a CLI integration test</td></tr>
+    <tr><td>D9.2</td><td>E1, end state (#1): a file written and then <code>git mv</code>'d appears once, at its destination, with the source marked <code>moved</code> and <code>movedTo</code> set. A file written and then <code>rm</code>'d (and <code>git rm</code>'d) is <code>deleted</code> and isn't listed as live. Plain <code>mv</code>, <code>git mv</code>, <code>rm</code> and <code>git rm</code> each have a case.</td><td><code>test/unit/handoff.test.ts</code>, using the Research E §1 fixture</td></tr>
+    <tr><td>D9.3</td><td>E2, questions and signal (#1, #2):
+      <ul>
+        <li>A question followed by a reply from the other party isn't in <code>openQuestions</code>, while an early unanswered blocker stays.</li>
+        <li>The four Research E §2 lines are classified as expected: the narration and the bare outcome aren't decisions, and the user's request answered next turn isn't open.</li>
+        <li>"Would you like me to also commit it?", left as the last unanswered line, <em>is</em> open. "Anything else?" isn't.</li>
+        <li>A table of at least 20 lines (narration, outcomes, real decisions, real blockers, closers, trailing offers) is classified 100% as expected.</li>
+      </ul></td><td><code>test/unit/handoff-signal.test.ts</code> (table-driven); <code>handoff.test.ts</code></td></tr>
+    <tr><td>D9.4</td><td>E2, goal (#6), on the fixture with user turns "Land feature #1578 and the doc follow-ups." → "the .env.local got committed" → "yes":
+      <ul>
+        <li><code>goal</code> is the first ask in structured, brief and handoff output.</li>
+        <li><code>currentTask</code> is "the .env.local got committed" and never an assistant line.</li>
+        <li>A single-ask session has <code>goal === currentTask</code>.</li>
+        <li>Existing <code>snapshot.test.ts</code> task tests pass unchanged.</li>
+      </ul></td><td><code>test/unit/snapshot.test.ts</code>; <code>handoff.test.ts</code></td></tr>
+    <tr><td>D9.5</td><td>E3, git artifacts (#3), using a Claude Code <code>Bash</code> fixture and an equivalent Codex <code>exec_command</code> fixture:
+      <ul>
+        <li>Both fixtures yield one created and pushed branch, commit <code>1a2b3c4</code> with its subject, and PR 2067 marked <code>merged</code>.</li>
+        <li>A failed <code>git commit</code> yields no commit, and a session with no git calls yields <code>{ branches: [], commits: [], prs: [] }</code>.</li>
+        <li><code>head</code> reflects a temp repo's branch and dirty count, and is absent when <code>git</code> isn't on PATH.</li>
+        <li>No <code>gh</code> or other network process is spawned while building a handoff.</li>
+      </ul></td><td><code>test/unit/git-artifacts.test.ts</code>; one <code>handoff.test.ts</code> temp-repo case; a spawn spy</td></tr>
+    <tr><td>D9.6</td><td>E3, schema (#4):
+      <ul>
+        <li><code>at --mode handoff --json</code>, both <code>--local</code> and harness, and MCP <code>peek_session</code> with <code>mode=handoff</code> validate against <code>docs/schema/handoff.v1.json</code>.</li>
+        <li>With a stub runner, every field except <code>document</code>, <code>provider</code> and <code>runner</code> is deep-equal between local and harness.</li>
+        <li>The default still runs the runner, and the docs name <code>--local --json</code> as the deterministic path.</li>
+        <li>A public-API type test shows new fields are optional for consumers who construct <code>HandoffSnapshot</code>.</li>
+      </ul></td><td>A schema-validation test; a stub-runner parity test; a type test</td></tr>
+    <tr><td>D9.7</td><td>E3, retention: a commit subject seeded as a canary never appears in <code>graph.db</code> or in any pushed payload. The D5.2 contract test asserts that no remote tool's output schema contains <code>HandoffSnapshot</code> keys.</td><td>A D4.2-style canary test; the D5.2 contract test</td></tr>
+    <tr><td>D9.8</td><td>E4, parent id and check (#5), using a fixture home with parent <code>parent-1</code> and two subagents each writing <code>src/shared.ts</code>:
+      <ul>
+        <li>The subagents' <code>parentId</code> is <code>claude-code:parent-1</code>, and <code>parentSessionId</code> is still <code>parent-1</code>.</li>
+        <li><code>CLAUDE_SESSION_ID=parent-1 check src/shared.ts --ignore-self</code> and <code>--ignore-session claude-code:parent-1</code> both report zero conflicts and exit 0. <code>--ignore-session parent-1</code> still works.</li>
+        <li><code>list --json</code> and <code>list --include-subagents --json</code> keep every existing key and value.</li>
+      </ul></td><td><code>claude-code-subagents.test.ts</code>; a CLI integration test</td></tr>
+    <tr><td>D9.9</td><td>E4, tree (#5):
+      <ul>
+        <li><code>peek tree --json</code> returns <code>parent-1</code> with two children, each showing <code>src/shared.ts</code> as active writing, and one <code>high</code> overlap rolled up to the parent.</li>
+        <li>A subagent whose cwd is a different worktree is still listed under its parent.</li>
+        <li>A subagent whose parent transcript was deleted shows as an orphan root.</li>
+        <li><code>list --tree</code> renders the same forest, and stdio MCP <code>session_tree</code> returns the <code>--json</code> shape and isn't registered remotely.</li>
+      </ul></td><td><code>test/unit/session-tree.test.ts</code>; a CLI integration test; MCP goldens (additions)</td></tr>
+    <tr><td>D9.10</td><td>Compatibility, all E PRs:
+      <ul>
+        <li>For every re-recorded golden, the suite projects the 0.6 snapshot onto the new output and asserts byte-identical values for every 0.6 key. No golden value changes.</li>
+        <li>Each re-record sits in its own commit, listing the added keys.</li>
+        <li>The <code>check --ignore-self</code> exit-code change is the only behaviour change, and the CHANGELOG lists it under Fixed.</li>
+        <li>New commands and tools have new golden cases.</li>
+      </ul></td><td>The golden suite with its projection check; the CHANGELOG review in D7</td></tr>
+    <tr><td>D9.11</td><td>Docs: the README and website document <code>peek tree</code>, <code>list --tree</code>, the handoff v1 schema, <code>--local --json</code>, the <code>files</code> roles and states, and <code>goal</code> versus <code>currentTask</code>. The CHANGELOG lists each issue number under Added or Fixed.</td><td>The CI docs build; D7 review</td></tr>
+  </tbody>
+</table>
+</bp-table>
+
+<bp-note>Evidence gaps carried into the PRs: the parent link for Claude Code's worktree-isolated workers is inferred, not observed (E4 tests the sidecar case and records what a real transcript shows if one is available); whether current Codex records freeform patches outside <code>function_call</code> is unchecked (E1 checks before adding a parser case); and whether a JSON Schema validator is already a dev dependency is unchecked (E3 falls back to a structural assertion). Every reproduction so far uses hand-built fixtures (Research E, Evidence gaps).</bp-note>
+</section>
+
+<section id="compat" data-bp-node-id="compat"><h2 data-sidebar="Compatibility">Compatibility guarantees and how they are tested</h2>
+<bp-subheader>Research A listed six contracts that clients rely on today. The table gives the 0.7 promise for each and the test that holds it. Test file paths throughout this spec are indicative; implementers place tests to match the repo's existing layout and keep the names.</bp-subheader>
+
+<bp-table density="compact" wide="">
+<table>
+  <thead><tr><th scope="col">Contract</th><th scope="col">0.7 promise</th><th scope="col">Held by</th></tr></thead>
+  <tbody>
+    <tr><td>CLI: 22 commands, <code>--json</code>, exit codes 1, 5 and 6</td><td>Unchanged. New commands are additive: <code>graph</code>, <code>serve</code>, <code>remote</code>, <code>push</code>, <code>agent</code>, <code>monitor</code> and <code>tree</code>. New failure modes reuse 5 (usage) and 6 (environment). One accepted fix: <code>check --ignore-self</code> from a parent exits 0 for its own subagents' writes (D9.8).</td><td>D3.1 golden outputs, plus the existing integration tests asserting exits 1 and 6.</td></tr>
+    <tr><td>MCP stdio: 12 tools, 3 prompts, resources</td><td>Names, argument schemas and result shapes are unchanged. New tools are additive.</td><td>D3.1, plus a <code>tools/list</code> snapshot diff that allows only additions.</td></tr>
+    <tr><td>Library exports</td><td>Additive, except for the storage exports listed in D7. The <code>./adapter</code> ABI is unchanged.</td><td>D7.4</td></tr>
+    <tr><td>Cursor strings</td><td>0.6.0 feed and peek cursors still decode. A malformed or mismatched cursor fails with the existing error classes.</td><td>D2.3 and D2.4</td></tr>
+    <tr><td><code>~/.agent-peek</code> layout</td><td>Additive only: new files, new tables and columns, and the <code>claims.json</code> rename to <code>.migrated</code>. <code>usage.db</code> changes are additive.</td><td>D2.2, D2.5 and D7.1</td></tr>
+    <tr><td>ADR 0001 (whitelisted arguments)</td><td>Untouched. ADR 0002 extends the same boundary to the graph and the server.</td><td>D1.2, D4.2 and D6.3</td></tr>
+  </tbody>
+</table>
+</bp-table>
+<p>Every PR on the release branch keeps typecheck, oxlint and the full Vitest suite green under Node 24. The coverage thresholds in <code>vitest.config.ts</code> are not lowered.</p>
+</section>
+<section id="locked" data-bp-node-id="locked"><h2 data-sidebar="Locked decisions">Delivery, locked decisions and risks</h2>
+
+<bp-callout type="locked" label="Locked decisions">
+  <ul>
+    <li><strong>Delivery.</strong> One release branch, <code>release/0.7.0</code>, cut from <code>main</code>. Every deliverable lands there as its own PR, and the branch merges to <code>main</code> once, after QA passes. Nothing ships to <code>main</code> on its own.</li>
+    <li><strong>Scope.</strong> Portability (D2), the core overhaul (D3), the local graph (D4), self-hostable <code>peek serve</code> (D5), push clients and the sidecar (D6), and docs and release (D7). The OpenCode V2 adapter and the opt-in <code>peek monitor</code> (D8) were added on 2026-11-13. Handoff and multi-agent accuracy for issues #1–#7 (D9, PRs E1–E4) was added on the same day. D1, ADR 0002, gates every PR that exports data.</li>
+    <li><strong>Monitor.</strong> It is local-only and opt-in. It notifies by default and retries only with <code>--retry</code>, at most 3 attempts per failed turn, and only for transient <code>provider.*</code> types. It never touches child sessions and never reads prose. A fingerprint and message id are persisted before any submit, which goes through the OpenCode HTTP <code>/synthetic</code> API, never <code>opencode run</code>. There is no MCP tool and no <code>peek serve</code> role. If the D8.9 probe finds no recovery, <code>--retry</code> is removed before release.</li>
+    <li><strong>Out of scope.</strong> LLM extraction, embeddings and vector search, OAuth, vendor pull connectors (Devin, Cursor v0), multi-tenant hosting, Postgres, a web UI, and dedicated graph databases.</li>
+    <li><strong>Hosting.</strong> The team runs <code>peek serve</code>, as a single Node process or Docker image on SQLite. Local stdio MCP stays the default, and nothing reaches the network unless a remote is configured.</li>
+    <li><strong>Retention.</strong> Exported data is structure plus authored or derived short text. Transcript text never leaves the machine in 0.7. <code>assertExportable</code> is the single enforcement point, and remote raw, tail and handoff modes do not exist.</li>
+    <li><strong>Identity.</strong> An explicit project key overrides the origin remote. Machine-local ids never go remote. Session ids are machine-namespaced. The principal comes from the token, never from the client.</li>
+    <li><strong>Graph.</strong> Typed <code>node</code> and <code>edge</code> tables in <code>node:sqlite</code>. Six named queries and no free-form query tool. The <code>inferred</code> origin is rejected.</li>
+    <li><strong>Compatibility.</strong> CLI, stdio MCP, cursors and the on-disk layout are additive-only. The one accepted break is the exported storage API, documented in the CHANGELOG. One accepted behaviour fix: <code>check --ignore-self</code> from a parent no longer counts its own subagents (exit 1 → 0). A golden may be re-recorded only when the old snapshot projects byte-identically onto the new output.</li>
+    <li><strong>Handoff (D9).</strong> <code>currentTask</code> keeps its meaning, and the new <code>goal</code> field holds the session goal. <code>parentSessionId</code> stays bare, and the new <code>parentId</code> is prefixed. The handoff JSON is versioned (<code>schemaVersion: 1</code>, additive) and still runs the agent CLI by default. PR state comes from the transcript, with no <code>gh</code> or network calls. A trailing unanswered offer counts as an open question. Handoff content is local-only. E1, E3 and E4 land before the D4 graph ingest, and E1 also lands before D6.4.</li>
+  </ul>
+</bp-callout>
+
+<h3>Risks the plan must cover</h3>
+<bp-table density="compact" wide="">
+<table>
+  <thead><tr><th scope="col">Risk</th><th scope="col">Why it matters</th><th scope="col">Mitigation in this spec</th></tr></thead>
+  <tbody>
+    <tr><td>Codex cloud remote MCP is unverified.</td><td>One launch target may have no MCP path, and legacy egress blocks POST requests.</td><td>The sidecar push fallback, plus the D6.7 three-outcome record. The docs state the verified status, not the hoped-for one.</td></tr>
+    <tr><td>Cloud VMs may not write the local transcript layout.</td><td>The sidecar would publish nothing.</td><td>The sidecar degrades to MCP-only (D6.4). D6.7 records what actually happened.</td></tr>
+    <tr><td>MCP SDK support for stateless Streamable HTTP is unknown.</td><td>This decides whether the server can ever scale horizontally.</td><td>Single-node is acceptable in 0.7. D5 records the mode that shipped.</td></tr>
+    <tr><td>Agents forget to call publish tools.</td><td>The shared view goes stale.</td><td>The D7 instructions snippet, plus sidecar-derived status that does not depend on the agent.</td></tr>
+    <tr><td>Prompt injection through shared posts.</td><td>One agent's text becomes another agent's input.</td><td>Content is returned as quoted data with principal provenance. The server holds no secrets beyond token hashes, and scopes are per project.</td></tr>
+    <tr><td>A refactor regresses CLI or MCP behaviour.</td><td><code>cli/index.ts</code> and <code>mcp/index.ts</code> are excluded from coverage today.</td><td>D3.1 golden outputs are recorded before the refactor starts. The logic moves into covered <code>src/app</code>.</td></tr>
+    <tr><td>Inferred defects may not reproduce.</td><td>Fixing a non-bug wastes work.</td><td>Each inferred item's test reproduces it first, and the PR records the outcome.</td></tr>
+    <tr><td>OpenCode labels its HTTP API experimental, and the retry premise is unmeasured.</td><td>A future OpenCode release could break the transport, and retries could just add cost.</td><td>The transport is pinned to OpenCode 2.3.0 or later and checked through <code>/api/info</code>, with a contract test (D8.8). Notify-only is the default, and the D8.9 live probe decides whether <code>--retry</code> ships.</td></tr>
+    <tr><td>Path and handoff heuristics are tuned on hand-built fixtures.</td><td>Real Claude Code and Codex transcripts may use shapes the fixtures miss, such as freeform Codex patches or worktree-isolated workers.</td><td>D9 PRs check a real current transcript where one is available and record the result. Detection rules are pure and table-tested, so a new shape is a one-row fix.</td></tr>
+    <tr><td><code>node:sqlite</code> is experimental.</td><td>An API change in Node could break every store.</td><td>The engines field stays at Node 24 or later. All store access goes through one module per store.</td></tr>
+  </tbody>
+</table>
+</bp-table>
+
+<h3>Open questions</h3>
+<p>One question needs the owner. The live vendor QA in D6.7 needs accounts on Claude Code cloud, Cursor, GitHub Copilot coding agent and Codex cloud, and a deployed <code>peek serve</code> with a public HTTPS URL. If no agent can reach those accounts, the owner runs those four checks, and QA records his evidence. Everything else is decided.</p>
+</section>
+</main>
+  
+
+</body></html>

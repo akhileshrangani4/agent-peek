@@ -1,0 +1,20 @@
+# agent-peek PR #20 @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 — Node v24.22.3
+$ git diff --name-only origin/release/0.7.0 HEAD -- test/golden   # golden files changed by this PR
+(none)
+
+$ npm run typecheck
+> tsc --noEmit
+
+$ npm run lint
+Found 0 warnings and 0 errors.
+Finished in 46ms on 139 files with 96 rules using 8 threads.
+
+$ npx vitest run --coverage
+ ✓ test/golden/harness.test.ts (18 tests) 14ms
+ ✓ test/golden/mcp.golden.test.ts (28 tests) 1346ms
+ ✓ test/golden/opencode-legacy.golden.test.ts (4 tests) 1949ms
+ ✓ test/golden/cli.golden.test.ts (40 tests) 15310ms
+ Test Files  54 passed (54)
+      Tests  842 passed (842)
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+All files          |    89.4 |    80.89 |   92.27 |   92.12 |                   

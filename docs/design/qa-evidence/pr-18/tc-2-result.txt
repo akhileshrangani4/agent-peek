@@ -1,0 +1,24 @@
+head 2644bdc
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > currentTask prefers the user's ask over the assistant's narration 3ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > currentTask is the user's words even without an action verb, minus harness wrappers 1ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > currentTask and lastUserMessage skip harness-injected user turns and reach the human one 0ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > currentTask is not truncated with an ellipsis; renderers shorten it 0ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > currentTask walks back to the previous human ask when the user turn is not actionable 0ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > currentTask falls back to the assistant's objective only when no human turn is an ask 1ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > goal > is the first substantive ask; currentTask stays the current ask, never an assistant line 0ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > goal > is carried on the brief 0ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > goal > skips leading acknowledgements and harness wrappers 0ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > goal > equals currentTask for a single-ask session 1ms
+ ✓ test/unit/snapshot.test.ts > snapshot.toStructured > currentTask comes from last user message (heuristic) 0ms
+ ✓ test/unit/handoff.test.ts > handoff.buildHandoff > local handoff carries branch, first ask, recent commands, and no questions as next actions 10ms
+ ✓ test/unit/handoff.test.ts > handoff.buildHandoff > carries goal separately from currentTask and renders both 2ms
+ ✓ test/unit/handoff.test.ts > handoff.buildHandoff > a single-ask handoff has no separate Current ask line 1ms
+
+ Test Files  2 passed (2)
+      Tests  14 passed | 42 skipped (56)
+   Start at  23:34:18
+   Duration  285ms (transform 215ms, setup 0ms, import 294ms, tests 23ms, environment 0ms)
+

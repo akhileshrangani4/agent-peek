@@ -1,0 +1,14 @@
+# agent-peek PR #20 @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 — Node v24.22.3
+$ npx vitest run test/unit/coordination-paths.test.ts -t relPath|repo-relative
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/unit/coordination-paths.test.ts > per-call working directory (#7, D9.1) > gives the same relPath for the same file in two clones at different paths 28ms
+ ✓ test/unit/coordination-paths.test.ts > repo-relative paths > finds the toplevel of a checkout, a linked worktree and a submodule 1ms
+ ✓ test/unit/coordination-paths.test.ts > repo-relative paths > is undefined outside a repo, for relative paths and for the toplevel itself 1ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 21 skipped (24)
+   Start at  00:06:06
+   Duration  354ms (transform 134ms, setup 0ms, import 177ms, tests 33ms, environment 0ms)
+
