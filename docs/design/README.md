@@ -13,6 +13,8 @@ These documents were exported from the design workspace on 2026-11-17 and are no
 | [research-c-graph-db.md](research-c-graph-db.md) | Research C: graph database and conversation knowledge-graph options. |
 | [research-d-opencode-retry-monitor.md](research-d-opencode-retry-monitor.md) | Research D: OpenCode V2 and the opt-in retry monitor (spec D8). |
 | [research-e-issues-1-7.md](research-e-issues-1-7.md) | Research E: reproductions and fixes for open issues #1–#7 (spec D9). |
+| [0.7-remaining-work.md](0.7-remaining-work.md) | The unbuilt 0.7 work: one GitHub issue per item (milestone `0.7.0`), dependencies and other follow-ups. |
+| [qa-evidence/](qa-evidence/README.md) | Test transcripts recorded for PRs #14–#20, filed by PR with each PR's head SHA. |
 
 ## How the export was made
 
