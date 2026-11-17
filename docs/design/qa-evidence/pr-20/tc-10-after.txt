@@ -1,0 +1,12 @@
+# AFTER: PR #20 head @ f20c84941ecb48d456e4680ad1a5a555d39cbf09
+$ npx vitest run --reporter=verbose test/unit/engine.test.ts -t "whichever session read"
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/unit/engine.test.ts > Engine > coordinate encodes the same cursor whichever session read finishes first 118ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 21 skipped (22)
+   Start at  00:06:52
+   Duration  632ms (transform 275ms, setup 0ms, import 336ms, tests 120ms, environment 0ms)
+

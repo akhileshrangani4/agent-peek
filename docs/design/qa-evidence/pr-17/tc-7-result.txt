@@ -1,0 +1,29 @@
+head: cb16d35fd04d2570370fcdedcdfe8ea16b15695e
+$ npx vitest run --reporter=verbose test/adapters/opencode.test.ts -t \(g\)
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ↓ test/adapters/opencode.test.ts > opencode adapter: legacy filesystem storage (a) > lists legacy sessions under the 0.6.0 ids, adapter and source type
+ ↓ test/adapters/opencode.test.ts > opencode adapter: V2 opencode.db (b) > lists sessions, maps parents and reports execution for every outcome
+ ↓ test/adapters/opencode.test.ts > opencode adapter: V2 opencode.db (b) > reads messages, tool calls and system rows, and honours the cursor
+ ↓ test/adapters/opencode.test.ts > opencode adapter: V2 opencode.db (b) > derives execution from a row with no idle marker or an unknown outcome
+ ↓ test/adapters/opencode.test.ts > opencode adapter: both stores (c) > lists a session present in both stores exactly once, from V2
+ ↓ test/adapters/opencode.test.ts > opencode adapter: both stores (c) > mergeStores keeps the first copy of an id, so V2 wins
+ ↓ test/adapters/opencode.test.ts > opencode adapter: no sqlite3 binary (d) > scans and reads V2 with PATH stripped to an empty directory
+ ↓ test/adapters/opencode.test.ts > opencode adapter: hostile session ids (e) > reads a session id containing ' and ; and executes nothing
+ ✓ test/adapters/opencode.test.ts > opencode adapter: database resolution (g) > lists sessions from OPENCODE_DB when it points at a fixture 8ms
+ ✓ test/adapters/opencode.test.ts > opencode adapter: database resolution (g) > resolves a relative OPENCODE_DB against the data dir, as OpenCode does 2ms
+ ✓ test/adapters/opencode.test.ts > opencode adapter: database resolution (g) > falls back to opencode.db when OPENCODE_DB is blank 2ms
+ ✓ test/adapters/opencode.test.ts > opencode adapter: database resolution (g) > reads nothing from V2 when OPENCODE_DB is :memory: 1ms
+ ✓ test/adapters/opencode.test.ts > opencode adapter: database resolution (g) > reads channel databases beside opencode.db unless channel databases are disabled 4ms
+ ✓ test/adapters/opencode.test.ts > opencode adapter: database resolution (g) > lists channel databases alone when opencode.db is absent 2ms
+ ✓ test/adapters/opencode.test.ts > opencode adapter: database resolution (g) > returns no sessions when OpenCode has no data dir at all 1ms
+ ↓ test/adapters/opencode.test.ts > opencode adapter: unreadable database > keeps legacy sessions listable and surfaces the scan failure as a warning
+ ↓ test/adapters/opencode.test.ts > opencode adapter: unreadable database > throws TranscriptUnreadableError when a listed database disappears before read
+
+ Test Files  1 passed (1)
+      Tests  7 passed | 10 skipped (17)
+   Start at  23:00:38
+   Duration  278ms (transform 90ms, setup 0ms, import 121ms, tests 22ms, environment 0ms)
+
+exit: 0

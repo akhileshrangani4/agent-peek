@@ -1,0 +1,12 @@
+# agent-peek PR #20 @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 — Node v24.22.3
+$ npx vitest run test/unit/handoff.test.ts -t git rm'd
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/unit/handoff.test.ts > handoff file roles and end state (#1, D9.2) > marks a file edited then git rm'd as deleted; git rm --cached leaves it live 25ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 42 skipped (43)
+   Start at  00:06:11
+   Duration  398ms (transform 178ms, setup 0ms, import 227ms, tests 28ms, environment 0ms)
+

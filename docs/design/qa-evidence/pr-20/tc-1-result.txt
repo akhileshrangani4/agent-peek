@@ -1,0 +1,14 @@
+# agent-peek PR #20 @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 — Node v24.22.3
+$ npx vitest run test/unit/coordination-paths.test.ts test/unit/handoff.test.ts test/adapters/codex-code-mode.test.ts -t lists the two real edits as wrote|section 7 session|code-mode edit against its workdir
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/unit/coordination-paths.test.ts > per-call working directory (#7, D9.1) > lists the two real edits as wrote and the two reads as read 24ms
+ ✓ test/unit/handoff.test.ts > handoff file roles and end state (#1, D9.2) > renders the section 7 session's real edits as written and its reads as read 25ms
+ ✓ test/adapters/codex-code-mode.test.ts > codex code-mode records > resolves a code-mode edit against its workdir, through the adapter, into writingFiles and file roles 25ms
+
+ Test Files  3 passed (3)
+      Tests  3 passed | 73 skipped (76)
+   Start at  00:06:04
+   Duration  389ms (transform 342ms, setup 0ms, import 551ms, tests 81ms, environment 0ms)
+

@@ -1,0 +1,53 @@
+head 2644bdc
+
+ RUN  v4.1.11 /home/user/work/agent-peek
+
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > has at least 20 rows 1ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Using peek to capture session context, then I'll write the handoff. -> narration 1ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > I added the handoff file. -> outcome 2ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > can you not use peek to create a handoff? -> question 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Would you like me to also commit it? -> question 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Anything else? -> closer 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Let me run peek at first. -> narration 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Now I'll check the tests. -> narration 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > I'm going to read the config next. -> narration 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > I'm looking at the uploader now. -> narration 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Right — let me use peek's own capability instead of hand-authoring. -> decision 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Let me rerun it because it flaked. -> narration 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Decided to keep the JSON store for now because the migration is risky. -> decision 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > We chose SQLite over a graph database. -> decision 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Going with the bearer-token approach. -> decision 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Using SQLite rather than Postgres, since it ships with Node. -> decision 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > The cursor stays opaque because clients must not parse it. -> decision 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Will rewrite next. -> next-action 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Next: wire the backoff into the uploader. -> next-action 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > We still need to update the docs. -> next-action 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Remaining: the Windows path case. -> next-action 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Fixed the flaky upload test. -> outcome 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Done. -> outcome 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Should I put the plan under docs/superpowers/plans or docs/plans? -> question 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Blocked on the staging credentials. -> question 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Do you want me to also add jitter? -> question 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Let me know if you want any changes. -> closer 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Does that help? -> closer 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Hope this helps! -> closer 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Why does this matter? -> other 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > Is `a ?? b` or `a || b` right here? -> other 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > The function returns early on empty input. -> other 0ms
+ ✓ test/unit/handoff-signal.test.ts > classifySignalLine (D9.3 table) > classifies the whole table at 100% 1ms
+ ✓ test/unit/handoff-signal.test.ts > extractDecisions / extractNextActions > keep decisions and next actions and drop narration and outcomes 1ms
+ ✓ test/unit/handoff-signal.test.ts > extractOpenQuestions > drops a question the other party replied to after 0ms
+ ✓ test/unit/handoff-signal.test.ts > extractOpenQuestions > drops the user's request once the assistant has acted on it, even with tools only 0ms
+ ✓ test/unit/handoff-signal.test.ts > extractOpenQuestions > keeps a trailing unanswered offer and drops the closer beside it 0ms
+ ✓ test/unit/handoff-signal.test.ts > extractOpenQuestions > keeps an unanswered question while the same party keeps talking 0ms
+ ✓ test/unit/handoff-signal.test.ts > signalTurns > ignores harness-only user records and keeps tool-only assistant turns 1ms
+ ✓ test/unit/handoff-signal.test.ts > signalTurns > a harness reminder after a question does not answer it 0ms
+ ✓ test/unit/handoff.test.ts > handoff.buildHandoff > open questions keep real questions and drop rhetoric and code fragments 8ms
+ ✓ test/unit/handoff.test.ts > handoff.buildHandoff > open questions are the unanswered ones: answered drop, an early unanswered blocker stays 2ms
+ ✓ test/unit/handoff.test.ts > handoff.buildHandoff > narration and bare outcomes are not decisions; an answered request is not open; a trailing offer is 1ms
+
+ Test Files  2 passed (2)
+      Tests  43 passed | 23 skipped (66)
+   Start at  23:34:17
+   Duration  265ms (transform 162ms, setup 0ms, import 226ms, tests 24ms, environment 0ms)
+

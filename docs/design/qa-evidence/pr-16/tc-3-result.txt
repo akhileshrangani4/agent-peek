@@ -1,0 +1,19 @@
+head: 0da5270fc402ee34949939c5483d9cb8b62968b7, CI=true (no snapshot writes), Node v24.22.3
+ ✓ test/golden/harness.test.ts > Normalizer > rewrites the fixture home, the checkout and the node binary, and leaves fixture data paths alone 3ms
+ ✓ test/golden/harness.test.ts > Normalizer > rewrites the user@host fallback identity 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > replaces run-time instants and keeps fixture instants 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > numbers generated ids by first appearance and keeps stable fixture ids 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > decodes opaque cursors and normalises their contents 1ms
+ ✓ test/golden/harness.test.ts > Normalizer > leaves strings that are not cursors alone, even if base64-looking 0ms
+ ✓ test/golden/harness.test.ts > Normalizer > rewrites the package and node versions, but not a longer number containing them 0ms
+ ✓ test/golden/harness.test.ts > Normalizer > replaces elapsed-time fields only 0ms
+ ✓ test/golden/harness.test.ts > structure > parses JSON output and splits text output into lines 1ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > ignores additions, so a new tool leaves the golden unchanged 1ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > reports a removed baseline entry 0ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > changes the recorded projection when a baseline entry is reshaped 0ms
+ ✓ test/golden/harness.test.ts > projectOntoBaseline > records in baseline order, so reordering registration is not a change 0ms
+ Test Files  3 passed (3)
+      Tests  81 passed (81)
+   Start at  22:42:57
+   Duration  13.74s (transform 134ms, setup 0ms, import 348ms, tests 14.77s, environment 0ms)
+

@@ -1,0 +1,12 @@
+# agent-peek PR #20 @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 — Node v24.22.3
+$ npx vitest run test/unit/coordination-paths.test.ts -t decoy
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/unit/coordination-paths.test.ts > per-call working directory (#7, D9.1) > never pins an edit on a same-named decoy at the session root 22ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 23 skipped (24)
+   Start at  00:06:05
+   Duration  329ms (transform 131ms, setup 0ms, import 165ms, tests 23ms, environment 0ms)
+

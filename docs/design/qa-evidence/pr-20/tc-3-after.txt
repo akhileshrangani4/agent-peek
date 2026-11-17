@@ -1,0 +1,12 @@
+# AFTER: PR #20 head @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 (after npm run build)
+$ npx vitest run --reporter=verbose test/integration/cli.test.ts -t "cd-prefixed edit"
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/integration/cli.test.ts > CLI integration > check sees a cd-prefixed edit on the real file and not on a same-named decoy 761ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 34 skipped (35)
+   Start at  00:07:18
+   Duration  1.04s (transform 84ms, setup 0ms, import 110ms, tests 766ms, environment 0ms)
+

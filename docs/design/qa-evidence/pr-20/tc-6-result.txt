@@ -1,0 +1,13 @@
+# agent-peek PR #20 @ f20c84941ecb48d456e4680ad1a5a555d39cbf09 — Node v24.22.3
+$ npx vitest run test/unit/handoff.test.ts -t plain mv|chain of moves
+
+ RUN  v4.1.11 /home/user/work/agent-peek-e1
+
+ ✓ test/unit/handoff.test.ts > handoff file roles and end state (#1, D9.2) > folds a plain mv: the source is moved, the destination carries the write 14ms
+ ✓ test/unit/handoff.test.ts > handoff file roles and end state (#1, D9.2) > follows a chain of moves to where the file ended up 2ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 41 skipped (43)
+   Start at  00:06:08
+   Duration  369ms (transform 178ms, setup 0ms, import 220ms, tests 18ms, environment 0ms)
+

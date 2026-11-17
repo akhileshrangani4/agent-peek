@@ -1,0 +1,34 @@
+head: 0da5270fc402ee34949939c5483d9cb8b62968b7, CI=true (no snapshot writes), Node v24.22.3
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tools/list keeps every 0.6.0 tool, unchanged 15ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompts/list keeps every 0.6.0 prompt, unchanged 4ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > covers every 0.6.0 tool and prompt 1ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool list-sessions-all 19ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool list-sessions-active 8ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-raw-default 10ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-raw-window 8ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-structured 13ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-brief 9ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-summary 7ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-handoff 11ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-unknown 7ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool coordination-digest 14ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool tag-session 4ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool peek-by-tag 8ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool post-to-feed 12ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool post-to-feed-invalid 11ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool read-feed 23ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool expand-post 6ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool usage-report 40ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool usage-report-all-tools 18ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool skills-report 25ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool skill-detail 21ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool archive-plan 12ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > tool list-agents 11ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompt coordinate-agents 3ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompt session-handoff 1ms
+ ✓ test/golden/mcp.golden.test.ts > MCP stdio golden output (0.6.0 baseline) > prompt avoid-overlap 1ms
+ Test Files  3 passed (3)
+      Tests  81 passed (81)
+   Start at  22:42:57
+   Duration  13.74s (transform 134ms, setup 0ms, import 348ms, tests 14.77s, environment 0ms)
+
